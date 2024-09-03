@@ -17,11 +17,10 @@ classifiers = [
 
 dependencies = [
     "cached_path>=1.6.2",
-    "ase==3.22.1",
+    "ase>=3.22.1",
     "numpy<2.0.0",
     "scipy>=1.13.1",
     "torch==2.2.0",
-    "ase==3.22.1",
     "dm-tree>=0.1.8",
 ]
 
