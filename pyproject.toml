@@ -1,6 +1,6 @@
 [project]
 name = "orb-models"
-version = "0.2"
+version = "0.3"
 description = "Foundation models for computational chemistry."
 readme = "README.md"
 requires-python = ">=3.8"
