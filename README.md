@@ -104,4 +104,8 @@ We are currently preparing a preprint for publication.
 ORB models are licensed under the ORB Community License Agreement, Version 1. Please see the [LICENSE](LICENSE) file for details.
 
 **If you have an interesting use case or benchmark for an Orb model, please let us know!** We are happy to work with the community to make these models useful for as many applications as possible.
-Contact us at info@orbitalmaterials.com, or open an issue on GitHub.
+Please fill in the [commercial license form](https://www.orbitalmaterials.com/commercial-license-form), or open an issue on GitHub.
+
+### Community
+
+Please join the discussion on Discord by following [this](https://discord.gg/4EYXRA7x) link.
