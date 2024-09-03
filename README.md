@@ -1,6 +1,6 @@
 
 <p align="center">
-  <img src="./logo_color_text.webp" alt="Orbital Materials" width="600"/>
+  <img src="./logo_color_text.png" alt="Orbital Materials" width="600"/>
 </p>
 <br/>
 
