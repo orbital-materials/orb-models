@@ -27,7 +27,7 @@ def warn_for_tf32_matmul():
     ):
         print(
             "Warning! You are using a model on the GPU without enabling tensorfloat matmuls."
-            "This is 2x slower than enabling this flag."
+            "This can be up to 2x slower than enabling this flag."
             "Enable it with torch.set_float32_matmul_precision('high')"
         )
         HAS_WARNED_FOR_TF32_MATMUL = True

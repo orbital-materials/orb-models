@@ -1,6 +1,8 @@
 # flake8: noqa: E501
+from typing import Union
 import torch
 from cached_path import cached_path
+from orb_models.forcefield.featurization_utilities import get_device
 from orb_models.forcefield.graph_regressor import (
     EnergyHead,
     NodeHead,
@@ -9,6 +11,9 @@ from orb_models.forcefield.graph_regressor import (
 )
 from orb_models.forcefield.gns import MoleculeGNS
 from orb_models.forcefield.rbf import ExpNormalSmearing
+
+
+torch.set_float32_matmul_precision('high')
 
 
 def get_base(
@@ -33,9 +38,28 @@ def get_base(
     )
 
 
+def load_model_for_inference(
+    model: torch.nn.Module, 
+    weights_path: str, 
+    device: Union[torch.device, str] = None,
+) -> torch.nn.Module:
+    """Load a pretrained model in inference mode, using GPU if available."""
+    local_path = cached_path(weights_path)
+    state_dict = torch.load(local_path, map_location="cpu")
+
+    model.load_state_dict(state_dict, strict=True)
+    model = model.to(get_device(device))
+
+    model = model.eval()
+    for param in model.parameters():
+        param.requires_grad = False
+
+    return model
+
+
 def orb_v1(
     weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orbff-v1-20240827.ckpt",  # noqa: E501
-    # NOTE: Use https scheme for weights so that folks can download without gcloud auth.
+    device: Union[torch.device, str] = None,
 ):
     """Load ORB v1."""
     base = get_base()
@@ -67,15 +91,14 @@ def orb_v1(
         model=base,
     )
 
-    local_path = cached_path(weights_path)
-    state_dict = torch.load(local_path, map_location="cpu")
-    model.load_state_dict(state_dict, strict=True)
+    model = load_model_for_inference(model, weights_path, device)
 
     return model
 
 
 def orb_d3_v1(
     weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-d3-v1-20240902.ckpt",
+    device: Union[torch.device, str] = None,
 ):
     """ORB v1 with D3 corrections."""
     base = get_base()
@@ -107,15 +130,14 @@ def orb_d3_v1(
         model=base,
     )
 
-    local_path = cached_path(weights_path)
-    state_dict = torch.load(local_path, map_location="cpu")
-    model.load_state_dict(state_dict, strict=True)
+    model = load_model_for_inference(model, weights_path, device)
 
     return model
 
 
 def orb_d3_sm_v1(
     weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-d3-sm-v1-20240902.ckpt",
+    device: Union[torch.device, str] = None,
 ):
     """A 10 layer model pretrained on bulk data."""
     base = get_base(num_message_passing_steps=10)
@@ -147,15 +169,14 @@ def orb_d3_sm_v1(
         model=base,
     )
 
-    local_path = cached_path(weights_path)
-    state_dict = torch.load(local_path, map_location="cpu")
-    model.load_state_dict(state_dict, strict=True)
+    model = load_model_for_inference(model, weights_path, device)
 
     return model
 
 
 def orb_d3_xs_v1(
     weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-d3-xs-v1-20240902.ckpt",
+    device: Union[torch.device, str] = None,
 ):
     """A 5 layer model pretrained on bulk data."""
     base = get_base(num_message_passing_steps=5)
@@ -186,14 +207,14 @@ def orb_d3_xs_v1(
         model=base,
     )
 
-    local_path = cached_path(weights_path)
-    state_dict = torch.load(local_path, map_location="cpu")
-    model.load_state_dict(state_dict, strict=True)
+    model = load_model_for_inference(model, weights_path, device)
+
     return model
 
 
 def orb_v1_mptraj_only(
     weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orbff-mptraj-only-v1-20240827.ckpt",
+    device: Union[torch.device, str] = None,
 ):
     """A 10 layer model pretrained on bulk data."""
     base = get_base()
@@ -225,9 +246,7 @@ def orb_v1_mptraj_only(
         model=base,
     )
 
-    local_path = cached_path(weights_path)
-    state_dict = torch.load(local_path, map_location="cpu")
-    model.load_state_dict(state_dict, strict=True)
+    model = load_model_for_inference(model, weights_path, device)
 
     return model
 
