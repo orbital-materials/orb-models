@@ -1,0 +1,43 @@
+[project]
+name = "orb-models"
+version = "0.2"
+description = "Foundation models for computational chemistry."
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [{name = "Orbital Materials"}]
+license = {text = "ORB Community License Agreement, Version 1."}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "cached_path>=1.6.2",
+    "ase==3.22.1",
+    "numpy<2.0.0",
+    "scipy>=1.13.1",
+    "torch==2.2.0",
+    "ase==3.22.1",
+    "dm-tree>=0.1.8",
+]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["orb_models*"]
+
+[project.urls]
+Homepage = "https://github.com/orbital-materials/orb-models"
+Changelog = "https://github.com/orbital-materials/orb-models/releases"
+Issues = "https://github.com/orbital-materials/orb-models/issues"
+CI = "https://github.com/orbital-materials/orb-models/actions"
+
+[project.optional-dependencies]
+test = ["pytest"]

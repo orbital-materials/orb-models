@@ -1,0 +1,34 @@
+[flake8]
+max-line-length = 115
+docstring-conventions = google
+
+# these rules don't play well with black
+# E203 whitespace before :
+# W503 line break before binary operator
+# D401 imperative doc string
+# D107 Missing docstring in __init__
+# D104 Missing docstring in public package
+# D100 Missing docstring in public module
+# E731 Do not assign lambdas
+ignore =
+    E203
+    W503
+    D401
+    D107
+    D104
+    D100
+    E731
+exclude =
+    build/**
+    doc/**
+    notebooks
+    wandb
+
+per-file-ignores =
+    # __init__.py files are allowed to have unused imports and lines-too-long
+    */__init__.py:F401,D
+    */**/**/__init__.py:F401,E501
+
+    # tests don't have to respect
+    #  E731: do not assign a lambda expression, use a def
+    tests/**:E731,D

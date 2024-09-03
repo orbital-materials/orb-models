@@ -1,0 +1,56 @@
+ORBITAL MATERIALS
+ORB COMMUNITY LICENSE AGREEMENT, VERSION 1
+
+ORB Community License Agreement, Version 1:  Release Date: September 3rd, 2024
+
+This ORB Community License Agreement, Version 1 (“Agreement”) sets forth the terms and conditions for your use, reproduction, modification, and distribution of any of the Licensed Materials (defined below).
+
+“Documentation” means the specifications, manuals, and documentation accompanying the Orb that we make available at https://github.com/orbital-materials/orb-models.
+
+“Licensee” or “you” or “your” means you, or your employer or any other person or entity (if you are entering into this Agreement on your employer’s or such other person’s or entity’s behalf), of the age required under applicable laws, rules, and regulations to provide legal consent, and that has legal authority to bind your employer or such other person or entity if you are entering in this Agreement on their behalf.
+
+“Orb” means the machine learning related technology, software, and algorithms, including machine-learning model code, trained model weights, inference-enabling code, training-enabling code, fine-tuning enabling code, and other elements related to the foregoing, that we make available at https://github.com/orbital-materials/orb-models.
+
+“Licensed Materials” means, collectively, our proprietary Orb and Documentation (and any portion thereof) made available under this Agreement.
+
+“Orbital Materials” or “we” or “our” or “us” means Orbital Materials Ltd (if you are located in, or if you are an entity, your principal place of business is in, the EEA or Switzerland) or Orbital Materials, Inc. (if you are located outside of the EEA or Switzerland).
+
+By clicking on an “I Accept” or similar button presented to you along with the Licensed Materials, or by accessing, downloading, copying, modifying, distributing, or otherwise using in any manner any portion or element of any of the Licensed Materials, you agree to be bound by this Agreement.
+
+License Rights and Redistribution.
+
+Grant of Rights. Subject to the terms of this Agreement, we grant you, during the term of this Agreement, a non-exclusive, limited, and non-transferable license under the intellectual property rights that we own and that are embodied in the Licensed Materials to use, reproduce, modify, and distribute the Licensed Materials. 
+
+Redistribution and Use.
+
+If you distribute or make available to any third party any of the Licensed Materials (or any modifications thereto or derivative works thereof), or a product, technology, or service, including another AI model, that uses or is derived from any of the Licensed Materials, you shall provide a copy of this Agreement therewith.
+
+If you distribute or make available to any third party a product, technology, or service, including another AI model, that uses or is derived from any of the Licensed Materials, you shall prominently display “Built with the Orbital Materials Orb” on such product’s, technology’s, or service’s user interface, product documentation, “about” page, and website.
+
+If you use any of the Licensed Materials to develop, create, train, fine tune, or otherwise improve an AI model, which is distributed or made available to any third party, you shall also include “Orb” at the beginning of each such AI model name.
+
+You must retain in all copies of any of the Licensed Materials that you distribute or otherwise make available to any third party the following attribution notice within a “Notice” text file distributed as a part of such copies: “The Orbital Materials Orb is licensed under the ORB Community License Agreement, Version 1, Copyright © Orbital Materials, Inc. All Rights Reserved.”
+
+Your use of the Licensed Materials must comply with all applicable laws and regulations (including trade compliance laws and regulations).
+
+You will not use any of the Licensed Materials or any output resulting from the use of any Licensed Materials to improve any other model.
+
+If you receive any of the Licensed Materials, or any modifications thereto or derivative works thereof, from a Licensee as part of an integrated end user product, then Section 2 (Additional Commercial Terms) of this Agreement will not apply to you.
+
+Additional Commercial Terms. If any of the Licensed Materials are being used, directly or indirectly, for the benefit of any entity or organization, including an employer or an entity that engages contractors, and if, as of the effective date or at any time thereafter during the term of this Agreement, the number of full time employees in such entity or organization is greater than 100, you must request a license from Orbital Materials, which Orbital Materials may grant to you in its sole discretion, and you are not authorized to exercise any of the rights under this Agreement unless or until Orbital Materials otherwise expressly grants you such rights.
+
+Disclaimer of Warranties. UNLESS REQUIRED BY APPLICABLE LAW, THE LICENSED MATERIALS AND ANY OUTPUT AND RESULTS GENERATED FROM THE USE THEREOF ARE PROVIDED ON AN “AS IS” BASIS, WITHOUT REPRESENTATIONS OR WARRANTIES OF ANY KIND, AND ORBITAL MATERIALS DISCLAIMS ALL WARRANTIES OF ANY KIND, EXPRESS, IMPLIED, AND STATUTORY, INCLUDING, WITHOUT LIMITATION, ANY WARRANTIES OF TITLE, NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE. YOU ARE SOLELY RESPONSIBLE FOR DETERMINING THE APPROPRIATENESS OF USING OR REDISTRIBUTING THE LICENSED MATERIALS AND YOU ASSUME ALL RISKS ASSOCIATED WITH YOUR USE OF THE ORB MATERIALS AND ANY OUTPUT AND RESULTS GENERATED FROM THE USE THEREOF.
+
+Limitation of Liability. IN NO EVENT WILL ORBITAL MATERIALS OR ITS AFFILIATES BE LIABLE UNDER ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, TORT (INCLUDING NEGLIGENCE AND PRODUCTS LIABILITY), OR OTHERWISE, RELATING TO OR ARISING OUT OF THIS AGREEMENT, FOR ANY LOST PROFITS OR ANY INDIRECT, SPECIAL, CONSEQUENTIAL, INCIDENTAL, EXEMPLARY OR PUNITIVE DAMAGES, EVEN IF ORBITAL MATERIALS OR ITS AFFILIATES HAVE BEEN ADVISED OF THE POSSIBILITY OF ANY OF THE FOREGOING.
+ 
+Intellectual Property.
+
+Trademarks. No trademark licenses are granted under this Agreement, and in connection with the Licensed Materials, neither Orbital Materials nor Licensee may use any name or mark owned by or associated with the other or any of its affiliates, except as required for reasonable and customary use in describing and redistributing the Licensed Materials or as set forth in this Section 5(a). We hereby grant you a license to use any trademarks that we may own in the “Orb” or “Orbital Materials” marks (“Marks”) solely as required to comply with the last sentence of Section 1(b) (Redistribution and Use) and in accordance with any trademark usage guidelines that we may make available to you. All goodwill arising out of your use of the Marks will inure to the benefit of Orbital Materials.
+
+Derivatives. Subject to our ownership of the Licensed Materials and derivatives made by or for us, with respect to any derivative works and modifications of the Licensed Materials that are made by you, as between you and Orbital Materials, you are and will be the owner of such derivative works and modifications.
+	
+Litigation. If you institute any litigation or other proceeding against Orbital Materials or any entity (including a cross-claim or counterclaim in a lawsuit) alleging that any of the Licensed Materials or any of the output or results generated from the use thereof, or any portion of any of the foregoing, constitutes infringement of intellectual property or other rights owned or licensable by you, then any licenses granted to you under this Agreement shall terminate as of the date such litigation or claim is filed or instituted. You will indemnify and hold harmless Orbital Materials from and against any claim by any third party arising out of or related to your use or distribution of the Licensed Materials.
+
+Term and Termination. The term of this Agreement will commence upon your initial access to the Licensed Materials and will continue in full force and effect until terminated in accordance with the terms and conditions herein. Orbital Materials may terminate this Agreement if you are in breach of any term or condition of this Agreement. Upon termination of this Agreement, you shall delete and cease all uses of all Licensed Materials. This sentence and Sections 3 (Disclaimer of Warranties), 4 (Limitation of Liability), and 7 (Governing Law and Jurisdiction) shall survive the termination of this Agreement.
+
+Governing Law and Jurisdiction. This Agreement will be governed and construed under the laws of the State of Delaware without regard to choice of law principles, and the UN Convention on Contracts for the International Sale of Goods does not apply to this Agreement. The courts of Delaware shall have exclusive jurisdiction of any dispute arising out of this Agreement.
