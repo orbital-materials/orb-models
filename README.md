@@ -4,7 +4,7 @@
 </p>
 <br/>
 
-# Orbital Materials - Pretrained models for atomic simulations
+# Pretrained models for atomic simulations
 
 ![example workflow](https://github.com/orbital-materials/orb-models/actions/workflows/test.yml/badge.svg)
 [![PyPI version](https://badge.fury.io/py/orb-models.svg)](https://badge.fury.io/py/orb-models)
