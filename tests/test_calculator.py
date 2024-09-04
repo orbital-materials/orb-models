@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import ase
+import pytest
 
 from orb_models.forcefield import segment_ops
 from orb_models.forcefield.calculator import ORBCalculator
@@ -49,10 +50,11 @@ def atoms(unit_cell=False):
     return atoms
 
 
-def test_orb_calculator():
+@pytest.mark.parametrize("brute_force_knn", [True, False])
+def test_orb_calculator(brute_force_knn):
     minimum = [-0.5, -2.0, -1.0]
     a = atoms()
-    a.calc = ORBCalculator(EuclideanNormModel(minimum))  # type: ignore
+    a.calc = ORBCalculator(EuclideanNormModel(minimum), brute_force_knn)  # type: ignore
     # energy and forces of random initial position should be non-zero
     assert a.get_potential_energy() > 1e-5
     assert np.any(np.abs(a.get_forces()) > 1e-5)

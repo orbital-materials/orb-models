@@ -18,6 +18,7 @@ class ORBCalculator(Calculator):
     def __init__(
         self,
         model: GraphRegressor,
+        brute_force_knn: Optional[bool] = None,
         system_config: SystemConfig = SystemConfig(radius=10.0, max_num_neighbors=20),
         device: Optional[torch.device] = None,
         **kwargs,
@@ -26,6 +27,10 @@ class ORBCalculator(Calculator):
 
         Args:
             model (GraphRegressor): The finetuned model to use for predictions.
+            brute_force_knn: whether to use a 'brute force' k-nearest neighbors method for graph construction.
+                Defaults to None, in which case brute_force is used if a GPU is available (2-6x faster),
+                but not on CPU (1.5x faster - 4x slower). For very large systems (>10k atoms),
+                brute_force may OOM on GPU, so it is recommended to set to False in that case.
             system_config (SystemConfig): The config defining how an atomic system is featurized.
             device (Optional[torch.device], optional): The device to use for the model.
             **kwargs: Additional keyword arguments for parent Calculator class.
@@ -35,6 +40,7 @@ class ORBCalculator(Calculator):
         self.model = model
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.system_config = system_config
+        self.brute_force_knn = brute_force_knn
 
         # NOTE: we currently do not predict stress, but when we do,
         # we should add it here and also update calculate() below.
@@ -60,8 +66,13 @@ class ORBCalculator(Calculator):
         Calculator.calculate(self, atoms)
 
         # prepare data
-        batch = ase_atoms_to_atom_graphs(atoms, system_config=self.system_config)
+        batch = ase_atoms_to_atom_graphs(
+            atoms,
+            system_config=self.system_config,
+            brute_force_knn=self.brute_force_knn,
+        )
         batch = batch.to(self.device)  # type: ignore
+        self.model = self.model.to(self.device)  # type: ignore
 
         self.results = {}
         out = self.model.predict(batch)

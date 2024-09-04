@@ -13,7 +13,7 @@ from orb_models.forcefield.gns import MoleculeGNS
 from orb_models.forcefield.rbf import ExpNormalSmearing
 
 
-torch.set_float32_matmul_precision('high')
+torch.set_float32_matmul_precision("high")
 
 
 def get_base(
@@ -39,17 +39,21 @@ def get_base(
 
 
 def load_model_for_inference(
-    model: torch.nn.Module, 
-    weights_path: str, 
+    model: torch.nn.Module,
+    weights_path: str,
     device: Union[torch.device, str] = None,
 ) -> torch.nn.Module:
     """Load a pretrained model in inference mode, using GPU if available."""
     local_path = cached_path(weights_path)
     state_dict = torch.load(local_path, map_location="cpu")
-
     model.load_state_dict(state_dict, strict=True)
-    model = model.to(get_device(device))
-
+    device = get_device(device)
+    if device.type == "cuda" and torch.get_float32_matmul_precision() == "high":
+        print(
+            "GPU tensorfloat matmuls precision set to 'high'. "
+            "This can achieve up to 2x speedup on Nvidia A100 and H100 devices."
+        )
+    model = model.to(device)
     model = model.eval()
     for param in model.parameters():
         param.requires_grad = False

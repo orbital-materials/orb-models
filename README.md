@@ -70,8 +70,9 @@ from orb_models.forcefield import pretrained
 from orb_models.forcefield.calculator import ORBCalculator
 
 
-orbff = pretrained.orb_v1() # Or choose another model using ORB_PRETRAINED_MODELS[model_name]()
-calc = ORBCalculator(orbff, device="cpu")  # or device="cuda"
+device="cpu" # or device="cuda"
+orbff = pretrained.orb_v1(device=device) # or choose another model using ORB_PRETRAINED_MODELS[model_name]()
+calc = ORBCalculator(orbff, device=device)
 atoms = bulk('Cu', 'fcc', a=3.58, cubic=True)
 
 atoms.set_calculator(calc)
@@ -87,7 +88,7 @@ from ase.optimize import BFGS
 atoms.rattle(0.5)
 print("Rattled Energy:", atoms.get_potential_energy())
 
-calc = ORBCalculator(orbff, device="cpu")
+calc = ORBCalculator(orbff, device="cpu") # or device="cuda"
 dyn = BFGS(atoms)
 dyn.run(fmax=0.01)
 print("Optimized Energy:", atoms.get_potential_energy())

@@ -129,7 +129,6 @@ def forces_row_fn(row: ase.db.row.AtomsRow, dataset: str):
         "alexandria-d3": [("forces", 1), ("data.d3.forces", 1)],
     }
     if dataset not in extract_info:
-
         if not hasattr(row, "forces"):
             raise ValueError(
                 f"db row {row.id} doesn't have a forces attribute directly, "

@@ -16,6 +16,8 @@ from orb_models.forcefield import segment_ops
 global HAS_WARNED_FOR_TF32_MATMUL
 HAS_WARNED_FOR_TF32_MATMUL = False
 
+# torch.set_float32_matmul_precision('high')
+
 
 def warn_for_tf32_matmul():
     """Warn the user once only if they are not using tensorfloat matmuls."""
@@ -477,7 +479,7 @@ class GraphRegressor(nn.Module):
             for param in self.model.parameters():
                 param.requires_grad = False
 
-    warn_for_tf32_matmul()
+        warn_for_tf32_matmul()
 
     def predict(self, batch: base.AtomGraphs) -> Dict[str, torch.Tensor]:
         """Predict node and/or graph level attributes.
