@@ -23,7 +23,7 @@ Orb models are expected to work on MacOS and Linux. Windows support is not guara
 
 We provide several pretrained models that can be used to calculate energies and forces of atomic systems. All models are provided in the `orb_models.forcefield.pretrained` module. 
 
-- `orb-v1` - The main model, trained on the full dataset.
+- `orb-v1` - The main model, trained on the full dataset (MPTraj + Alexandria).
 - `orb-mptraj-only-v1` - The main model, trained on the MPTraj dataset only to reproduce our second Matbench Discovery result. We do not recommend using this model for general use.
 
 - `orb-d3-v1` - The main model, trained on the full dataset with integrated D3 corrections. This model should be used for systems where dispersion interactions are important. In general, we recommend using this model. This model is the same speed as the main model, as we include the D3 corrections in the model itself. This is substantially faster than using analytical D3 corrections.
