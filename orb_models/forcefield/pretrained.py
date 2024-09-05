@@ -12,6 +12,8 @@ from orb_models.forcefield.graph_regressor import (
 from orb_models.forcefield.gns import MoleculeGNS
 from orb_models.forcefield.rbf import ExpNormalSmearing
 
+global HAS_MESSAGED_FOR_TF32_MATMUL
+HAS_MESSAGED_FOR_TF32_MATMUL = False
 
 torch.set_float32_matmul_precision("high")
 
@@ -44,15 +46,21 @@ def load_model_for_inference(
     device: Union[torch.device, str] = None,
 ) -> torch.nn.Module:
     """Load a pretrained model in inference mode, using GPU if available."""
+    global HAS_MESSAGED_FOR_TF32_MATMUL
     local_path = cached_path(weights_path)
     state_dict = torch.load(local_path, map_location="cpu")
     model.load_state_dict(state_dict, strict=True)
     device = get_device(device)
-    if device.type == "cuda" and torch.get_float32_matmul_precision() == "high":
+    if (
+        device.type == "cuda"
+        and torch.get_float32_matmul_precision() == "high"
+        and not HAS_MESSAGED_FOR_TF32_MATMUL
+    ):
         print(
             "GPU tensorfloat matmuls precision set to 'high'. "
             "This can achieve up to 2x speedup on Nvidia A100 and H100 devices."
         )
+        HAS_MESSAGED_FOR_TF32_MATMUL = True
     model = model.to(device)
     model = model.eval()
     for param in model.parameters():
