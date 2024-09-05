@@ -95,8 +95,7 @@ def ase_atoms_to_atom_graphs(
         radius=10.0, max_num_neighbors=20, use_timestep_0=True
     ),
     system_id: Optional[int] = None,
-    n_kdtree_workers: int = 1,
-    brute_force: bool = False,
+    brute_force_knn: Optional[bool] = None,
 ) -> AtomGraphs:
     """Generate AtomGraphs from an ase.Atoms object.
 
@@ -104,8 +103,10 @@ def ase_atoms_to_atom_graphs(
         atoms: ase.Atoms object
         system_config: SystemConfig object
         system_id: Optional system_id
-        n_kdtree_workers: number of workers to use for kdtree construction.
-        brute_force: whether to use brute force for kdtree construction.
+        brute_force_knn: whether to use a 'brute force' knn approach with torch.cdist for kdtree construction.
+            Defaults to None, in which case brute_force is used if we a GPU is avaiable (2-6x faster),
+            but not on CPU (1.5x faster - 4x slower). For very large systems, brute_force may OOM on GPU,
+            so it is recommended to set to False in that case.
 
     Returns:
         AtomGraphs object
@@ -128,8 +129,7 @@ def ase_atoms_to_atom_graphs(
         system_feats["cell"][0],
         system_config.radius,
         system_config.max_num_neighbors,
-        n_kdtree_workers=n_kdtree_workers,
-        brute_force=brute_force,
+        brute_force=brute_force_knn,
     )
 
     num_atoms = len(node_feats["positions"])  # type: ignore
@@ -154,8 +154,7 @@ def _get_edge_feats(
     cell: torch.Tensor,
     radius: float,
     max_num_neighbours: int,
-    n_kdtree_workers: int = 1,
-    brute_force: bool = False,
+    brute_force: Optional[bool] = None,
 ):
     """Get edge features.
 
@@ -178,7 +177,6 @@ def _get_edge_feats(
         periodic_boundaries=cell,
         radius=radius,
         max_number_neighbors=max_num_neighbours,
-        n_workers=n_kdtree_workers,
         brute_force=brute_force,
     )
     edge_feats = {

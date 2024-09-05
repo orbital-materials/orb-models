@@ -477,7 +477,7 @@ class GraphRegressor(nn.Module):
             for param in self.model.parameters():
                 param.requires_grad = False
 
-    warn_for_tf32_matmul()
+        warn_for_tf32_matmul()
 
     def predict(self, batch: base.AtomGraphs) -> Dict[str, torch.Tensor]:
         """Predict node and/or graph level attributes.

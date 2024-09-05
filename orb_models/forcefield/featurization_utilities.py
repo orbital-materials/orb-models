@@ -231,8 +231,8 @@ def compute_pbc_radius_graph(
         radius (Union[float, torch.tensor]): The radius within which to connect atoms.
         max_number_neighbors (int, optional): The maximum number of neighbors for each particle. Defaults to 20.
         brute_force (bool, optional): Whether to use brute force knn. Defaults to None, in which case brute_force
-            is used if we are on GPU (2-6x faster), but not on CPU (1.5x faster - 4x slower, depending on
-            atom size).  More details here: https://github.com/orbital-materials/orb/pull/766
+            is used if GPU is available (2-6x faster), but not on CPU (1.5x faster - 4x slower, depending on
+            system size).
         library (str, optional): The KDTree library to use. Currently, either 'scipy' or 'pynanoflann'.
         n_workers (int, optional): The number of workers to use for KDTree construction. Defaults to 1.
 
@@ -240,13 +240,13 @@ def compute_pbc_radius_graph(
         Tuple[torch.Tensor, torch.Tensor]: A 2-Tuple. First, an edge_index tensor, where the first index are the
         sender indices and the second are the receiver indices. Second, the vector displacements between edges.
     """
+    device = get_device()
     if brute_force is None:
         # use brute force if positions are already on gpu
-        brute_force = positions.device.type != "cpu"
+        brute_force = device.type != "cpu"
 
     if brute_force:
         # use gpu if available
-        device = get_device()
         positions = positions.to(device)
         periodic_boundaries = periodic_boundaries.to(device)
 
