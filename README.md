@@ -71,7 +71,7 @@ from orb_models.forcefield.calculator import ORBCalculator
 
 
 device="cpu" # or device="cuda"
-orbff = pretrained.orb_v1(device=device) # or choose another model using ORB_PRETRAINED_MODELS[model_name]()
+orbff = pretrained.orb_v1() # or choose another model using ORB_PRETRAINED_MODELS[model_name]()
 calc = ORBCalculator(orbff, device=device)
 atoms = bulk('Cu', 'fcc', a=3.58, cubic=True)
 
