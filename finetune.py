@@ -13,6 +13,11 @@ from orb_models.finetune_utilities import steps
 from orb_models import utils
 
 
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
+
+
 def run(args):
     """Training Loop.
 
@@ -27,16 +32,14 @@ def run(args):
 
     # Instantiate model
     model = pretrained.orb_v1(device=device)
+    for param in model.parameters():
+        param.requires_grad = True
     model_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logging.info(f"Model has {model_params} trainable parameters.")
 
-    # Initialize and construct harness for training.
-    optim_config: experiment.OptimConfig = args.optim  # type: ignore
-    experiment.initialize_model(optim_config, model)
-
     # Move model to correct device.
     model.to(device=device)
-    optimizer, lr_scheduler, ema = optim.get_optim(lr=args.learning_rate)
+    optimizer, lr_scheduler, ema = optim.get_optim(args.lr, model)
 
     wandb_run = None
     # Logger instantiation/configuration
@@ -55,22 +58,14 @@ def run(args):
 
     loader_args = dict(
         dataset=args.dataset,
+        path=args.data_path,
         num_workers=args.num_workers,
-        batch_size_dict=args.batch_size,
+        batch_size=args.batch_size,
+        target_config={"graph": ["energy", "stress"], "node": ["forces"]},
     )
     train_loader = data_loaders.build_train_loader(
         **loader_args,
         augmentation=getattr(args, "augmentation", True),
-    )
-
-    lr_must_reduce_per_epoch = isinstance(
-        lr_scheduler,
-        (
-            torch.optim.lr_scheduler.ReduceLROnPlateau,
-            torch.optim.lr_scheduler.StepLR,
-            torch.optim.lr_scheduler.ExponentialLR,
-            torch.optim.lr_scheduler.CosineAnnealingLR,
-        ),
     )
     logging.info("Starting training!")
 
@@ -85,10 +80,9 @@ def run(args):
             optimizer=optimizer,
             dataloader=train_loader,
             ema=ema,
-            lr_scheduler=None if lr_must_reduce_per_epoch else lr_scheduler,
+            lr_scheduler=lr_scheduler,
             clip_grad=args.gradient_clip_val,
             device=device,
-            log_freq=args.get("log_freq", 100),
             num_steps=num_steps,
             epoch=epoch,
         )
@@ -138,7 +132,13 @@ def main():
         action="store_true",
         help="If the run is logged to wandb.",
     )
-    parser.add_argument("--dataset", default="QM9", type=str, help="Dataset name.")
+    parser.add_argument("--dataset", default="mp-traj", type=str, help="Dataset name.")
+    parser.add_argument(
+        "--data_path",
+        default=os.path.join(os.getcwd(), "datasets/mptraj/finetune.db"),
+        type=str,
+        help="Dataset path.",
+    )
     parser.add_argument(
         "--num_workers", default=8, type=int, help="Number of workers for data loader."
     )
@@ -166,7 +166,12 @@ def main():
         type=str,
         help="Path to save the model checkpoint.",
     )
-
+    parser.add_argument(
+        "--lr",
+        default=3e-04,
+        type=float,
+        help="Learning rate",
+    )
     args = parser.parse_args()
     run(args)
 

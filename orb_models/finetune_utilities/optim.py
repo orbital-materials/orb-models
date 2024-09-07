@@ -114,7 +114,7 @@ def make_parameter_groups(
 
 
 def get_optim(
-    learning_rate: float, model: torch.nn.Module
+    lr: float, model: torch.nn.Module
 ) -> Tuple[
     torch.optim.Optimizer,
     Optional[torch.optim.lr_scheduler._LRScheduler],
@@ -128,7 +128,7 @@ def get_optim(
         }
     ]
     params = make_parameter_groups(model, parameter_groups)
-    opt = torch.optim.Adam(params, lr=learning_rate)
+    opt = torch.optim.Adam(params, lr=lr)
 
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR
     ema_decay = 0.999

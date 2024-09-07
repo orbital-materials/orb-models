@@ -51,7 +51,7 @@ class AseSqliteDataset(Dataset):
     ):
         super().__init__()
         self.name = name
-        self.augmentations = augmentation
+        self.augmentation = augmentation
         self.path = path
         self.db = ase.db.connect(str(self.path), serial=True, type="db")
 
@@ -81,6 +81,7 @@ class AseSqliteDataset(Dataset):
         atom_graph = atomic_system.ase_atoms_to_atom_graphs(
             atoms,
             system_id=idx,
+            brute_force_knn=False,
         )
         atom_graph = self._add_extra_feats_and_targets(
             atom_graph, extra_feats, extra_targets
@@ -113,7 +114,7 @@ class AseSqliteDataset(Dataset):
     def _get_row_properties(
         self,
         row: ase.db.row.AtomsRow,
-        property_config: Optional[dict] = None,
+        property_config: Optional[atomic_system.PropertyConfig] = None,
     ) -> Dict:
         """Extract numerical properties from the db as tensors, to be used as features/targets.
 
@@ -242,13 +243,11 @@ def random_rotations_with_properties(
     properties["node"] = new_node_properties
 
     if "stress" in properties["graph"]:
-        # Transformation rule of stress tensor,
-        # see https://en.wikipedia.org/wiki/Cauchy_stress_tensor#Transformation_rule_of_the_stress_tensor
-
+        # Transformation rule of stress tensor
         stress = properties["graph"]["stress"]
         full_stress = voigt_6_to_full_3x3_stress(stress)
 
-        # Our featurization code adds a batch dimension, so we need to reshape
+        # The featurization code adds a batch dimension, so we need to reshape
         if full_stress.shape != (3, 3):
             full_stress = full_stress.reshape(3, 3)
 

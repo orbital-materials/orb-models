@@ -52,7 +52,7 @@ def fintune(
     lr_scheduler: Optional[_LRScheduler] = None,
     num_steps: Optional[int] = None,
     clip_grad: Optional[float] = None,
-    log_freq: float = 500,
+    log_freq: float = 100,
     device: torch.device = torch.device("cpu"),
     epoch: int = 0,
 ):

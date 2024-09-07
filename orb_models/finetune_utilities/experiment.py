@@ -3,10 +3,8 @@
 import os
 import dataclasses
 import random
-import re
 from typing import Dict, List, Optional, TypeVar, Union
 
-import hydra
 import numpy
 import omegaconf
 import torch
@@ -88,20 +86,10 @@ class OptimConfig(DictConfig):
     Args:
         optimizer: Configuration and kwargs for a torch.optim.Optimizer.
         lr_scheduler: Configuration and kwargs for a torch.optim.LRScheduler.
-        ema: Configuration and kwargs for Exponential Moving Averages of weights during training.
-        init: Regex : initializer mappings for initializing a model.
-        parameter_groups: Regex: optimizer kwargs for creating multiple seperate
-            parameter groups during optimization.
-        verbose: Whether to list parameter groups and model init regexes. For large
-            models this can be verbose.
     """
 
     optimizer: DictConfig
     lr_scheduler: DictConfig
-    ema_decay: Optional[float]
-    init: Optional[DictConfig]
-    parameter_groups: Optional[DictConfig]
-    verbose: bool = False
 
 
 @dataclasses.dataclass
@@ -147,47 +135,3 @@ class InitConfig(omegaconf.DictConfig):
 
     regexes: Dict[str, omegaconf.DictConfig]
     prevent_regexes: Optional[List[str]]
-
-
-def initialize_model(optim_config: OptimConfig, module: torch.nn.Module) -> None:
-    """Initialize a model from a config.
-
-    Applies initializers to parameters of a Module based on regexes. Any parameter not
-    matching a regex will not be initialized, instead using whatever the default
-    initialization was in code.
-
-    Args:
-        init_config: The config specifying the init.
-        module: The model/module to initialize.
-
-    Returns:
-        None, modifies model inplace!
-    """
-    init_config: InitConfig = optim_config.get("init", None)
-    if init_config is None:
-        return
-
-    initializers = hydra.utils.instantiate(init_config.regexes)
-
-    prevent_regexes = init_config.get("prevent_regexes", None)
-    prevent_regex = None
-    if prevent_regexes:
-        prevent_regex = "(" + ")|(".join(prevent_regexes) + ")"
-
-    hydra.utils.log.info("Initializing parameters")
-    unused_regexes = {k for k, v in initializers.items()}
-    uninitialized_parameters = set()
-    # Store which initializers were applied to which parameters.
-    for name, parameter in module.named_parameters():
-        for initializer_regex, initializer in initializers.items():
-            allow = prevent_regex is None or not bool(re.search(prevent_regex, name))
-            if allow and re.search(initializer_regex, name):
-                initializer(parameter)
-                unused_regexes.discard(initializer_regex)
-                break
-        else:  # no break
-            uninitialized_parameters.add(name)
-    for regex in unused_regexes:
-        hydra.utils.log.warning(
-            "Did not use initialization regex that was passed: %s", regex
-        )

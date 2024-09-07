@@ -247,3 +247,27 @@ def ase_fix_atoms_to_tensor(atoms: ase.Atoms) -> Optional[torch.Tensor]:
             fixed_atoms = torch.zeros((len(atoms)), dtype=torch.bool)
             fixed_atoms[constraint.index] = True
     return fixed_atoms
+
+
+def make_property_definitions_from_config(
+    config: Optional[Dict] = None,
+) -> PropertyConfig:
+    """Get PropertyConfig object from hydra config."""
+    if config is None:
+        return PropertyConfig()
+    assert all(
+        key in ["node", "edge", "graph"] for key in config
+    ), "Only node, edge and graph properties are supported."
+
+    node_properties = edge_properties = graph_properties = None
+    if config.get("node"):
+        node_properties = [name for name in config["node"]]
+    if config.get("edge"):
+        edge_properties = [name for name in config["edge"]]
+    if config.get("graph"):
+        graph_properties = [name for name in config["graph"]]
+    return PropertyConfig(
+        node_names=node_properties,
+        edge_names=edge_properties,
+        graph_names=graph_properties,
+    )

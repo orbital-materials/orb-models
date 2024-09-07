@@ -12,9 +12,9 @@ from torch.utils.data import (
     RandomSampler,
 )
 
-import hydra
 from orb_models.forcefield import base
 from orb_models.dataset.ase_dataset import AseSqliteDataset
+from orb_models.forcefield.atomic_system import make_property_definitions_from_config
 
 HAVE_PRINTED_WORKER_INFO = False
 
@@ -76,10 +76,12 @@ class BatchSizeConfig:
 
 
 def build_train_loader(
-    dataset,
-    num_workers: WorkerConfig,
-    batch_size_dict: omegaconf.DictConfig,
+    dataset: str,
+    path: str,
+    num_workers: int,
+    batch_size: int,
     augmentation: Optional[List[str]] = None,
+    target_config: Optional[Dict] = None,
     **kwargs,
 ) -> DataLoader:
     """Builds the train dataloader from a config file.
@@ -95,10 +97,11 @@ def build_train_loader(
     Returns:
         The train Dataloader.
     """
-    batch_size = hydra.utils.instantiate(batch_size_dict)
-
     log_train = "Loading train datasets:\n"
-    dataset = AseSqliteDataset(dataset, augmentation=augmentation, **kwargs)
+    target_config = make_property_definitions_from_config(target_config)
+    dataset = AseSqliteDataset(
+        dataset, path, target_config=target_config, augmentation=augmentation, **kwargs
+    )
 
     log_train += f"Total train dataset size: {len(dataset)} samples"
     logging.info(log_train)
@@ -113,10 +116,10 @@ def build_train_loader(
 
     train_loader: DataLoader = DataLoader(
         dataset,
-        num_workers=num_workers.train,
+        num_workers=num_workers,
         worker_init_fn=worker_init_fn,
         collate_fn=base.batch_graphs,
         batch_sampler=batch_sampler,
-        timeout=10 * 60 if num_workers.train > 0 else 0,
+        timeout=10 * 60 if num_workers > 0 else 0,
     )
     return train_loader
