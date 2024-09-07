@@ -252,7 +252,7 @@ def ase_fix_atoms_to_tensor(atoms: ase.Atoms) -> Optional[torch.Tensor]:
 def make_property_definitions_from_config(
     config: Optional[Dict] = None,
 ) -> PropertyConfig:
-    """Get PropertyConfig object from hydra config."""
+    """Get PropertyConfig object from config."""
     if config is None:
         return PropertyConfig()
     assert all(

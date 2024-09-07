@@ -30,7 +30,7 @@ def prefix_keys(
     return {f"{prefix}{sep}{k}": v for k, v in dict_to_prefix.items()}
 
 
-def seed_everything(seed: int, rank: int) -> None:
+def seed_everything(seed: int, rank: int = 0) -> None:
     """Set the seed for all pseudo random number generators."""
     random.seed(seed + rank)
     numpy.random.seed(seed + rank)
@@ -39,21 +39,23 @@ def seed_everything(seed: int, rank: int) -> None:
 
 def init_wandb_from_config(args, job_type: str) -> wandb_run.Run:
     """Initialise wandb from config."""
-    run_name = args.get("name")
-    project = args.get("project")
-    if not run_name:
+    if not hasattr(args, "wandb_name"):
         run_name = f"{job_type}-test"
-    if not project:
+    else:
+        run_name = args.name
+    if not hasattr(args, "wandb_project"):
         project = "orb-experiment"
+    else:
+        project = args.project
+
     wandb.init(  # type: ignore
         job_type=job_type,
         dir=os.path.join(os.getcwd(), "wandb"),
         name=run_name,
         project=project,
-        entity=args.entity,
-        mode=args.mode,
-        group=args.get("group"),
-        sync_tensorboard=True,
+        entity="orbitalmaterials",
+        mode="online",
+        sync_tensorboard=False,
     )
     assert wandb.run is not None
     return wandb.run

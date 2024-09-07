@@ -25,7 +25,7 @@ def run(args):
         config (DictConfig): Config for training loop.
     """
     device = utils.init_device()
-    experiment.seed_everything(args.random_seed, utils.get_local_rank())
+    experiment.seed_everything(args.random_seed)
 
     # Make sure to use this flag for matmuls on A100 and H100 GPUs.
     torch.set_float32_matmul_precision("high")
@@ -39,7 +39,7 @@ def run(args):
 
     # Move model to correct device.
     model.to(device=device)
-    optimizer, lr_scheduler, ema = optim.get_optim(args.lr, model)
+    optimizer, lr_scheduler, ema = optim.get_optim(args.lr, args.max_epochs, model)
 
     wandb_run = None
     # Logger instantiation/configuration
@@ -69,11 +69,12 @@ def run(args):
     )
     logging.info("Starting training!")
 
-    num_steps = len(train_loader)
+    num_steps = args.num_steps
 
     start_epoch = 0
 
     for epoch in range(start_epoch, args.max_epochs):
+        print(f"Start epoch: {epoch} training...")
         t1 = time.time()
         avg_train_metrics = steps.fintune(
             model=model,
@@ -91,25 +92,30 @@ def run(args):
         train_times["avg_time_per_step"] = (t2 - t1) / num_steps
         train_times["total_time"] = t2 - t1
 
-        if wandb.run is not None:
+        if args.wandb:
             wandb.run.log(
-                experiment.prefix_keys(avg_train_metrics, "train"), commit=False
+                experiment.prefix_keys(avg_train_metrics, "finetune"), commit=False
             )
             wandb.run.log(
-                experiment.prefix_keys(train_times, "train", sep="-"),
+                experiment.prefix_keys(train_times, "finetune", sep="-"),
                 commit=False,
             )
             wandb.run.log({"epoch": epoch}, commit=True)
 
         if epoch == args.max_epochs - 1:
             checkpoint = {
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'lr_scheduler_state_dict': lr_scheduler.state_dict() if lr_scheduler else None,
-                'ema_state_dict': ema.state_dict() if ema else None,
+                "epoch": epoch,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "lr_scheduler_state_dict": lr_scheduler.state_dict()
+                if lr_scheduler
+                else None,
+                "ema_state_dict": ema.state_dict() if ema else None,
             }
-            torch.save(checkpoint, args.checkpoint_path)
+            torch.save(
+                checkpoint,
+                os.path.join(args.checkpoint_path, f"checkpoint_epoch{epoch}.ckpt"),
+            )
             logging.info(f"Checkpoint saved to {args.checkpoint_path}")
 
     if wandb_run is not None:
@@ -127,7 +133,7 @@ def main():
     )
     parser.add_argument(
         "--wandb",
-        default=False,
+        default=True,
         action="store_true",
         help="If the run is logged to wandb.",
     )
@@ -154,8 +160,14 @@ def main():
         help="Maximum number of epochs to finetune.",
     )
     parser.add_argument(
+        "--num_steps",
+        default=100,
+        type=int,
+        help="Num steps of in each epoch.",
+    )
+    parser.add_argument(
         "--checkpoint_path",
-        default=os.path.join(os.getcwd(), "checkpoints"),
+        default=os.getcwd(),
         type=str,
         help="Path to save the model checkpoint.",
     )

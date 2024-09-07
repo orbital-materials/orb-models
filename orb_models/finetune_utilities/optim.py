@@ -1,7 +1,7 @@
 import re
 from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 
-import hydra
+import logging
 import omegaconf
 import torch
 from orb_models.finetune_utilities.ema import ExponentialMovingAverage as EMA
@@ -92,21 +92,21 @@ def make_parameter_groups(
             parameter_group_names[-1].add(name)
 
     # log the remaining parameter groups
-    hydra.utils.log.info("Constructed parameter groups:")
+    logging.info("Constructed parameter groups:")
     for k in range(len(parameter_groups)):
         group_options = {
             key: val for key, val in parameter_groups[k].items() if key != "params"
         }
-        hydra.utils.log.info("Group %s, options: %s", k, group_options)
+        logging.info("Group %s, options: %s", k, group_options)
         if verbose:
-            hydra.utils.log.info("Parameters: ")
+            logging.info("Parameters: ")
             for p in list(parameter_group_names[k]):
-                hydra.utils.log.info(p)
+                logging.info(p)
 
     # check for unused regex
     for regex, count in regex_use_counts.items():
         if count == 0:
-            hydra.utils.log.warning(
+            logging.warning(
                 "Parameter group regex %s does not match any parameter name.",
                 regex,
             )
@@ -114,13 +114,13 @@ def make_parameter_groups(
 
 
 def get_optim(
-    lr: float, model: torch.nn.Module
+    lr: float, max_epoch: int, model: torch.nn.Module
 ) -> Tuple[
     torch.optim.Optimizer,
     Optional[torch.optim.lr_scheduler._LRScheduler],
     Optional[EMA],
 ]:
-    """Configure optimizers, LR schedulers and EMA from a Hydra config."""
+    """Configure optimizers, LR schedulers and EMA."""
     parameter_groups = [
         {
             "filter_string": "(.*bias|.*layer_norm.*|.*batch_norm.*)",
@@ -130,7 +130,7 @@ def get_optim(
     params = make_parameter_groups(model, parameter_groups)
     opt = torch.optim.Adam(params, lr=lr)
 
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=max_epoch)
     ema_decay = 0.999
     ema = EMA(model.parameters(), ema_decay)
 

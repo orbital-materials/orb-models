@@ -1,6 +1,7 @@
 from typing import List, Optional, Union, cast
 
 import torch
+import tqdm
 from torch.optim.lr_scheduler import _LRScheduler
 from torch.utils.data import DataLoader
 
@@ -52,7 +53,7 @@ def fintune(
     lr_scheduler: Optional[_LRScheduler] = None,
     num_steps: Optional[int] = None,
     clip_grad: Optional[float] = None,
-    log_freq: float = 100,
+    log_freq: float = 10,
     device: torch.device = torch.device("cpu"),
     epoch: int = 0,
 ):
@@ -96,7 +97,7 @@ def fintune(
         except TypeError:
             raise ValueError("Dataloader has no length, you must specify num_steps.")
 
-    batch_generator_tqdm = batch_generator
+    batch_generator_tqdm = tqdm.tqdm(batch_generator, total=num_training_batches)
 
     i = 0
     batch_iterator = iter(batch_generator_tqdm)
@@ -173,4 +174,4 @@ def fintune(
         for h in hook_handles:
             h.remove()
 
-    return metrics.get_metrics(sync_dist=True)
+    return metrics.get_metrics()
