@@ -14,13 +14,11 @@ from orb_models.forcefield import (
     atomic_system,
     property_definitions,
 )
-from core.dataset.base_datasets import (
-    AtomsDataset,
-)
+from torch.utils.data import Dataset
 from orb_models.forcefield.base import AtomGraphs
 
 
-class AseSqliteDataset(AtomsDataset):
+class AseSqliteDataset(Dataset):
     """AseSqliteDataset.
 
     A Pytorch Dataset for reading ASE Sqlite serialized Atoms objects.
@@ -47,21 +45,17 @@ class AseSqliteDataset(AtomsDataset):
         self,
         name: str,
         path: str,
-        system_config: atomic_system.SystemConfig,
+        system_config: Optional[atomic_system.SystemConfig] = None,
         target_config: Optional[atomic_system.PropertyConfig] = None,
         augmentation: Optional[bool] = True,
     ):
-        super().__init__(
-            name=name,
-            system_config=system_config,
-            augmentation=augmentation,
-        )
+        super().__init__()
+        self.name = name
+        self.augmentations = augmentation
         self.path = path
         self.db = ase.db.connect(str(self.path), serial=True, type="db")
 
-        self.feature_config = atomic_system.make_property_definitions_from_config(
-            system_config.conditioning_feats
-        )
+        self.feature_config = system_config
         self.target_config = target_config
 
     def __getitem__(self, idx) -> AtomGraphs:

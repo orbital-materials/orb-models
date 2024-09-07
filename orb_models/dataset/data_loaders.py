@@ -13,8 +13,8 @@ from torch.utils.data import (
 )
 
 import hydra
-from orb_models.forcefield.atomic_system import make_property_definitions_from_config
 from orb_models.forcefield import base
+from orb_models.dataset.ase_dataset import AseSqliteDataset
 
 HAVE_PRINTED_WORKER_INFO = False
 
@@ -76,22 +76,18 @@ class BatchSizeConfig:
 
 
 def build_train_loader(
-    datasets: DatasetsConfig,
+    dataset,
     num_workers: WorkerConfig,
     batch_size_dict: omegaconf.DictConfig,
-    system_config_dict: omegaconf.DictConfig,
-    target_config_dict: Optional[omegaconf.DictConfig] = None,
     augmentation: Optional[List[str]] = None,
     **kwargs,
 ) -> DataLoader:
     """Builds the train dataloader from a config file.
 
     Args:
-        datasets: The dataset config.
+        dataset: The dataset name.
         num_workers: The number of workers for each dataset.
         batch_size: The batch_size config for each dataset.
-        system_config: The system config.
-        target_config: The target config.
         temperature: The temperature for temperature sampling.
             Default is None for using random sampler.
         augmentation: If rotation augmentation is used.
@@ -100,19 +96,9 @@ def build_train_loader(
         The train Dataloader.
     """
     batch_size = hydra.utils.instantiate(batch_size_dict)
-    system_config = hydra.utils.instantiate(system_config_dict)
-    target_config = make_property_definitions_from_config(target_config_dict)
 
     log_train = "Loading train datasets:\n"
-    dataset = get_dataset(
-        datasets=datasets.train,
-        system_config=system_config,
-        target_config=target_config,
-        mode="train",
-        extra_kwargs=datasets.get("extra_kwargs"),
-        augmentations=augmentation,
-        download=datasets.get("download"),
-    )
+    dataset = AseSqliteDataset(dataset, augmentation=augmentation, **kwargs)
 
     log_train += f"Total train dataset size: {len(dataset)} samples"
     logging.info(log_train)

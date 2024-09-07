@@ -1,9 +1,9 @@
 """Core training loop."""
 
+import os
 import logging
 import argparse
 import time
-from pathlib import Path
 
 import torch
 from orb_models.forcefield import pretrained
@@ -31,21 +31,20 @@ def run(args):
     logging.info(f"Model has {model_params} trainable parameters.")
 
     # Initialize and construct harness for training.
-    optim_config: experiment.OptimConfig = config.optim  # type: ignore
+    optim_config: experiment.OptimConfig = args.optim  # type: ignore
     experiment.initialize_model(optim_config, model)
 
     # Move model to correct device.
     model.to(device=device)
-    optimizer, lr_scheduler, ema = optim.optim_from_config(optim_config, model)
+    optimizer, lr_scheduler, ema = optim.get_optim(lr=args.learning_rate)
 
     wandb_run = None
     # Logger instantiation/configuration
     if args.wandb:
         import wandb
+
         logging.info("Instantiating WandbLogger.")
-        wandb_run = experiment.init_wandb_from_config(
-            args, job_type="finetuning"
-        )
+        wandb_run = experiment.init_wandb_from_config(args, job_type="finetuning")
 
         wandb.define_metric("global_step")
         wandb.define_metric("epochs")
@@ -55,11 +54,9 @@ def run(args):
         wandb.define_metric("key-metrics/*", step_metric="epochs")
 
     loader_args = dict(
-        datasets=args.datasets,
+        dataset=args.dataset,
         num_workers=args.num_workers,
         batch_size_dict=args.batch_size,
-        system_config_dict=args.system_config,
-        target_config_dict=getattr(args, "target_config", None),
     )
     train_loader = data_loaders.build_train_loader(
         **loader_args,
@@ -77,7 +74,7 @@ def run(args):
     )
     logging.info("Starting training!")
 
-    num_steps = args.get("num_steps") or len(train_loader)
+    num_steps = len(train_loader)
 
     start_epoch = 0
 
@@ -94,9 +91,6 @@ def run(args):
             log_freq=args.get("log_freq", 100),
             num_steps=num_steps,
             epoch=epoch,
-            gradient_accumulation_steps=args.get(
-                "gradient_accumulation_steps", 1
-            ),
         )
         t2 = time.time()
         train_times = {}
@@ -115,8 +109,8 @@ def run(args):
 
         if epoch == args.max_epoch - 1:
             model_checkpointer = checkpointer.from_config(
-            args.checkpoint_dir, args.checkpoint_path
-        )
+                args.checkpoint_dir, args.checkpoint_path
+            )
             model_checkpointer.checkpoint(
                 model,
                 num_steps * epoch,
@@ -129,22 +123,52 @@ def run(args):
         wandb_run.finish()
 
 
-
 def main():
     """Main."""
     parser = argparse.ArgumentParser(
         description="Finetune orb model",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--random_seed", default=1234, type=Path, help="Random seed for finetuning.")
-    parser.add_argument("--wandb", default=False, type=Path, help="If the run is logged to wandb.")
-    parser.add_argument("--dataset", default="QM9", type=Path, help="Dataset name.")
-    parser.add_argument("--num_workers", default=8, type=Path, help="Number of workders for data loader.")
-    parser.add_argument("--batch_size", default=100, type=Path, help="Batch size for finetuning.")
+    parser.add_argument(
+        "--random_seed", default=1234, type=int, help="Random seed for finetuning."
+    )
+    parser.add_argument(
+        "--wandb",
+        default=False,
+        action="store_true",
+        help="If the run is logged to wandb.",
+    )
+    parser.add_argument("--dataset", default="QM9", type=str, help="Dataset name.")
+    parser.add_argument(
+        "--num_workers", default=8, type=int, help="Number of workers for data loader."
+    )
+    parser.add_argument(
+        "--batch_size", default=100, type=int, help="Batch size for finetuning."
+    )
+    parser.add_argument(
+        "--gradient_clip_val", default=0.5, type=float, help="Gradient clip value."
+    )
+    parser.add_argument(
+        "--max_epochs",
+        default=50,
+        type=int,
+        help="Maximum number of epochs to finetune.",
+    )
+    parser.add_argument(
+        "--checkpoint_dir",
+        default="checkpoints",
+        type=str,
+        help="Directory to save checkpoints.",
+    )
+    parser.add_argument(
+        "--checkpoint_path",
+        default=os.getcwd(),
+        type=str,
+        help="Path to save the model checkpoint.",
+    )
 
-    args = vars(parser.parse_args())
+    args = parser.parse_args()
     run(args)
-
 
 
 if __name__ == "__main__":

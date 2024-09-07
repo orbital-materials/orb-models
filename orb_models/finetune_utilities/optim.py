@@ -4,7 +4,6 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 import hydra
 import omegaconf
 import torch
-from orb_models.finetune_utilities import experiment
 from orb_models.finetune_utilities.ema import ExponentialMovingAverage as EMA
 
 Metric = Union[torch.Tensor, int, float]
@@ -114,27 +113,25 @@ def make_parameter_groups(
     return parameter_groups
 
 
-def optim_from_config(
-    optim: experiment.OptimConfig, model: torch.nn.Module
+def get_optim(
+    learning_rate: float, model: torch.nn.Module
 ) -> Tuple[
     torch.optim.Optimizer,
     Optional[torch.optim.lr_scheduler._LRScheduler],
     Optional[EMA],
 ]:
     """Configure optimizers, LR schedulers and EMA from a Hydra config."""
-    if optim.get("parameter_groups") is not None:
-        params = make_parameter_groups(model, optim.parameter_groups, optim.verbose)  # type: ignore
-    else:
-        params = model.parameters()  # type: ignore
-    opt = hydra.utils.instantiate(optim.optimizer, params=params, _convert_="partial")
+    parameter_groups = [
+        {
+            "filter_string": "(.*bias|.*layer_norm.*|.*batch_norm.*)",
+            "optimizer_kwargs": {"weight_decay": 0.0},
+        }
+    ]
+    params = make_parameter_groups(model, parameter_groups)
+    opt = torch.optim.Adam(params, lr=learning_rate)
 
-    scheduler = None
-    if optim.lr_scheduler is not None:
-        scheduler = hydra.utils.instantiate(optim.lr_scheduler, optimizer=opt)
-
-    ema = None
-    if hasattr(optim, "ema_decay"):
-        assert optim.ema_decay is not None
-        ema = EMA(model.parameters(), optim.ema_decay)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR
+    ema_decay = 0.999
+    ema = EMA(model.parameters(), ema_decay)
 
     return opt, scheduler, ema

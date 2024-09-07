@@ -1,5 +1,6 @@
 """Experiment utilities."""
 
+import os
 import dataclasses
 import random
 import re
@@ -11,7 +12,6 @@ import omegaconf
 import torch
 import wandb
 from omegaconf import DictConfig
-from orb_models.utils import env
 from wandb import wandb_run
 
 T = TypeVar("T")
@@ -64,12 +64,12 @@ def init_wandb_from_config(args, job_type: str) -> wandb_run.Run:
     run_name = args.get("name")
     project = args.get("project")
     if not run_name:
-        run_name = f"{job_type}-{env.get_timestamp()}"
+        run_name = f"{job_type}-test"
     if not project:
         project = "orb-experiment"
     wandb.init(  # type: ignore
         job_type=job_type,
-        dir=env.wandb_root(),
+        dir=os.path.join(os.getcwd(), "wandb"),
         name=run_name,
         project=project,
         entity=args.entity,
@@ -167,8 +167,6 @@ def initialize_model(optim_config: OptimConfig, module: torch.nn.Module) -> None
     if init_config is None:
         return
 
-    verbose = optim_config.verbose
-
     initializers = hydra.utils.instantiate(init_config.regexes)
 
     prevent_regexes = init_config.get("prevent_regexes", None)
@@ -184,10 +182,6 @@ def initialize_model(optim_config: OptimConfig, module: torch.nn.Module) -> None
         for initializer_regex, initializer in initializers.items():
             allow = prevent_regex is None or not bool(re.search(prevent_regex, name))
             if allow and re.search(initializer_regex, name):
-                if verbose:
-                    hydra.utils.log.info(
-                        "Initializing %s using %s initializer", name, initializer_regex
-                    )
                 initializer(parameter)
                 unused_regexes.discard(initializer_regex)
                 break
@@ -197,13 +191,3 @@ def initialize_model(optim_config: OptimConfig, module: torch.nn.Module) -> None
         hydra.utils.log.warning(
             "Did not use initialization regex that was passed: %s", regex
         )
-
-    if verbose:
-        hydra.utils.log.info(
-            "Done initializing parameters; the following parameters are using their "
-            "default initialization from their code"
-        )
-        uninitialized_parameter_list = list(uninitialized_parameters)
-        uninitialized_parameter_list.sort()
-        for name in uninitialized_parameter_list:
-            hydra.utils.log.info("   %s", name)

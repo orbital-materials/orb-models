@@ -21,7 +21,8 @@ dependencies = [
     "numpy<2.0.0",
     "scipy>=1.13.1",
     "torch==2.2.0",
-    "dm-tree>=0.1.8"
+    "dm-tree>=0.1.8",
+    "e3nn==0.4.4"
 ]
 
 [build-system]
