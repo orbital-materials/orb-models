@@ -2,12 +2,13 @@
 
 from collections import OrderedDict
 from typing import List, Literal
+
+import numpy as np
 import torch
 from torch import nn
-import numpy as np
-from orb_models.forcefield import base
+
+from orb_models.forcefield import base, segment_ops
 from orb_models.forcefield.nn_util import build_mlp
-from orb_models.forcefield import segment_ops
 
 _KEY = "feat"
 

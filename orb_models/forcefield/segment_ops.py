@@ -1,5 +1,6 @@
-import torch
 from typing import Optional
+
+import torch
 
 TORCHINT = [torch.int64, torch.int32, torch.int16, torch.int8, torch.uint8]
 

@@ -2,16 +2,8 @@
 
 from collections import defaultdict
 from copy import deepcopy
-from typing import (
-    Any,
-    Dict,
-    Union,
-    NamedTuple,
-    Mapping,
-    Optional,
-    List,
-    Sequence,
-)
+from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Sequence, Union
+
 import torch
 import tree
 

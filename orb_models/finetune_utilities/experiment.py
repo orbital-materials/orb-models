@@ -1,26 +1,67 @@
 """Experiment utilities."""
 
 import os
-import dataclasses
 import random
-from typing import Dict, TypeVar
+from collections import defaultdict
+from pathlib import Path
+from typing import Dict, Mapping, TypeVar
 
+import dotenv
 import numpy
 import torch
 import wandb
 from wandb import wandb_run
 
+from orb_models.forcefield import base
+
 T = TypeVar("T")
 
 
-@dataclasses.dataclass
-class WandbArtifactTypes:
-    """Artifact types for wandb."""
+_V = TypeVar("_V", int, float, torch.Tensor)
 
-    MODEL = "model"
-    CONFIG = "config"
-    DATASET = "dataset"
-    SCREENING = "screening"
+dotenv.load_dotenv(override=True)
+PROJECT_ROOT: Path = Path(
+    os.environ.get("PROJECT_ROOT", str(Path(__file__).parent.parent))
+)
+assert (
+    PROJECT_ROOT.exists()
+), "You must configure the PROJECT_ROOT environment variable in a .env file!"
+
+DATA_ROOT: Path = Path(os.environ.get("DATA_ROOT", default=str(PROJECT_ROOT / "data")))
+WANDB_ROOT: Path = Path(
+    os.environ.get("WANDB_ROOT", default=str(PROJECT_ROOT / "wandb"))
+)
+
+
+def init_device() -> torch.device:
+    """Initialize a device.
+
+    Initializes a device, making sure to also
+    initialize the process group in a distributed
+    setting.
+    """
+    rank = 0
+    if torch.cuda.is_available():
+        device = f"cuda:{rank}"
+        torch.cuda.set_device(rank)
+        torch.cuda.empty_cache()
+    else:
+        device = "cpu"
+    return torch.device(device)
+
+
+def ensure_detached(x: base.Metric) -> base.Metric:
+    """Ensure that the tensor is detached and on the CPU."""
+    if isinstance(x, torch.Tensor):
+        return x.detach()
+    return x
+
+
+def to_item(x: base.Metric) -> base.Metric:
+    """Convert a tensor to a python scalar."""
+    if isinstance(x, torch.Tensor):
+        return x.cpu().item()
+    return x
 
 
 def prefix_keys(
@@ -59,3 +100,29 @@ def init_wandb_from_config(args, job_type: str) -> wandb_run.Run:
     )
     assert wandb.run is not None
     return wandb.run
+
+
+class ScalarMetricTracker:
+    """Keep track of average scalar metric values."""
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        """Reset the AverageMetrics."""
+        self.sums = defaultdict(float)
+        self.counts = defaultdict(int)
+
+    def update(self, metrics: Mapping[str, base.Metric]) -> None:
+        """Update the metric counts with new values."""
+        for k, v in metrics.items():
+            if isinstance(v, torch.Tensor) and v.nelement() > 1:
+                continue  # only track scalar metrics
+            if isinstance(v, torch.Tensor) and v.isnan().any():
+                continue
+            self.sums[k] += ensure_detached(v)
+            self.counts[k] += 1
+
+    def get_metrics(self):
+        """Get the metric values, possibly reducing across gpu processes."""
+        return {k: to_item(v) / self.counts[k] for k, v in self.sums.items()}

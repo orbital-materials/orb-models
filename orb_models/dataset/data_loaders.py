@@ -1,17 +1,13 @@
-import random
 import logging
-from typing import Dict, List, Optional
+import random
+from typing import Any, Optional
 
 import numpy as np
 import torch
-from torch.utils.data import (
-    BatchSampler,
-    DataLoader,
-    RandomSampler,
-)
+from torch.utils.data import BatchSampler, DataLoader, RandomSampler
 
-from orb_models.forcefield import base
 from orb_models.dataset.ase_dataset import AseSqliteDataset
+from orb_models.forcefield import base
 from orb_models.forcefield.atomic_system import make_property_definitions_from_config
 
 HAVE_PRINTED_WORKER_INFO = False
@@ -47,19 +43,19 @@ def build_train_loader(
     path: str,
     num_workers: int,
     batch_size: int,
-    augmentation: Optional[List[str]] = None,
-    target_config: Optional[Dict] = None,
+    augmentation: Optional[bool] = None,
+    target_config: Optional[Any] = None,
     **kwargs,
 ) -> DataLoader:
     """Builds the train dataloader from a config file.
 
     Args:
         dataset: The dataset name.
+        path: Dataset path.
         num_workers: The number of workers for each dataset.
         batch_size: The batch_size config for each dataset.
-        temperature: The temperature for temperature sampling.
-            Default is None for using random sampler.
         augmentation: If rotation augmentation is used.
+        target_config: The target config.
 
     Returns:
         The train Dataloader.

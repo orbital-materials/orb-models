@@ -1,6 +1,6 @@
 """Featurization utilities for molecular models."""
 
-from typing import Callable, Tuple, Union, Optional
+from typing import Callable, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -8,7 +8,6 @@ import torch
 # TODO(Mark): Make pynanoflann optional
 from pynanoflann import KDTree as NanoKDTree
 from scipy.spatial import KDTree as SciKDTree
-
 
 DistanceFeaturizer = Callable[[torch.Tensor], torch.Tensor]
 

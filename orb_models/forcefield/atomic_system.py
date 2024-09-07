@@ -1,14 +1,14 @@
-from typing import Optional, List, Dict
 from dataclasses import dataclass
+from typing import Dict, List, Optional
 
 import ase
+import torch
 from ase import constraints
 from ase.calculators.singlepoint import SinglePointCalculator
 
-from orb_models.forcefield.property_definitions import PROPERTIES, PropertyDefinition
 from orb_models.forcefield import featurization_utilities
 from orb_models.forcefield.base import AtomGraphs
-import torch
+from orb_models.forcefield.property_definitions import PROPERTIES, PropertyDefinition
 
 
 @dataclass

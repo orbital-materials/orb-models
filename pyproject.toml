@@ -22,7 +22,8 @@ dependencies = [
     "scipy>=1.13.1",
     "torch==2.2.0",
     "dm-tree>=0.1.8",
-    "e3nn==0.4.4"
+    "e3nn==0.4.4",
+    "tqdm>=4.66.5",
 ]
 
 [build-system]

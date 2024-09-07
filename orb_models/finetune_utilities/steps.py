@@ -2,15 +2,12 @@ from typing import List, Optional, Union, cast
 
 import torch
 import tqdm
+import wandb
 from torch.optim.lr_scheduler import _LRScheduler
 from torch.utils.data import DataLoader
-
-import wandb
-from orb_models.finetune_utilities import experiment
-from orb_models.finetune_utilities.ema import EMAContextManager as EMA
-from orb_models.utils import ScalarMetricTracker
-
 from wandb import wandb_run
+
+from orb_models.finetune_utilities import experiment
 
 
 def gradient_clipping(
@@ -49,7 +46,6 @@ def fintune(
     model: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
     dataloader: DataLoader,
-    ema: Optional[EMA] = None,
     lr_scheduler: Optional[_LRScheduler] = None,
     num_steps: Optional[int] = None,
     clip_grad: Optional[float] = None,
@@ -63,7 +59,6 @@ def fintune(
         model: The model to optimize.
         optimizer: The optimizer for the model.
         dataloader: A Pytorch Dataloader, which may be infinite if num_steps is passed.
-        ema: Optional, an Exponential Moving Average tracker for saving averaged model weights.
         lr_scheduler: Optional, a Learning rate scheduler for modifying the learning rate.
         num_steps: The number of training steps to take. This is required for distributed training,
             because controlling parallism is easier if all processes take exactly the same number of steps (
@@ -81,7 +76,7 @@ def fintune(
     if clip_grad is not None:
         hook_handles = gradient_clipping(model, clip_grad)
 
-    metrics = ScalarMetricTracker()
+    metrics = experiment.ScalarMetricTracker()
 
     # Set the model to "train" mode.
     model.train()
@@ -136,10 +131,6 @@ def fintune(
 
         if lr_scheduler is not None:
             lr_scheduler.step()
-
-        # Update moving averages
-        if ema is not None:
-            ema.update()
 
         metrics.update(step_metrics)
 

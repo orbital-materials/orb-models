@@ -1,20 +1,16 @@
 from pathlib import Path
-from typing import Dict, Literal, Optional, Tuple, Union
+from typing import Dict, Optional, Tuple, Union
 
 import ase
 import ase.db
 import ase.db.row
+import numpy as np
 import torch
 from ase.stress import voigt_6_to_full_3x3_stress
-import numpy as np
 from e3nn import o3
-
-
-from orb_models.forcefield import (
-    atomic_system,
-    property_definitions,
-)
 from torch.utils.data import Dataset
+
+from orb_models.forcefield import atomic_system, property_definitions
 from orb_models.forcefield.base import AtomGraphs
 
 
@@ -31,11 +27,7 @@ class AseSqliteDataset(Dataset):
             of the dataset.
         system_config: A config for controlling how an atomic system is represented.
         target_config: A config for regression/classification targets.
-        evaluation: Three modes: "eval_with_noise", "eval_no_noise", "train".
         augmentation: If random rotation augmentation is used.
-        limit_size: Limit the size of the dataset to this many samples. Useful for debugging.
-        masking_args: Arguments for masking function.
-        filter_indices_path: Path to a file containing a list of indices to include in the dataset.
 
     Returns:
         An AseSqliteDataset.
@@ -44,7 +36,7 @@ class AseSqliteDataset(Dataset):
     def __init__(
         self,
         name: str,
-        path: str,
+        path: Union[str, Path],
         system_config: Optional[atomic_system.SystemConfig] = None,
         target_config: Optional[atomic_system.PropertyConfig] = None,
         augmentation: Optional[bool] = True,
@@ -205,7 +197,6 @@ def get_dataset(
     name: str,
     system_config: atomic_system.SystemConfig,
     target_config: atomic_system.PropertyConfig,
-    evaluation: Literal["eval_with_noise", "eval_no_noise", "train"] = "train",
 ) -> AseSqliteDataset:
     """Dataset factory function."""
     return AseSqliteDataset(
@@ -213,7 +204,6 @@ def get_dataset(
         name=name,
         system_config=system_config,
         target_config=target_config,
-        evaluation=evaluation,
     )
 
 

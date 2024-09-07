@@ -1,7 +1,7 @@
 """Classes that define prediction targets."""
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Literal, Tuple, Union, List, Optional
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 
 import ase.data
 import ase.db

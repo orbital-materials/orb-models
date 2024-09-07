@@ -1,10 +1,9 @@
+import logging
 import re
 from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 
-import logging
 import omegaconf
 import torch
-from orb_models.finetune_utilities.ema import ExponentialMovingAverage as EMA
 
 Metric = Union[torch.Tensor, int, float]
 MetricCollection = Union[Metric, Mapping[str, Metric]]
@@ -115,11 +114,7 @@ def make_parameter_groups(
 
 def get_optim(
     lr: float, max_epoch: int, model: torch.nn.Module
-) -> Tuple[
-    torch.optim.Optimizer,
-    Optional[torch.optim.lr_scheduler._LRScheduler],
-    Optional[EMA],
-]:
+) -> Tuple[torch.optim.Optimizer, Optional[torch.optim.lr_scheduler._LRScheduler],]:
     """Configure optimizers, LR schedulers and EMA."""
     parameter_groups = [
         {
@@ -131,7 +126,5 @@ def get_optim(
     opt = torch.optim.Adam(params, lr=lr)
 
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=max_epoch)
-    ema_decay = 0.999
-    ema = EMA(model.parameters(), ema_decay)
 
-    return opt, scheduler, ema
+    return opt, scheduler

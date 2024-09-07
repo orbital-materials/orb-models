@@ -10,7 +10,6 @@ from orb_models.forcefield import pretrained
 from orb_models.finetune_utilities import experiment, optim
 from orb_models.dataset import data_loaders
 from orb_models.finetune_utilities import steps
-from orb_models import utils
 
 
 logging.basicConfig(
@@ -24,7 +23,7 @@ def run(args):
     Args:
         config (DictConfig): Config for training loop.
     """
-    device = utils.init_device()
+    device = experiment.init_device()
     experiment.seed_everything(args.random_seed)
 
     # Make sure to use this flag for matmuls on A100 and H100 GPUs.
@@ -39,7 +38,7 @@ def run(args):
 
     # Move model to correct device.
     model.to(device=device)
-    optimizer, lr_scheduler, ema = optim.get_optim(args.lr, args.max_epochs, model)
+    optimizer, lr_scheduler = optim.get_optim(args.lr, args.max_epochs, model)
 
     wandb_run = None
     # Logger instantiation/configuration
@@ -80,7 +79,6 @@ def run(args):
             model=model,
             optimizer=optimizer,
             dataloader=train_loader,
-            ema=ema,
             lr_scheduler=lr_scheduler,
             clip_grad=args.gradient_clip_val,
             device=device,
@@ -110,7 +108,6 @@ def run(args):
                 "lr_scheduler_state_dict": lr_scheduler.state_dict()
                 if lr_scheduler
                 else None,
-                "ema_state_dict": ema.state_dict() if ema else None,
             }
             torch.save(
                 checkpoint,
