@@ -7,7 +7,7 @@ import time
 
 import torch
 from orb_models.forcefield import pretrained
-from orb_models.finetune_utilities import experiment, optim, checkpointer
+from orb_models.finetune_utilities import experiment, optim
 from orb_models.dataset import data_loaders
 from orb_models.finetune_utilities import steps
 from orb_models import utils
@@ -101,17 +101,16 @@ def run(args):
             )
             wandb.run.log({"epoch": epoch}, commit=True)
 
-        if epoch == args.max_epoch - 1:
-            model_checkpointer = checkpointer.from_config(
-                args.checkpoint_dir, args.checkpoint_path
-            )
-            model_checkpointer.checkpoint(
-                model,
-                num_steps * epoch,
-                optimizer,
-                lr_scheduler,
-                ema,
-            )
+        if epoch == args.max_epochs - 1:
+            checkpoint = {
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'lr_scheduler_state_dict': lr_scheduler.state_dict() if lr_scheduler else None,
+                'ema_state_dict': ema.state_dict() if ema else None,
+            }
+            torch.save(checkpoint, args.checkpoint_path)
+            logging.info(f"Checkpoint saved to {args.checkpoint_path}")
 
     if wandb_run is not None:
         wandb_run.finish()
@@ -155,14 +154,8 @@ def main():
         help="Maximum number of epochs to finetune.",
     )
     parser.add_argument(
-        "--checkpoint_dir",
-        default="checkpoints",
-        type=str,
-        help="Directory to save checkpoints.",
-    )
-    parser.add_argument(
         "--checkpoint_path",
-        default=os.getcwd(),
+        default=os.path.join(os.getcwd(), "checkpoints"),
         type=str,
         help="Path to save the model checkpoint.",
     )

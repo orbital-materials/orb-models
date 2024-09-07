@@ -1,10 +1,8 @@
-import dataclasses
 import random
 import logging
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional
 
 import numpy as np
-import omegaconf
 import torch
 from torch.utils.data import (
     BatchSampler,
@@ -42,37 +40,6 @@ def worker_init_fn(id: int):
     if not HAVE_PRINTED_WORKER_INFO:
         print(torch.utils.data.get_worker_info())
         HAVE_PRINTED_WORKER_INFO = True
-
-
-@dataclasses.dataclass
-class DatasetsConfig(omegaconf.DictConfig):
-    """Config for Datasets."""
-
-    data_root: str
-
-    train: List[str]
-    val: List[str]
-    test: List[str]
-
-    extra_kwargs: Dict[str, omegaconf.DictConfig]
-
-
-@dataclasses.dataclass
-class WorkerConfig:
-    """Config for Workers."""
-
-    train: int
-    val: int
-    test: int
-
-
-@dataclasses.dataclass
-class BatchSizeConfig:
-    """Config for Dynamic Batch Size."""
-
-    train: Union[int]
-    val: int
-    test: int
 
 
 def build_train_loader(
