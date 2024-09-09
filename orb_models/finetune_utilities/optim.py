@@ -113,7 +113,7 @@ def make_parameter_groups(
 
 
 def get_optim(
-    lr: float, max_epoch: int, model: torch.nn.Module
+    lr: float, total_steps: int, model: torch.nn.Module
 ) -> Tuple[torch.optim.Optimizer, Optional[torch.optim.lr_scheduler._LRScheduler],]:
     """Configure optimizers, LR schedulers and EMA."""
     parameter_groups = [
@@ -125,6 +125,8 @@ def get_optim(
     params = make_parameter_groups(model, parameter_groups)
     opt = torch.optim.Adam(params, lr=lr)
 
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=max_epoch)
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(
+        opt, max_lr=lr, total_steps=total_steps, pct_start=0.05
+    )
 
     return opt, scheduler

@@ -1,4 +1,4 @@
-"""Core training loop."""
+"""Finetuning loop."""
 
 import os
 import logging
@@ -38,7 +38,8 @@ def run(args):
 
     # Move model to correct device.
     model.to(device=device)
-    optimizer, lr_scheduler = optim.get_optim(args.lr, args.max_epochs, model)
+    total_steps = args.max_epochs * args.num_steps
+    optimizer, lr_scheduler = optim.get_optim(args.lr, total_steps, model)
 
     wandb_run = None
     # Logger instantiation/configuration
@@ -100,6 +101,7 @@ def run(args):
             )
             wandb.run.log({"epoch": epoch}, commit=True)
 
+        # Save checkpoint from last epoch
         if epoch == args.max_epochs - 1:
             checkpoint = {
                 "epoch": epoch,

@@ -94,7 +94,6 @@ class ScalarNormalizer(torch.nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Normalize by running mean and std."""
         if self.training:
-            # hack: call batch norm, but only to update a running mean/std
             self.bn(x.view(-1, 1))
         return (x - self.bn.running_mean) / torch.sqrt(self.bn.running_var)  # type: ignore
 
