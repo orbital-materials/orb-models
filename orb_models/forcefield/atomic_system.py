@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 import ase
 import torch
@@ -8,8 +8,7 @@ from ase.calculators.singlepoint import SinglePointCalculator
 
 from orb_models.forcefield import featurization_utilities
 from orb_models.forcefield.base import AtomGraphs
-from orb_models.forcefield.property_definitions import (PROPERTIES,
-                                                        PropertyDefinition)
+from orb_models.forcefield.property_definitions import PROPERTIES, PropertyDefinition
 
 
 @dataclass
@@ -25,47 +24,6 @@ class SystemConfig:
     radius: float
     max_num_neighbors: int
     use_timestep_0: bool = True
-
-
-class PropertyConfig:
-    """Defines which properties should be calculated and stored on the AtomGraphs batch.
-
-    These are numerical physical properties that can be used as features/targets for a model.
-    """
-
-    def __init__(
-        self,
-        node_names: Optional[List[str]] = None,
-        edge_names: Optional[List[str]] = None,
-        graph_names: Optional[List[str]] = None,
-        **kwargs,
-    ) -> None:
-        """Initialize PropertyConfig.
-
-        Args:
-            node_names: List of node property names in PROPERTIES
-            edge_names: List of edge property names in PROPERTIES
-            graph_names: List of graph property names in PROPERTIES
-            **kwargs: Additional keyword arguments
-        """
-        if node_names is not None:
-            self.node_properties: Optional[Dict[str, PropertyDefinition]] = {
-                name: PROPERTIES[name] for name in node_names
-            }
-        else:
-            self.node_properties = None
-        if edge_names is not None:
-            self.edge_properties: Optional[Dict[str, PropertyDefinition]] = {
-                name: PROPERTIES[name] for name in edge_names
-            }
-        else:
-            self.edge_properties = None
-        if graph_names is not None:
-            self.graph_properties: Optional[Dict[str, PropertyDefinition]] = {
-                name: PROPERTIES[name] for name in graph_names
-            }
-        else:
-            self.graph_properties = None
 
 
 def atom_graphs_to_ase_atoms(

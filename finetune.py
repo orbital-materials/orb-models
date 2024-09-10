@@ -126,9 +126,7 @@ def finetune(
                     {"global_step": global_step},
                     commit=False,
                 )
-                run.log(
-                    utils.prefix_keys(metrics_dict, "train_step"), commit=False
-                )
+                run.log(utils.prefix_keys(metrics_dict, "train_step"), commit=False)
                 # Log learning rates.
                 run.log(
                     {
@@ -227,9 +225,9 @@ def run(args):
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
-                "lr_scheduler_state_dict": lr_scheduler.state_dict()
-                if lr_scheduler
-                else None,
+                "lr_scheduler_state_dict": (
+                    lr_scheduler.state_dict() if lr_scheduler else None
+                ),
             }
             torch.save(
                 checkpoint,
