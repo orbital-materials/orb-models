@@ -1,6 +1,6 @@
 [project]
 name = "orb-models"
-version = "0.3"
+dynamic = ["version"]
 description = "Foundation models for computational chemistry."
 readme = "README.md"
 requires-python = ">=3.8"
@@ -40,3 +40,6 @@ CI = "https://github.com/orbital-materials/orb-models/actions"
 
 [project.optional-dependencies]
 test = ["pytest"]
+
+[tool.setuptools.dynamic]
+version = {attr = "orb_models.__version__"}
