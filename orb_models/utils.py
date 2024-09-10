@@ -1,5 +1,6 @@
 """Experiment utilities."""
 
+import math
 import os
 import random
 import re
@@ -158,3 +159,149 @@ def get_optim(
     )
 
     return optimizer, scheduler
+
+
+def rand_angles(*shape, requires_grad=False, dtype=None, device=None):
+    r"""random rotation angles
+
+    Parameters
+    ----------
+    *shape : int
+
+    Returns
+    -------
+    alpha : `torch.Tensor`
+        tensor of shape :math:`(\mathrm{shape})`
+
+    beta : `torch.Tensor`
+        tensor of shape :math:`(\mathrm{shape})`
+
+    gamma : `torch.Tensor`
+        tensor of shape :math:`(\mathrm{shape})`
+    """
+    alpha, gamma = 2 * math.pi * torch.rand(2, *shape, dtype=dtype, device=device)
+    beta = torch.rand(shape, dtype=dtype, device=device).mul(2).sub(1).acos()
+    alpha = alpha.detach().requires_grad_(requires_grad)
+    beta = beta.detach().requires_grad_(requires_grad)
+    gamma = gamma.detach().requires_grad_(requires_grad)
+    return alpha, beta, gamma
+
+
+def matrix_x(angle: torch.Tensor) -> torch.Tensor:
+    r"""matrix of rotation around X axis
+
+    Parameters
+    ----------
+    angle : `torch.Tensor`
+        tensor of any shape :math:`(...)`
+
+    Returns
+    -------
+    `torch.Tensor`
+        matrices of shape :math:`(..., 3, 3)`
+    """
+    c = angle.cos()
+    s = angle.sin()
+    o = torch.ones_like(angle)
+    z = torch.zeros_like(angle)
+    return torch.stack(
+        [
+            torch.stack([o, z, z], dim=-1),
+            torch.stack([z, c, -s], dim=-1),
+            torch.stack([z, s, c], dim=-1),
+        ],
+        dim=-2,
+    )
+
+
+def matrix_y(angle: torch.Tensor) -> torch.Tensor:
+    r"""matrix of rotation around Y axis
+
+    Parameters
+    ----------
+    angle : `torch.Tensor`
+        tensor of any shape :math:`(...)`
+
+    Returns
+    -------
+    `torch.Tensor`
+        matrices of shape :math:`(..., 3, 3)`
+    """
+    c = angle.cos()
+    s = angle.sin()
+    o = torch.ones_like(angle)
+    z = torch.zeros_like(angle)
+    return torch.stack(
+        [
+            torch.stack([c, z, s], dim=-1),
+            torch.stack([z, o, z], dim=-1),
+            torch.stack([-s, z, c], dim=-1),
+        ],
+        dim=-2,
+    )
+
+
+def matrix_z(angle: torch.Tensor) -> torch.Tensor:
+    r"""matrix of rotation around Z axis
+
+    Parameters
+    ----------
+    angle : `torch.Tensor`
+        tensor of any shape :math:`(...)`
+
+    Returns
+    -------
+    `torch.Tensor`
+        matrices of shape :math:`(..., 3, 3)`
+    """
+    c = angle.cos()
+    s = angle.sin()
+    o = torch.ones_like(angle)
+    z = torch.zeros_like(angle)
+    return torch.stack(
+        [
+            torch.stack([c, -s, z], dim=-1),
+            torch.stack([s, c, z], dim=-1),
+            torch.stack([z, z, o], dim=-1),
+        ],
+        dim=-2,
+    )
+
+
+def angles_to_matrix(alpha, beta, gamma):
+    r"""conversion from angles to matrix
+
+    Parameters
+    ----------
+    alpha : `torch.Tensor`
+        tensor of shape :math:`(...)`
+
+    beta : `torch.Tensor`
+        tensor of shape :math:`(...)`
+
+    gamma : `torch.Tensor`
+        tensor of shape :math:`(...)`
+
+    Returns
+    -------
+    `torch.Tensor`
+        matrices of shape :math:`(..., 3, 3)`
+    """
+    alpha, beta, gamma = torch.broadcast_tensors(alpha, beta, gamma)
+    return matrix_y(alpha) @ matrix_x(beta) @ matrix_y(gamma)
+
+
+def rand_matrix(*shape, requires_grad=False, dtype=None, device=None):
+    r"""random rotation matrix
+
+    Parameters
+    ----------
+    *shape : int
+
+    Returns
+    -------
+    `torch.Tensor`
+        tensor of shape :math:`(\mathrm{shape}, 3, 3)`
+    """
+    R = angles_to_matrix(*rand_angles(*shape, dtype=dtype, device=device))
+    return R.detach().requires_grad_(requires_grad)

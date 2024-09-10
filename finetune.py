@@ -265,7 +265,7 @@ def main():
         "--num_workers", default=8, type=int, help="Number of workers for data loader."
     )
     parser.add_argument(
-        "--batch_size", default=10, type=int, help="Batch size for finetuning."
+        "--batch_size", default=100, type=int, help="Batch size for finetuning."
     )
     parser.add_argument(
         "--gradient_clip_val", default=0.5, type=float, help="Gradient clip value."

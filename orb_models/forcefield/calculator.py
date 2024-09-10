@@ -3,7 +3,8 @@ from typing import Optional
 import torch
 from ase.calculators.calculator import Calculator, all_changes
 
-from orb_models.forcefield.atomic_system import SystemConfig, ase_atoms_to_atom_graphs
+from orb_models.forcefield.atomic_system import (SystemConfig,
+                                                 ase_atoms_to_atom_graphs)
 from orb_models.forcefield.graph_regressor import GraphRegressor
 
 

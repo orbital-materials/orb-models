@@ -8,7 +8,6 @@ from ase.calculators.singlepoint import SinglePointCalculator
 
 from orb_models.forcefield import featurization_utilities
 from orb_models.forcefield.base import AtomGraphs
-from orb_models.forcefield.property_definitions import PROPERTIES, PropertyDefinition
 
 
 @dataclass

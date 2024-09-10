@@ -7,11 +7,11 @@ import ase.db.row
 import numpy as np
 import torch
 from ase.stress import voigt_6_to_full_3x3_stress
-from e3nn import o3
 from torch.utils.data import Dataset
 
 from orb_models.forcefield import atomic_system, property_definitions
 from orb_models.forcefield.base import AtomGraphs
+from orb_models.utils import rand_matrix
 
 
 class AseSqliteDataset(Dataset):
@@ -153,7 +153,7 @@ def random_rotations_with_properties(
         atoms (ase.Atoms): Atoms object to rotate.
         properties (dict): Dictionary of properties to rotate.
     """
-    rand_rotation = o3.rand_matrix(1)[0].numpy()
+    rand_rotation = rand_matrix(1)[0].numpy()
     atoms.positions = atoms.positions @ rand_rotation
     if atoms.cell is not None:
         atoms.set_cell(atoms.cell.array @ rand_rotation)
