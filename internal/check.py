@@ -1,14 +1,13 @@
 """Integration tests to check compatibility of outputs with internal OM models."""
 
-import torch
-import ase
-
-from orb_models.forcefield import pretrained
-from orb_models.forcefield import atomic_system
-from core.models import load
-from core.dataset import atomic_system as core_atomic_system
-
 import argparse
+
+import ase
+import torch
+from core.dataset import atomic_system as core_atomic_system
+from core.models import load
+
+from orb_models.forcefield import atomic_system, pretrained
 
 
 def main(model: str, core_model: str):

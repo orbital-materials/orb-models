@@ -8,9 +8,6 @@ from torch.utils.data import BatchSampler, DataLoader, RandomSampler
 
 from orb_models.dataset.ase_dataset import AseSqliteDataset
 from orb_models.forcefield import base
-from orb_models.forcefield.atomic_system import make_property_definitions_from_config
-
-HAVE_PRINTED_WORKER_INFO = False
 
 
 def worker_init_fn(id: int):
@@ -32,10 +29,6 @@ def worker_init_fn(id: int):
     ss = np.random.SeedSequence([uint64_seed])
     np.random.seed(ss.generate_state(4))
     random.seed(uint64_seed)
-    global HAVE_PRINTED_WORKER_INFO
-    if not HAVE_PRINTED_WORKER_INFO:
-        print(torch.utils.data.get_worker_info())
-        HAVE_PRINTED_WORKER_INFO = True
 
 
 def build_train_loader(
@@ -43,7 +36,7 @@ def build_train_loader(
     path: str,
     num_workers: int,
     batch_size: int,
-    augmentation: Optional[bool] = None,
+    augmentation: Optional[bool] = True,
     target_config: Optional[Any] = None,
     **kwargs,
 ) -> DataLoader:
@@ -61,7 +54,6 @@ def build_train_loader(
         The train Dataloader.
     """
     log_train = "Loading train datasets:\n"
-    target_config = make_property_definitions_from_config(target_config)
     dataset = AseSqliteDataset(
         dataset, path, target_config=target_config, augmentation=augmentation, **kwargs
     )

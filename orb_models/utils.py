@@ -2,11 +2,10 @@
 
 import os
 import random
+import re
 from collections import defaultdict
-from pathlib import Path
-from typing import Dict, Mapping, TypeVar
+from typing import Dict, List, Mapping, Optional, Tuple, TypeVar
 
-import dotenv
 import numpy
 import torch
 import wandb
@@ -15,22 +14,6 @@ from wandb import wandb_run
 from orb_models.forcefield import base
 
 T = TypeVar("T")
-
-
-_V = TypeVar("_V", int, float, torch.Tensor)
-
-dotenv.load_dotenv(override=True)
-PROJECT_ROOT: Path = Path(
-    os.environ.get("PROJECT_ROOT", str(Path(__file__).parent.parent))
-)
-assert (
-    PROJECT_ROOT.exists()
-), "You must configure the PROJECT_ROOT environment variable in a .env file!"
-
-DATA_ROOT: Path = Path(os.environ.get("DATA_ROOT", default=str(PROJECT_ROOT / "data")))
-WANDB_ROOT: Path = Path(
-    os.environ.get("WANDB_ROOT", default=str(PROJECT_ROOT / "wandb"))
-)
 
 
 def init_device() -> torch.device:
@@ -78,22 +61,13 @@ def seed_everything(seed: int, rank: int = 0) -> None:
     torch.manual_seed(seed + rank)
 
 
-def init_wandb_from_config(args, job_type: str) -> wandb_run.Run:
-    """Initialise wandb from config."""
-    if not hasattr(args, "wandb_name"):
-        run_name = f"{job_type}-test"
-    else:
-        run_name = args.name
-    if not hasattr(args, "wandb_project"):
-        project = "orb-experiment"
-    else:
-        project = args.project
-
+def init_wandb_from_config(job_type: str) -> wandb_run.Run:
+    """Initialise wandb."""
     wandb.init(  # type: ignore
         job_type=job_type,
         dir=os.path.join(os.getcwd(), "wandb"),
-        name=run_name,
-        project=project,
+        name=f"{job_type}-test",
+        project="orb-experiment",
         entity="orbitalmaterials",
         mode="online",
         sync_tensorboard=False,
@@ -126,3 +100,61 @@ class ScalarMetricTracker:
     def get_metrics(self):
         """Get the metric values, possibly reducing across gpu processes."""
         return {k: to_item(v) / self.counts[k] for k, v in self.sums.items()}
+
+
+def gradient_clipping(
+    model: torch.nn.Module, clip_value: float
+) -> List[torch.utils.hooks.RemovableHandle]:
+    """Add gradient clipping hooks to a model.
+
+    This is the correct way to implement gradient clipping, because
+    gradients are clipped as gradients are computed, rather than after
+    all gradients are computed - this means expoding gradients are less likely,
+    because they are "caught" earlier.
+
+    Args:
+        model: The model to add hooks to.
+        clip_value: The upper and lower threshold to clip the gradients to.
+
+    Returns:
+        A list of handles to remove the hooks from the parameters.
+    """
+    handles = []
+
+    def _clip(grad):
+        if grad is None:
+            return grad
+        return grad.clamp(min=-clip_value, max=clip_value)
+
+    for parameter in model.parameters():
+        if parameter.requires_grad:
+            h = parameter.register_hook(lambda grad: _clip(grad))
+            handles.append(h)
+
+    return handles
+
+
+def get_optim(
+    lr: float, total_steps: int, model: torch.nn.Module
+) -> Tuple[torch.optim.Optimizer, Optional[torch.optim.lr_scheduler._LRScheduler]]:
+    """Configure optimizers, LR schedulers and EMA."""
+
+    # Initialize parameter groups
+    params = []
+
+    # Split parameters based on the regex
+    for name, param in model.named_parameters():
+        if re.search(r"(.*bias|.*layer_norm.*|.*batch_norm.*)", name):
+            params.append({"params": param, "weight_decay": 0.0})
+        else:
+            params.append({"params": param})
+
+    # Create the optimizer with the parameter groups
+    optimizer = torch.optim.Adam(params, lr=lr)
+
+    # Create the learning rate scheduler
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(
+        optimizer, max_lr=lr, total_steps=total_steps, pct_start=0.05
+    )
+
+    return optimizer, scheduler

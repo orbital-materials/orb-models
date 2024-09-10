@@ -1,8 +1,8 @@
+import ase
 import numpy as np
+import pytest
 import torch
 import torch.nn as nn
-import ase
-import pytest
 
 from orb_models.forcefield import segment_ops
 from orb_models.forcefield.calculator import ORBCalculator

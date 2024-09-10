@@ -38,7 +38,7 @@ class AseSqliteDataset(Dataset):
         name: str,
         path: Union[str, Path],
         system_config: Optional[atomic_system.SystemConfig] = None,
-        target_config: Optional[atomic_system.PropertyConfig] = None,
+        target_config: Optional[Dict] = None,
         augmentation: Optional[bool] = True,
     ):
         super().__init__()
@@ -64,9 +64,20 @@ class AseSqliteDataset(Dataset):
         # Sqlite db is 1 indexed.
         row = self.db.get(idx + 1)
         atoms = row.toatoms()
-        extra_feats = self._get_row_properties(row, self.feature_config)
-        extra_targets = self._get_row_properties(row, self.target_config)
-
+        node_properties = property_definitions.get_property_from_row(
+            self.target_config["node"], row
+        )
+        graph_property_dict = {}
+        for target_propery in self.target_config["graph"]:
+            system_properties = property_definitions.get_property_from_row(
+                target_propery, row
+            )
+            graph_property_dict[target_propery] = system_properties
+        extra_targets = {
+            "node": {"forces": node_properties},
+            "edge": {},
+            "graph": graph_property_dict,
+        }
         if self.augmentation:
             atoms, extra_targets = random_rotations_with_properties(atoms, extra_targets)  # type: ignore
 
@@ -75,9 +86,7 @@ class AseSqliteDataset(Dataset):
             system_id=idx,
             brute_force_knn=False,
         )
-        atom_graph = self._add_extra_feats_and_targets(
-            atom_graph, extra_feats, extra_targets
-        )
+        atom_graph = self._add_extra_targets(atom_graph, extra_targets)
 
         return atom_graph
 
@@ -91,10 +100,6 @@ class AseSqliteDataset(Dataset):
         row = self.db.get(idx + 1)
         return row.toatoms(), row.data
 
-    def get_idx_to_natoms(self) -> Dict[int, int]:
-        """Return a mapping between dataset index and number of atoms."""
-        return self.db.get_idx_to_natoms(zero_index=True)
-
     def __len__(self) -> int:
         """Return the dataset length."""
         return len(self.db)
@@ -103,70 +108,17 @@ class AseSqliteDataset(Dataset):
         """String representation of class."""
         return f"AseSqliteDataset({self.name=}, {self.path=})"
 
-    def _get_row_properties(
-        self,
-        row: ase.db.row.AtomsRow,
-        property_config: Optional[atomic_system.PropertyConfig] = None,
-    ) -> Dict:
-        """Extract numerical properties from the db as tensors, to be used as features/targets.
-
-        Applies extraction function (e.g. extract from metadata) and normalisation
-
-        Args:
-            row: Database row
-            property_config: The config specifying how to extract the property/target.
-
-        Returns:
-            ExtrinsicProperties containing the tensors for the row.
-        """
-        if property_config is None:
-            return {"node": {}, "edge": {}, "graph": {}}
-
-        def _get_properties(
-            property_definitions: Optional[
-                Dict[str, property_definitions.PropertyDefinition]
-            ],
-        ) -> Dict[str, torch.Tensor]:
-            kwargs = {}
-            if property_definitions is not None:
-                for key, definition in property_definitions.items():
-                    if definition.row_to_property_fn is not None:
-                        property_tensor = definition.row_to_property_fn(
-                            row=row, dataset=self.name
-                        )
-                        kwargs[key] = property_tensor
-            return kwargs
-
-        node_properties = _get_properties(property_config.node_properties)
-        edge_properties = _get_properties(property_config.edge_properties)
-        system_properties = _get_properties(property_config.graph_properties)
-        return {
-            "node": node_properties,
-            "edge": edge_properties,
-            "graph": system_properties,
-        }
-
-    def _add_extra_feats_and_targets(
+    def _add_extra_targets(
         self,
         atom_graph: AtomGraphs,
-        extra_feats: Dict[str, Dict],
         extra_targets: Dict[str, Dict],
     ):
         """Add extra features and targets to the AtomGraphs object.
 
         Args:
             atom_graph: AtomGraphs object to add extra features and targets to.
-            extra_feats: Dictionary of extra features with keys
             extra_targets: Dictionary of extra targets to add.
         """
-        node_feats = {**atom_graph.node_features, **extra_feats["node"]}
-        edge_feats = {**atom_graph.edge_features, **extra_feats["edge"]}
-
-        system_feats = (
-            atom_graph.system_features if atom_graph.system_features is not None else {}
-        )
-        system_feats = {**system_feats, **extra_feats["graph"]}
-
         node_targets = (
             atom_graph.node_targets if atom_graph.node_targets is not None else {}
         )
@@ -183,28 +135,10 @@ class AseSqliteDataset(Dataset):
         system_targets = {**system_targets, **extra_targets["graph"]}
 
         return atom_graph._replace(
-            node_features=node_feats,
-            edge_features=edge_feats,
-            system_features=system_feats,
             node_targets=node_targets if node_targets != {} else None,
             edge_targets=edge_targets if edge_targets != {} else None,
             system_targets=system_targets if system_targets != {} else None,
         )
-
-
-def get_dataset(
-    path: Union[str, Path],
-    name: str,
-    system_config: atomic_system.SystemConfig,
-    target_config: atomic_system.PropertyConfig,
-) -> AseSqliteDataset:
-    """Dataset factory function."""
-    return AseSqliteDataset(
-        path=path,
-        name=name,
-        system_config=system_config,
-        target_config=target_config,
-    )
 
 
 def random_rotations_with_properties(

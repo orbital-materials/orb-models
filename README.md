@@ -38,8 +38,8 @@ For more information on the models, please see the [MODELS.md](MODELS.md) file.
 
 import ase
 from ase.build import bulk
-from orb_models.forcefield import pretrained
-from orb_models.forcefield import atomic_system
+
+from orb_models.forcefield import atomic_system, pretrained
 from orb_models.forcefield.base import batch_graphs
 
 orbff = pretrained.orb_v1()
@@ -65,9 +65,9 @@ atoms = atomic_system.atom_graphs_to_ase_atoms(
 ```python
 import ase
 from ase.build import bulk
+
 from orb_models.forcefield import pretrained
 from orb_models.forcefield.calculator import ORBCalculator
-
 
 device="cpu" # or device="cuda"
 orbff = pretrained.orb_v1(device=device) # or choose another model using ORB_PRETRAINED_MODELS[model_name]()
