@@ -95,6 +95,13 @@ print("Optimized Energy:", atoms.get_potential_energy())
 ```
 
 
+### Finetuning
+You can finetune the model using your custom dataset.
+```python
+python finetune.py --dataset=<dataset_name> --data_path=<your_data_path>
+```
+After the model is finetuned, checkpoints will be saved. You can us the new model and load the checkpoint by modifying the `weights_path` in `pretrained.py`. 
+
 ### Citing
 
 We are currently preparing a preprint for publication.

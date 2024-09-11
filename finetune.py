@@ -266,20 +266,12 @@ def run(args):
             wandb.run.log({"epoch": epoch}, commit=True)
 
         # Save checkpoint from last epoch
-        if epoch == args.max_epochs - 1:
-            checkpoint = {
-                "epoch": epoch,
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "lr_scheduler_state_dict": (
-                    lr_scheduler.state_dict() if lr_scheduler else None
-                ),
-            }
+        if epoch == 1:
             # cerate ckpts folder if it does not exist
             if not os.path.exists(args.checkpoint_path):
                 os.makedirs(args.checkpoint_path)
             torch.save(
-                checkpoint,
+                model.state_dict(),
                 os.path.join(args.checkpoint_path, f"checkpoint_epoch{epoch}.ckpt"),
             )
             logging.info(f"Checkpoint saved to {args.checkpoint_path}")

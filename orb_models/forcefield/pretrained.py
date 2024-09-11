@@ -6,12 +6,8 @@ from cached_path import cached_path
 
 from orb_models.forcefield.featurization_utilities import get_device
 from orb_models.forcefield.gns import MoleculeGNS
-from orb_models.forcefield.graph_regressor import (
-    EnergyHead,
-    GraphHead,
-    GraphRegressor,
-    NodeHead,
-)
+from orb_models.forcefield.graph_regressor import (EnergyHead, GraphHead,
+                                                   GraphRegressor, NodeHead)
 from orb_models.forcefield.rbf import ExpNormalSmearing
 
 global HAS_MESSAGED_FOR_TF32_MATMUL
