@@ -266,8 +266,8 @@ def run(args):
             wandb.run.log({"epoch": epoch}, commit=True)
 
         # Save checkpoint from last epoch
-        if epoch == 1:
-            # cerate ckpts folder if it does not exist
+        if epoch == args.max_epochs - 1:
+            # create ckpts folder if it does not exist
             if not os.path.exists(args.checkpoint_path):
                 os.makedirs(args.checkpoint_path)
             torch.save(
