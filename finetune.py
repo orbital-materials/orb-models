@@ -252,7 +252,7 @@ def main():
         "--wandb",
         default=True,
         action="store_true",
-        help="If the run is logged to wandb.",
+        help="If the run is logged to Weights and Biases (requires installation).",
     )
     parser.add_argument("--dataset", default="mp-traj", type=str, help="Dataset name.")
     parser.add_argument(
