@@ -250,17 +250,17 @@ def main():
         "--wandb",
         default=True,
         action="store_true",
-        help="If the run is logged to wandb.",
+        help="If the run is logged to Weights and Biases (requires installation).",
     )
     parser.add_argument("--dataset", default="mp-traj", type=str, help="Dataset name.")
     parser.add_argument(
         "--data_path",
         default=os.path.join(os.getcwd(), "datasets/mptraj/finetune.db"),
         type=str,
-        help="Dataset path.",
+        help="Dataset path to an ASE sqlite database (you must convert your data into this format).",
     )
     parser.add_argument(
-        "--num_workers", default=8, type=int, help="Number of workers for data loader."
+        "--num_workers", default=8, type=int, help="Number of cpu workers for the pytorch data loader."
     )
     parser.add_argument(
         "--batch_size", default=100, type=int, help="Batch size for finetuning."
@@ -290,7 +290,7 @@ def main():
         "--lr",
         default=3e-04,
         type=float,
-        help="Learning rate",
+        help="Learning rate. 3e-4 is purely a sensible default; you may want to tune this for your problem.",
     )
     args = parser.parse_args()
     run(args)
