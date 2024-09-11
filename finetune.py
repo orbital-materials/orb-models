@@ -292,7 +292,7 @@ def main():
         "--lr",
         default=3e-04,
         type=float,
-        help="Learning rate",
+        help="Learning rate. 3e-4 is purely a sensible default; you may want to tune this for your problem.",
     )
     args = parser.parse_args()
     run(args)
