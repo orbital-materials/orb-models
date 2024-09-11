@@ -42,16 +42,17 @@ from ase.build import bulk
 from orb_models.forcefield import atomic_system, pretrained
 from orb_models.forcefield.base import batch_graphs
 
-orbff = pretrained.orb_v1()
+device = "cpu"  # or device="cuda"
+orbff = pretrained.orb_v1(device=device)
 atoms = bulk('Cu', 'fcc', a=3.58, cubic=True)
-graph = atomic_system.ase_atoms_to_atom_graphs(atoms)
+graph = atomic_system.ase_atoms_to_atom_graphs(atoms, device=device)
 
 # Optionally, batch graphs for faster inference
 # graph = batch_graphs([graph, graph, ...])
 
 result = orbff.predict(graph)
 
-# Convert to ASE atoms (this will also unbatch the results)
+# Convert to ASE atoms (unbatches the results and transfers to cpu if necessary)
 atoms = atomic_system.atom_graphs_to_ase_atoms(
     graph,
     energy=result["graph_pred"],

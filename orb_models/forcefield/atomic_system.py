@@ -95,6 +95,7 @@ def ase_atoms_to_atom_graphs(
     ),
     system_id: Optional[int] = None,
     brute_force_knn: Optional[bool] = None,
+    device: Optional[torch.device] = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
 ) -> AtomGraphs:
     """Generate AtomGraphs from an ase.Atoms object.
 
@@ -106,6 +107,7 @@ def ase_atoms_to_atom_graphs(
             Defaults to None, in which case brute_force is used if we a GPU is avaiable (2-6x faster),
             but not on CPU (1.5x faster - 4x slower). For very large systems, brute_force may OOM on GPU,
             so it is recommended to set to False in that case.
+        device: device to put the tensors on.
 
     Returns:
         AtomGraphs object
@@ -132,7 +134,7 @@ def ase_atoms_to_atom_graphs(
     )
 
     num_atoms = len(node_feats["positions"])  # type: ignore
-    return AtomGraphs(
+    atom_graph = AtomGraphs(
         senders=senders,
         receivers=receivers,
         n_node=torch.tensor([num_atoms]),
@@ -146,6 +148,7 @@ def ase_atoms_to_atom_graphs(
         radius=system_config.radius,
         max_num_neighbors=system_config.max_num_neighbors,
     )
+    return atom_graph.to(device)
 
 
 def _get_edge_feats(
