@@ -259,7 +259,7 @@ def main():
         "--data_path",
         default=os.path.join(os.getcwd(), "datasets/mptraj/finetune.db"),
         type=str,
-        help="Dataset path.",
+        help="Dataset path to an ASE sqlite database (you must convert your data into this format).",
     )
     parser.add_argument(
         "--num_workers", default=8, type=int, help="Number of workers for data loader."
