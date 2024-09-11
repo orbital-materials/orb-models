@@ -116,24 +116,17 @@ def finetune(
         if i != 0 and i % log_freq == 0:
             metrics_dict = metrics.get_metrics()
             if run is not None:
-                global_step = (epoch * num_training_batches) + i
+                step = (epoch * num_training_batches) + i
                 if run.sweep_id is not None:
                     run.log(
                         {"loss": metrics_dict["loss"]},
                         commit=False,
                     )
                 run.log(
-                    {"global_step": global_step},
+                    {"step": step},
                     commit=False,
                 )
-                run.log(utils.prefix_keys(metrics_dict, "train_step"), commit=False)
-                # Log learning rates.
-                run.log(
-                    {
-                        f"pg_{idx}": group["lr"]
-                        for idx, group in enumerate(optimizer.param_groups)
-                    },
-                )
+                run.log(utils.prefix_keys(metrics_dict, "finetune_step"), commit=True)
 
         # Finished a single full step!
         i += 1
@@ -178,7 +171,7 @@ def build_train_loader(
     batch_sampler = BatchSampler(
         sampler,
         batch_size=batch_size,
-        drop_last=True,
+        drop_last=False,
     )
 
     train_loader: DataLoader = DataLoader(
@@ -224,11 +217,8 @@ def run(args):
             dataset=args.dataset, job_type="finetuning", entity=args.wandb_entity
         )
 
-        wandb.define_metric("global_step")
-        wandb.define_metric("epochs")
-        wandb.define_metric("train_step/*", step_metric="global_step")
-        wandb.define_metric("learning_rates/*", step_metric="global_step")
-        wandb.define_metric("finetune/*", step_metric="epochs")
+        wandb.define_metric("step")
+        wandb.define_metric("finetune_step/*", step_metric="step")
 
     loader_args = dict(
         dataset_path=args.data_path,
@@ -248,7 +238,7 @@ def run(args):
 
     for epoch in range(start_epoch, args.max_epochs):
         print(f"Start epoch: {epoch} training...")
-        avg_train_metrics = finetune(
+        finetune(
             model=model,
             optimizer=optimizer,
             dataloader=train_loader,
@@ -258,12 +248,6 @@ def run(args):
             num_steps=num_steps,
             epoch=epoch,
         )
-
-        if args.wandb:
-            wandb.run.log(
-                utils.prefix_keys(avg_train_metrics, "finetune"), commit=False
-            )
-            wandb.run.log({"epoch": epoch}, commit=True)
 
         # Save checkpoint from last epoch
         if epoch == args.max_epochs - 1:
