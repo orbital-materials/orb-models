@@ -20,11 +20,7 @@ class AseSqliteDataset(Dataset):
     A Pytorch Dataset for reading ASE Sqlite serialized Atoms objects.
 
     Args:
-        name: The dataset name.
-        path: Local or GCS path to the sqlite file to read, or to a directory containing .db files
-            representing shards of a dataset. Shards are read in alphabetically sorted
-            order, so it is important to name them in a way that preserves the order
-            of the dataset.
+        dataset_path: Local path to read.
         system_config: A config for controlling how an atomic system is represented.
         target_config: A config for regression/classification targets.
         augmentation: If random rotation augmentation is used.
@@ -35,19 +31,23 @@ class AseSqliteDataset(Dataset):
 
     def __init__(
         self,
-        name: str,
-        path: Union[str, Path],
+        dataset_path: Union[str, Path],
         system_config: Optional[atomic_system.SystemConfig] = None,
         target_config: Optional[Dict] = None,
         augmentation: Optional[bool] = True,
     ):
         super().__init__()
-        self.name = name
         self.augmentation = augmentation
-        self.path = path
+        self.path = dataset_path
         self.db = ase.db.connect(str(self.path), serial=True, type="db")
 
         self.feature_config = system_config
+        if target_config is None:
+            target_config = {
+                "graph": ["energy", "stress"],
+                "node": ["forces"],
+                "edge": [],
+            }
         self.target_config = target_config
 
     def __getitem__(self, idx) -> AtomGraphs:
@@ -68,11 +68,11 @@ class AseSqliteDataset(Dataset):
             self.target_config["node"], row
         )
         graph_property_dict = {}
-        for target_propery in self.target_config["graph"]:
+        for target_property in self.target_config["graph"]:
             system_properties = property_definitions.get_property_from_row(
-                target_propery, row
+                target_property, row
             )
-            graph_property_dict[target_propery] = system_properties
+            graph_property_dict[target_property] = system_properties
         extra_targets = {
             "node": {"forces": node_properties},
             "edge": {},
@@ -85,6 +85,7 @@ class AseSqliteDataset(Dataset):
             atoms,
             system_id=idx,
             brute_force_knn=False,
+            device=torch.device("cpu"),
         )
         atom_graph = self._add_extra_targets(atom_graph, extra_targets)
 
@@ -106,7 +107,7 @@ class AseSqliteDataset(Dataset):
 
     def __repr__(self) -> str:
         """String representation of class."""
-        return f"AseSqliteDataset({self.name=}, {self.path=})"
+        return f"AseSqliteDataset({self.path=})"
 
     def _add_extra_targets(
         self,

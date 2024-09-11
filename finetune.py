@@ -3,17 +3,17 @@
 import argparse
 import logging
 import os
-from typing import Optional, Union, cast
+from typing import Dict, Optional, Union
 
 import torch
 import tqdm
 from torch.optim.lr_scheduler import _LRScheduler
-from torch.utils.data import DataLoader
+from torch.utils.data import BatchSampler, DataLoader, RandomSampler
 
 import wandb
-from orb_models.dataset import data_loaders
 from orb_models import utils
-from orb_models.forcefield import pretrained
+from orb_models.dataset.ase_dataset import AseSqliteDataset
+from orb_models.forcefield import base, pretrained
 from wandb import wandb_run
 
 logging.basicConfig(
@@ -145,13 +145,60 @@ def finetune(
     return metrics.get_metrics()
 
 
+def build_train_loader(
+    dataset_path: str,
+    num_workers: int,
+    batch_size: int,
+    augmentation: Optional[bool] = True,
+    target_config: Optional[Dict] = None,
+    **kwargs,
+) -> DataLoader:
+    """Builds the train dataloader from a config file.
+
+    Args:
+        dataset_path: Dataset path.
+        num_workers: The number of workers for each dataset.
+        batch_size: The batch_size config for each dataset.
+        augmentation: If rotation augmentation is used.
+        target_config: The target config.
+
+    Returns:
+        The train Dataloader.
+    """
+    log_train = "Loading train datasets:\n"
+    dataset = AseSqliteDataset(
+        dataset_path, target_config=target_config, augmentation=augmentation, **kwargs
+    )
+
+    log_train += f"Total train dataset size: {len(dataset)} samples"
+    logging.info(log_train)
+
+    sampler = RandomSampler(dataset)
+
+    batch_sampler = BatchSampler(
+        sampler,
+        batch_size=batch_size,
+        drop_last=True,
+    )
+
+    train_loader: DataLoader = DataLoader(
+        dataset,
+        num_workers=num_workers,
+        worker_init_fn=utils.worker_init_fn,
+        collate_fn=base.batch_graphs,
+        batch_sampler=batch_sampler,
+        timeout=10 * 60 if num_workers > 0 else 0,
+    )
+    return train_loader
+
+
 def run(args):
     """Training Loop.
 
     Args:
         config (DictConfig): Config for training loop.
     """
-    device = utils.init_device()
+    device = utils.init_device(device_id=args.device_id)
     utils.seed_everything(args.random_seed)
 
     # Make sure to use this flag for matmuls on A100 and H100 GPUs.
@@ -173,7 +220,9 @@ def run(args):
     # Logger instantiation/configuration
     if args.wandb:
         logging.info("Instantiating WandbLogger.")
-        wandb_run = utils.init_wandb_from_config(job_type="finetuning")
+        wandb_run = utils.init_wandb_from_config(
+            dataset=args.dataset, job_type="finetuning", entity=args.wandb_entity
+        )
 
         wandb.define_metric("global_step")
         wandb.define_metric("epochs")
@@ -182,13 +231,12 @@ def run(args):
         wandb.define_metric("finetune/*", step_metric="epochs")
 
     loader_args = dict(
-        dataset=args.dataset,
-        path=args.data_path,
+        dataset_path=args.data_path,
         num_workers=args.num_workers,
         batch_size=args.batch_size,
         target_config={"graph": ["energy", "stress"], "node": ["forces"]},
     )
-    train_loader = data_loaders.build_train_loader(
+    train_loader = build_train_loader(
         **loader_args,
         augmentation=True,
     )
@@ -227,6 +275,9 @@ def run(args):
                     lr_scheduler.state_dict() if lr_scheduler else None
                 ),
             }
+            # cerate ckpts folder if it does not exist
+            if not os.path.exists(args.checkpoint_path):
+                os.makedirs(args.checkpoint_path)
             torch.save(
                 checkpoint,
                 os.path.join(args.checkpoint_path, f"checkpoint_epoch{epoch}.ckpt"),
@@ -247,12 +298,26 @@ def main():
         "--random_seed", default=1234, type=int, help="Random seed for finetuning."
     )
     parser.add_argument(
+        "--device_id", default=0, type=int, help="GPU index to use if GPU is available."
+    )
+    parser.add_argument(
         "--wandb",
         default=True,
         action="store_true",
         help="If the run is logged to Weights and Biases (requires installation).",
     )
-    parser.add_argument("--dataset", default="mp-traj", type=str, help="Dataset name.")
+    parser.add_argument(
+        "--wandb_entity",
+        default="orbitalmaterials",
+        type=str,
+        help="Entity to log the run to in Weights and Biases.",
+    )
+    parser.add_argument(
+        "--dataset",
+        default="mp-traj",
+        type=str,
+        help="Dataset name for wandb run logging.",
+    )
     parser.add_argument(
         "--data_path",
         default=os.path.join(os.getcwd(), "datasets/mptraj/finetune.db"),
@@ -260,7 +325,10 @@ def main():
         help="Dataset path to an ASE sqlite database (you must convert your data into this format).",
     )
     parser.add_argument(
-        "--num_workers", default=8, type=int, help="Number of cpu workers for the pytorch data loader."
+        "--num_workers",
+        default=8,
+        type=int,
+        help="Number of cpu workers for the pytorch data loader.",
     )
     parser.add_argument(
         "--batch_size", default=100, type=int, help="Batch size for finetuning."
@@ -282,7 +350,7 @@ def main():
     )
     parser.add_argument(
         "--checkpoint_path",
-        default=os.getcwd(),
+        default=os.path.join(os.getcwd(), "ckpts"),
         type=str,
         help="Path to save the model checkpoint.",
     )
