@@ -50,7 +50,7 @@ def finetune(
     Returns
         A dictionary of metrics.
     """
-    run: Optional[wandb_run.Run] = cast(Optional[wandb_run.Run], wandb.run)
+    run: Optional[wandb_run.Run] = wandb.run
 
     if clip_grad is not None:
         hook_handles = utils.gradient_clipping(model, clip_grad)
@@ -172,8 +172,6 @@ def run(args):
     wandb_run = None
     # Logger instantiation/configuration
     if args.wandb:
-        import wandb
-
         logging.info("Instantiating WandbLogger.")
         wandb_run = utils.init_wandb_from_config(job_type="finetuning")
 
