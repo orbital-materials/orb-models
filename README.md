@@ -97,11 +97,18 @@ print("Optimized Energy:", atoms.get_potential_energy())
 
 ### Finetuning
 You can finetune the model using your custom dataset.
-The dataset should be an [ASE sqlite database](https://wiki.fysik.dtu.dk/ase/ase/db/db.html#module-ase.db.core)
+The dataset should be an [ASE sqlite database](https://wiki.fysik.dtu.dk/ase/ase/db/db.html#module-ase.db.core).
 ```python
 python finetune.py --dataset=<dataset_name> --data_path=<your_data_path>
 ```
-After the model is finetuned, checkpoints will be saved. You can us the new model and load the checkpoint by modifying the `weights_path` in `pretrained.py`. 
+After the model is finetuned, checkpoints will, by default, be saved to the ckpts folder in the directory you ran the finetuning script from. 
+
+You can use the new model and load the checkpoint by:
+```python
+from orb_models.forcefield import pretrained
+
+model = pretrained.orb_v1(weights_path=<path_to_ckpt>)
+```
 
 ### Citing
 
