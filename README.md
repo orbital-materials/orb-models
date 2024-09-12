@@ -97,7 +97,7 @@ print("Optimized Energy:", atoms.get_potential_energy())
 
 ### Finetuning
 You can finetune the model using your custom dataset.
-The dataset should be an ASE sqlite database.
+The dataset should be an [ASE sqlite database](https://wiki.fysik.dtu.dk/ase/ase/db/db.html#module-ase.db.core)
 ```python
 python finetune.py --dataset=<dataset_name> --data_path=<your_data_path>
 ```
