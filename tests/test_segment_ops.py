@@ -12,9 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from orb_models.forcefield import segment_ops
 import pytest
 import torch
+
+from orb_models.forcefield import segment_ops
 
 
 @pytest.mark.parametrize(

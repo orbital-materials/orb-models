@@ -1,4 +1,5 @@
 from typing import NamedTuple
+
 import numpy
 
 

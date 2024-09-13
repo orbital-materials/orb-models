@@ -1,14 +1,13 @@
-from typing import Optional, List
 from dataclasses import dataclass
+from typing import List, Optional
 
 import ase
+import torch
 from ase import constraints
 from ase.calculators.singlepoint import SinglePointCalculator
 
-
 from orb_models.forcefield import featurization_utilities
 from orb_models.forcefield.base import AtomGraphs
-import torch
 
 
 @dataclass
@@ -96,7 +95,9 @@ def ase_atoms_to_atom_graphs(
     ),
     system_id: Optional[int] = None,
     brute_force_knn: Optional[bool] = None,
-    device: Optional[torch.device] = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+    device: Optional[torch.device] = torch.device(
+        "cuda" if torch.cuda.is_available() else "cpu"
+    ),
 ) -> AtomGraphs:
     """Generate AtomGraphs from an ase.Atoms object.
 

@@ -1,8 +1,9 @@
 """Shared neural net utility functions."""
 
+from typing import List, Optional, Type
+
 import torch
 import torch.nn.functional as F
-from typing import List, Optional, Type
 from torch import nn
 from torch.utils.checkpoint import checkpoint_sequential
 

@@ -1,7 +1,7 @@
 """Classes that define prediction targets."""
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Literal, Tuple, Union, List, Optional
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 
 import ase.data
 import ase.db
@@ -97,6 +97,7 @@ def energy_row_fn(row: ase.db.row.AtomsRow, dataset: str) -> float:
       internally generated datasets.
     """
     extract_info: Dict[str, List[Tuple]] = {
+        "mp-traj": [("energy", 1)],
         "mp-traj-d3": [("energy", 1), ("data.d3.energy", 1)],
         "alexandria-d3": [("energy", 1), ("data.d3.energy", 1)],
     }
@@ -125,6 +126,7 @@ def forces_row_fn(row: ase.db.row.AtomsRow, dataset: str):
       internally generated datasets.
     """
     extract_info: Dict[str, List[Tuple]] = {
+        "mp-traj": [("forces", 1)],
         "mp-traj-d3": [("forces", 1), ("data.d3.forces", 1)],
         "alexandria-d3": [("forces", 1), ("data.d3.forces", 1)],
     }
@@ -145,6 +147,7 @@ def forces_row_fn(row: ase.db.row.AtomsRow, dataset: str):
 def stress_row_fn(row: ase.db.row.AtomsRow, dataset: str) -> float:
     """Extract stress data."""
     extract_info: Dict[str, List[Tuple]] = {
+        "mp-traj": [("stress", 1)],
         "mp-traj-d3": [("stress", 1), ("data.d3.stress", 1)],
         "alexandria-d3": [("stress", 1), ("data.d3.stress", 1)],
     }

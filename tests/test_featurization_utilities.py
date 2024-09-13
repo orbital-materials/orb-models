@@ -1,6 +1,7 @@
 """Tests featurization utilities."""
 
 import functools
+
 import ase
 import ase.io
 import ase.neighborlist

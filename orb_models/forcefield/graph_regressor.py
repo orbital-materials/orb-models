@@ -1,17 +1,14 @@
-from typing import Literal, Optional, Dict, Tuple, Union
+from typing import Dict, Literal, Optional, Tuple, Union
+
+import numpy
 import torch
 import torch.nn as nn
-import numpy
 
-from orb_models.forcefield.property_definitions import (
-    PROPERTIES,
-    PropertyDefinition,
-)
-from orb_models.forcefield.reference_energies import REFERENCE_ENERGIES
-from orb_models.forcefield import base
+from orb_models.forcefield import base, segment_ops
 from orb_models.forcefield.gns import _KEY, MoleculeGNS
 from orb_models.forcefield.nn_util import build_mlp
-from orb_models.forcefield import segment_ops
+from orb_models.forcefield.property_definitions import PROPERTIES, PropertyDefinition
+from orb_models.forcefield.reference_energies import REFERENCE_ENERGIES
 
 global HAS_WARNED_FOR_TF32_MATMUL
 HAS_WARNED_FOR_TF32_MATMUL = False
@@ -97,7 +94,6 @@ class ScalarNormalizer(torch.nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Normalize by running mean and std."""
         if self.training:
-            # hack: call batch norm, but only to update a running mean/std
             self.bn(x.view(-1, 1))
         return (x - self.bn.running_mean) / torch.sqrt(self.bn.running_var)  # type: ignore
 
