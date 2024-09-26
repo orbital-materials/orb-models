@@ -124,4 +124,4 @@ Please fill in the [commercial license form](https://www.orbitalmaterials.com/co
 
 ### Community
 
-Please join the discussion on Discord by following [this](https://discord.gg/4EYXRA7x) link.
+Please join the discussion on Discord by following [this](https://discord.gg/SyD6vWSSTB) link.
