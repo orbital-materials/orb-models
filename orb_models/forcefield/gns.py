@@ -1,11 +1,12 @@
 """Pyg implementation of Graph Net Simulator."""
 
 from collections import OrderedDict
-from typing import List, Literal
+from typing import List, Literal, Optional, Dict, Any
 
 import numpy as np
 import torch
 from torch import nn
+from torch.nn import functional as F
 
 from orb_models.forcefield import base, segment_ops
 from orb_models.forcefield.nn_util import build_mlp
@@ -29,6 +30,18 @@ def mlp_and_layer_norm(
             }
         )
     )
+
+
+def get_cutoff(p: int, r: torch.Tensor, r_max: float) -> torch.Tensor:
+    """Get the cutoff function for attention."""
+    envelope = (
+        1.0
+        - ((p + 1.0) * (p + 2.0) / 2.0) * torch.pow(r / r_max, p)  # type: ignore
+        + p * (p + 2.0) * torch.pow(r / r_max, p + 1)  # type: ignore
+        - (p * (p + 1.0) / 2) * torch.pow(r / r_max, p + 2)  # type: ignore
+    )
+    cutoff = (envelope * (r < r_max)).unsqueeze(-1)
+    return cutoff
 
 
 class AtomEmbedding(torch.nn.Module):
@@ -136,6 +149,7 @@ class InteractionNetwork(nn.Module):
         num_edge_out: int,
         num_mlp_layers: int,
         mlp_hidden_dim: int,
+        kwargs: Dict[str, Any] = None,
     ):
         """Interaction network, similar to an MPNN.
 
@@ -206,6 +220,10 @@ class AttentionInteractionNetwork(nn.Module):
         num_edge_out: int,
         num_mlp_layers: int,
         mlp_hidden_dim: int,
+        attention_gate: Literal["sigmoid", "softmax"] = "sigmoid",
+        distance_cutoff: bool = True,
+        polynomial_order: Optional[int] = 4,
+        cutoff_rmax: Optional[float] = 6.0,
     ):
         """Interaction network, similar to an MPNN.
 
@@ -220,6 +238,12 @@ class AttentionInteractionNetwork(nn.Module):
             num_edge_out (int): Number of output edge features.
             num_mlp_layers (int): Number of MLP layers.
             mlp_hidden_dim (int): MLP hidden dimension size.
+            attention_gate (Literal["sigmoid", "softmax"]): Which attention gate to use.
+            distance_cutoff (bool): Whether or not to use a distance cutoff for attention
+                to smooth the distribution.
+            polynomial_order (Optional[int]): The order of the polynomial for cutoff envelope.
+            cutoff_rmax (Optional[float]): The maximum cutoff radius that enforces the
+                high radius state to be disconnected.
         """
         super(AttentionInteractionNetwork, self).__init__()
         self._num_node_in = num_node_in
@@ -245,6 +269,11 @@ class AttentionInteractionNetwork(nn.Module):
         self._receive_attn = nn.Linear(num_edge_in, 1)
         self._send_attn = nn.Linear(num_edge_in, 1)
 
+        self._distance_cutoff = distance_cutoff
+        self._r_max = cutoff_rmax
+        self._polynomial_order = polynomial_order
+        self._attention_gate = attention_gate
+
     def forward(self, graph: base.AtomGraphs) -> base.AtomGraphs:
         """Run the interaction network forward."""
         nodes = graph.node_features[_KEY]
@@ -252,17 +281,36 @@ class AttentionInteractionNetwork(nn.Module):
         senders = graph.senders
         receivers = graph.receivers
 
+        p = self._polynomial_order
+        r_max = self._r_max
+        r = graph.edge_features["r"]
+        cutoff = get_cutoff(p, r, r_max)  # type: ignore
+
         sent_attributes = nodes[senders]
         received_attributes = nodes[receivers]
 
-        num_segments = int(graph.n_node.sum())
-
-        receive_attn = segment_ops.segment_softmax(
-            self._receive_attn(edges), receivers, num_segments
-        )
-        send_attn = segment_ops.segment_softmax(
-            self._send_attn(edges), senders, num_segments
-        )
+        if self._attention_gate == "softmax":
+            num_segments = int(graph.n_node.sum())
+            receive_attn = segment_ops.segment_softmax(
+                self._receive_attn(edges),
+                receivers,
+                num_segments,
+                weights=cutoff if self._distance_cutoff else None,
+            )
+            send_attn = segment_ops.segment_softmax(
+                self._send_attn(edges),
+                senders,
+                num_segments,
+                weights=cutoff if self._distance_cutoff else None,
+            )
+        else:
+            receive_attn = F.sigmoid(self._receive_attn(edges))
+            send_attn = F.sigmoid(self._send_attn(edges))
+        # We need to apply this cutoff here even though it is already applied
+        # in the attention (if softmax attention is used).
+        if self._distance_cutoff:
+            receive_attn = receive_attn * cutoff
+            send_attn = send_attn * cutoff
 
         edge_features = torch.cat([edges, sent_attributes, received_attributes], dim=1)
         updated_edges = self._edge_mlp(edge_features)
@@ -355,6 +403,7 @@ class MoleculeGNS(nn.Module):
         rbf_transform: nn.Module,
         use_embedding: bool = False,
         interactions: Literal["default", "simple_attention"] = "default",
+        interaction_params: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Initializes the molecular GNS.
 
@@ -372,6 +421,8 @@ class MoleculeGNS(nn.Module):
                 concatenate to form the initial edge latents.
             rbf_transform: An optional RBF transform to use for the edge features.
             use_embedding: Whether to embed atom types using an embedding table or embedding bag.
+            interactions: The type of interaction network (default message passing or simple attention) to use.
+            interaction_params: Additional parameters for the interaction network.
         """
         super().__init__()
 
@@ -391,6 +442,8 @@ class MoleculeGNS(nn.Module):
         elif interactions == "simple_attention":
             InteractionNetworkClass = AttentionInteractionNetwork  # type: ignore
         self.num_message_passing_steps = num_message_passing_steps
+        if interaction_params is None:
+            interaction_params = {}
         self.gnn_stacks = nn.ModuleList(
             [
                 InteractionNetworkClass(
@@ -400,6 +453,7 @@ class MoleculeGNS(nn.Module):
                     num_edge_out=latent_dim,
                     num_mlp_layers=num_mlp_layers,
                     mlp_hidden_dim=mlp_hidden_dim,
+                    **interaction_params,
                 )
                 for _ in range(self.num_message_passing_steps)
             ]

@@ -29,9 +29,15 @@ def get_base(
     return MoleculeGNS(
         num_node_in_features=256,
         num_node_out_features=3,
-        num_edge_in_features=53,
+        num_edge_in_features=23,
         latent_dim=latent_dim,
         interactions="simple_attention",
+        interaction_params={
+            "distance_cutoff": True,
+            "polynomial_order": 4,
+            "cutoff_rmax": 6,
+            "attention_gate": "sigmoid",
+        },
         num_message_passing_steps=num_message_passing_steps,
         num_mlp_layers=2,
         mlp_hidden_dim=mlp_hidden_dim,
