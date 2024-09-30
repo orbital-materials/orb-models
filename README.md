@@ -43,7 +43,7 @@ from orb_models.forcefield import atomic_system, pretrained
 from orb_models.forcefield.base import batch_graphs
 
 device = "cpu"  # or device="cuda"
-orbff = pretrained.orb_v1(device=device)
+orbff = pretrained.orb_v2(device=device)
 atoms = bulk('Cu', 'fcc', a=3.58, cubic=True)
 graph = atomic_system.ase_atoms_to_atom_graphs(atoms, device=device)
 
@@ -71,7 +71,7 @@ from orb_models.forcefield import pretrained
 from orb_models.forcefield.calculator import ORBCalculator
 
 device="cpu" # or device="cuda"
-orbff = pretrained.orb_v1(device=device) # or choose another model using ORB_PRETRAINED_MODELS[model_name]()
+orbff = pretrained.orb_v2(device=device) # or choose another model using ORB_PRETRAINED_MODELS[model_name]()
 calc = ORBCalculator(orbff, device=device)
 atoms = bulk('Cu', 'fcc', a=3.58, cubic=True)
 
@@ -107,7 +107,7 @@ You can use the new model and load the checkpoint by:
 ```python
 from orb_models.forcefield import pretrained
 
-model = pretrained.orb_v1(weights_path=<path_to_ckpt>)
+model = pretrained.orb_v2(weights_path=<path_to_ckpt>)
 ```
 
 ### Citing

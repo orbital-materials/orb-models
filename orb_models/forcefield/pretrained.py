@@ -24,6 +24,8 @@ def get_base(
     latent_dim: int = 256,
     mlp_hidden_dim: int = 512,
     num_message_passing_steps: int = 15,
+    distance_cutoff: bool = False,
+    attention_gate: str = "softmax",
 ) -> MoleculeGNS:
     """Define the base pretrained model architecture."""
     return MoleculeGNS(
@@ -33,10 +35,10 @@ def get_base(
         latent_dim=latent_dim,
         interactions="simple_attention",
         interaction_params={
-            "distance_cutoff": True,
+            "distance_cutoff": distance_cutoff,
             "polynomial_order": 4,
             "cutoff_rmax": 6,
-            "attention_gate": "sigmoid",
+            "attention_gate": attention_gate,
         },
         num_message_passing_steps=num_message_passing_steps,
         num_mlp_layers=2,
@@ -116,12 +118,52 @@ def orb_v1(
     return model
 
 
+def orb_v2(
+    weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orbff-v2-20240930.ckpt",  # noqa: E501
+    device: Union[torch.device, str] = None,
+):
+    """Load ORB v1."""
+    base = get_base(distance_cutoff=True, attention_gate="sigmoid")
+
+    model = GraphRegressor(
+        graph_head=EnergyHead(
+            latent_dim=256,
+            num_mlp_layers=1,
+            mlp_hidden_dim=256,
+            target="energy",
+            node_aggregation="mean",
+            reference_energy_name="vasp-shifted",
+            train_reference=True,
+            predict_atom_avg=True,
+        ),
+        node_head=NodeHead(
+            latent_dim=256,
+            num_mlp_layers=1,
+            mlp_hidden_dim=256,
+            target="forces",
+            remove_mean=True,
+        ),
+        stress_head=GraphHead(
+            latent_dim=256,
+            num_mlp_layers=1,
+            mlp_hidden_dim=256,
+            target="stress",
+            compute_stress=True,
+        ),
+        model=base,
+    )
+
+    model = load_model_for_inference(model, weights_path, device)
+
+    return model
+
+
 def orb_d3_v1(
     weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-d3-v1-20240902.ckpt",
     device: Union[torch.device, str] = None,
 ):
     """ORB v1 with D3 corrections."""
-    base = get_base()
+    base = get_base(attention_gate="sigmoid")
 
     model = GraphRegressor(
         graph_head=EnergyHead(
@@ -273,6 +315,7 @@ def orb_v1_mptraj_only(
 
 ORB_PRETRAINED_MODELS = {
     "orb-v1": orb_v1,
+    "orb-v2": orb_v2,
     "orb-d3-v1": orb_d3_v1,
     "orb-d3-sm-v1": orb_d3_sm_v1,
     "orb-d3-xs-v1": orb_d3_xs_v1,

@@ -198,7 +198,7 @@ def run(args):
     torch.set_float32_matmul_precision("high")
 
     # Instantiate model
-    model = pretrained.orb_v1(device=device)
+    model = pretrained.orb_v2(device=device)
     for param in model.parameters():
         param.requires_grad = True
     model_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
