@@ -7,7 +7,18 @@ import pandas as pd
 import wandb
 from matplotlib import pyplot as plt
 from ase.calculators.calculator import Calculator
-from orb_models.forcefield.calculator import get_energy, get_forces
+
+
+def get_energy(atoms: ase.Atoms, calc: Calculator):
+    """Get the energy of an atoms object."""
+    atoms.calc = calc
+    return atoms.get_potential_energy()
+
+
+def get_forces(atoms: ase.Atoms, calc: Calculator):
+    """Get the forces on an atoms object."""
+    atoms.calc = calc
+    return atoms.get_forces()
 
 
 def add_horizontal_line(

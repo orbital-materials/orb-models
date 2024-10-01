@@ -3,12 +3,12 @@ import numpy
 import torch
 import wandb
 import warnings
-from ase.calculators.mixing import SumCalculator
+
+import importlib
 
 # from core.external_models.mace.model import load_mace_calculator
 from orb_models.forcefield.calculator import ORBCalculator
-import importlib
-from orb_models.forcefield.pretrained import load_model_for_inference
+from orb_models.forcefield import pretrained
 
 warnings.filterwarnings(
     "ignore", category=UserWarning, module="plotly.matplotlylib.renderer"
@@ -49,7 +49,7 @@ def run_orbbench_mini(
     random.seed(seed)
     numpy.random.seed(seed)
     torch.manual_seed(seed)
-    model_name = model_name_or_uri.split("/")[-1]
+    model_name = weights_path.split("/")[-1]
     wandb.init(project="orbbench-mini", name=model_name)
     if benchmarks == "all":
         benchmark_list = BENCHMARKS
@@ -70,7 +70,7 @@ def run_orbbench_mini(
     #     calculator = SevenNetCalculator()
     # else:
     # It's an orb model
-    model = load_model_for_inference(model, weights_path, device)
+    orbff = pretrained.orb_v1(device=device)
     calculator = ORBCalculator(orbff, device=device)  # type: ignore
 
     # if analytic_d3:
@@ -79,9 +79,7 @@ def run_orbbench_mini(
 
     for benchmark in benchmark_list:
         print(f"Running {benchmark} benchmark...")
-        benchmark_module = importlib.import_module(
-            f"core.workflows.orbbench_mini.{benchmark}"
-        )
+        benchmark_module = importlib.import_module(f"{benchmark}")
         benchmark_module.main(calculator)
 
 
