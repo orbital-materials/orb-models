@@ -6,7 +6,7 @@ import seaborn as sns
 from tqdm import tqdm
 import wandb
 from orb_models.dataset.ase_dataset import random_rotations_with_properties
-from ase.io import read
+from ase.db import connect
 
 
 def eval_small_molecule_maes(calc: Calculator):
@@ -21,7 +21,7 @@ def eval_small_molecule_maes(calc: Calculator):
 
     Note that in this function we evaluate on every 3rd step of the geometry optimizations for efficiency.
     """
-    db = read("trajectories.db", index=":")
+    db = connect("trajectories.db")
     seen_counts: dict = defaultdict(int)
     mol_to_energy_ae = defaultdict(list)
     mol_to_force_ae = defaultdict(list)
@@ -79,7 +79,7 @@ def eval_small_molecule_equivariance(
     By default, we evaluate 10 random rotations of 5 molecules.
     These molecules are unoptimized and have non-neglible forces.
     """
-    db = read("step1.db", index=":")
+    db = connect("step1.db")
     per_mol_energy_deviations: dict = defaultdict(list)
     per_mol_force_deviations: dict = defaultdict(list)
     for row in db.select():

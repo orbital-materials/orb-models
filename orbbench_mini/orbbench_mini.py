@@ -70,7 +70,7 @@ def run_orbbench_mini(
     #     calculator = SevenNetCalculator()
     # else:
     # It's an orb model
-    orbff = pretrained.orb_v1(device=device)
+    orbff = pretrained.orb_v2(device=device)
     calculator = ORBCalculator(orbff, device=device)  # type: ignore
 
     # if analytic_d3:
