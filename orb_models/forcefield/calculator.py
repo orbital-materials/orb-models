@@ -1,6 +1,7 @@
 from typing import Optional
 
 import torch
+import ase
 from ase.calculators.calculator import Calculator, all_changes
 
 from orb_models.forcefield.atomic_system import SystemConfig, ase_atoms_to_atom_graphs
@@ -88,3 +89,15 @@ class ORBCalculator(Calculator):
             self.results["stress"] = (
                 raw_stress[0] if len(raw_stress.shape) > 1 else raw_stress
             )
+
+
+def get_energy(atoms: ase.Atoms, calc: Calculator):
+    """Get the energy of an atoms object."""
+    atoms.calc = calc
+    return atoms.get_potential_energy()
+
+
+def get_forces(atoms: ase.Atoms, calc: Calculator):
+    """Get the forces on an atoms object."""
+    atoms.calc = calc
+    return atoms.get_forces()
