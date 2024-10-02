@@ -132,7 +132,7 @@ def orb_v2(
     weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orbff-v2-20240930.ckpt",  # noqa: E501
     device: Union[torch.device, str] = None,
 ):
-    """Load ORB v1."""
+    """Load ORB v2."""
     base = get_base(
         num_edge_in_features=23,
         distance_cutoff=True,
