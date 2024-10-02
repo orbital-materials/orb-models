@@ -117,6 +117,7 @@ class NodeHead(torch.nn.Module):
         mlp_hidden_dim: int,
         target: Union[str, PropertyDefinition],
         dropout: Optional[float] = None,
+        remove_mean: bool = True,
     ):
         """Initializes the NodeHead MLP.
 
@@ -150,10 +151,20 @@ class NodeHead(torch.nn.Module):
             dropout=dropout,
         )
 
+        self.remove_mean = remove_mean
+
     def forward(self, batch: base.AtomGraphs) -> base.AtomGraphs:
         """Predictions with raw logits (no sigmoid/softmax or any inverse transformations)."""
         feat = batch.node_features[_KEY]
         pred = self.mlp(feat)
+        if self.remove_mean:
+            system_means = segment_ops.aggregate_nodes(
+                pred, batch.n_node, reduction="mean"
+            )
+            node_broadcasted_means = torch.repeat_interleave(
+                system_means, batch.n_node, dim=0
+            )
+            pred = pred - node_broadcasted_means
         batch.node_features["node_pred"] = pred
         return batch
 

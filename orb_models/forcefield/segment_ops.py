@@ -68,7 +68,12 @@ def segment_mean(data: torch.Tensor, segment_ids: torch.Tensor, num_segments: in
     return scatter_mean(data, segment_ids, dim=0, dim_size=num_segments)
 
 
-def segment_softmax(data: torch.Tensor, segment_ids: torch.Tensor, num_segments: int):
+def segment_softmax(
+    data: torch.Tensor,
+    segment_ids: torch.Tensor,
+    num_segments: int,
+    weights: Optional[torch.Tensor] = None,
+):
     """Computes a softmax over segments of the tensor.
 
     Note that unlike other segment reductions, this returns a tensor the
@@ -79,6 +84,7 @@ def segment_softmax(data: torch.Tensor, segment_ids: torch.Tensor, num_segments:
         data: A tensor which we want to sum over in segments.
         segment_ids: The segment indices tensor.
         num_segments: The number of segments.
+        weights: Optional weights tensor to multiply exponents.
 
     Returns:
         A tensor of same data type as data, also of the same shape.
@@ -87,10 +93,22 @@ def segment_softmax(data: torch.Tensor, segment_ids: torch.Tensor, num_segments:
     data_max = segment_max(data, segment_ids, num_segments)
     data = data - data_max[segment_ids]
 
-    logits = torch.exp(data)
-    denominator = segment_sum(logits, segment_ids, num_segments)
+    unnormalised_probs = torch.exp(data)
+    if weights is not None:
+        unnormalised_probs = unnormalised_probs * weights
+    denominator = segment_sum(unnormalised_probs, segment_ids, num_segments)
 
-    return logits / denominator[segment_ids]
+    return safe_division(unnormalised_probs, denominator, segment_ids)
+
+
+def safe_division(
+    numerator: torch.Tensor, denominator: torch.Tensor, segment_ids: torch.Tensor
+):
+    """Divides logits by denominator, setting 0 where the denominator is zero."""
+    result = torch.where(
+        denominator[segment_ids] == 0, 0, numerator / denominator[segment_ids]
+    )
+    return result
 
 
 # The Following implementation of scatter function are taken from

@@ -185,6 +185,7 @@ def _get_edge_feats(
     )
     edge_feats = {
         "vectors": edge_vectors.to(torch.float32),
+        "r": edge_vectors.norm(dim=-1),
     }
     senders, receivers = edge_index[0], edge_index[1]
     return edge_feats, senders, receivers
