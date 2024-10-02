@@ -149,7 +149,6 @@ class InteractionNetwork(nn.Module):
         num_edge_out: int,
         num_mlp_layers: int,
         mlp_hidden_dim: int,
-        kwargs: Dict[str, Any] = None,
     ):
         """Interaction network, similar to an MPNN.
 

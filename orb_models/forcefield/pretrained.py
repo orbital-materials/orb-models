@@ -178,7 +178,7 @@ def orb_d3_v1(
     device: Union[torch.device, str] = None,
 ):
     """ORB v1 with D3 corrections."""
-    base = get_base(attention_gate="sigmoid")
+    base = get_base()
 
     model = GraphRegressor(
         graph_head=EnergyHead(
