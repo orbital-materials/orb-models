@@ -117,7 +117,7 @@ class NodeHead(torch.nn.Module):
         mlp_hidden_dim: int,
         target: Union[str, PropertyDefinition],
         dropout: Optional[float] = None,
-        remove_mean: bool = False,
+        remove_mean: bool = True,
     ):
         """Initializes the NodeHead MLP.
 
