@@ -52,8 +52,6 @@ def test_optimization(model_fn):
         gold_rattled_energy = -11.943148
         gold_optimized_energy = -16.345758
     elif model_fn == pretrained.orb_v2:
-        print(rattled_energy)
-        print(optimized_energy)
         gold_rattled_energy = -12.034759
         gold_optimized_energy = -16.348310
 
