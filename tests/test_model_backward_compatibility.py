@@ -19,6 +19,7 @@ def set_seed(seed):
 def test_energy_forces_stress_prediction(model_fn):
     """Tests model compatibility on energy, forces and stress."""
     set_seed(42)
+    torch.set_default_tensor_type(torch.DoubleTensor)  # Use float64 precision
     orbff = model_fn(device="cpu")
     atoms = bulk("Cu", "fcc", a=3.58, cubic=True)
     graph = atomic_system.ase_atoms_to_atom_graphs(atoms, device="cpu")
@@ -30,15 +31,15 @@ def test_energy_forces_stress_prediction(model_fn):
 
     if model_fn == pretrained.orb_v1:
         energy_gold = np.array(-16.3437)
-        forces_gold = np.array([9.2324e-05, -3.9214e-05, 6.3257e-05])
+        forces_gold = np.array([9.3562e-05, -4.0427e-05, 6.0377e-05])
         stress_gold = np.array(
-            [-3.2064e-02, -3.2115e-02, -3.1964e-02, -6.2145e-07, 2.5603e-07, 1.6000e-06]
+            [-3.2064e-02, -3.2115e-02, -3.1964e-02, -6.2145e-07, 2.5602e-07, 1.6000e-06]
         )
     elif model_fn == pretrained.orb_v2:
         energy_gold = np.array(-16.3459)
-        forces_gold = np.array([1.1065e-07, 6.6851e-08, -3.3196e-07])
+        forces_gold = np.array([-1.1022e-06, 8.6655e-08, -1.7340e-06])
         stress_gold = np.array(
-            [-3.2431e-02, -3.2185e-02, -3.1791e-02, 1.5402e-06, 1.9556e-06, 6.9951e-07]
+            [-3.2431e-02, -3.2186e-02, -3.1791e-02, 1.5402e-06, 1.9556e-06, 6.9955e-07]
         )
 
     assert np.isclose(energy, energy_gold, atol=1e-4)
@@ -50,6 +51,7 @@ def test_energy_forces_stress_prediction(model_fn):
 def test_optimization(model_fn):
     """Tests model compatibility on optimization."""
     set_seed(42)
+    torch.set_default_tensor_type(torch.DoubleTensor)  # Use float64 precision
     atoms = bulk("Cu", "fcc", a=3.58, cubic=True)
     orbff = model_fn(device="cpu")
     calc = ORBCalculator(orbff, device="cpu")
@@ -60,11 +62,11 @@ def test_optimization(model_fn):
     dyn.run(fmax=0.01)
     optimized_energy = atoms.get_potential_energy()
     if model_fn == pretrained.orb_v1:
-        gold_rattled_energy = -11.943148
+        gold_rattled_energy = -11.943150
         gold_optimized_energy = -16.345758
     elif model_fn == pretrained.orb_v2:
         gold_rattled_energy = -12.034759
-        gold_optimized_energy = -16.348310
+        gold_optimized_energy = -16.348311
 
     assert np.isclose(rattled_energy, gold_rattled_energy, atol=1e-6)
     assert np.isclose(optimized_energy, gold_optimized_energy, atol=1e-6)
