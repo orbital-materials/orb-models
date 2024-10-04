@@ -219,8 +219,8 @@ class AttentionInteractionNetwork(nn.Module):
         num_edge_out: int,
         num_mlp_layers: int,
         mlp_hidden_dim: int,
-        attention_gate: Literal["sigmoid", "softmax"] = "sigmoid",
-        distance_cutoff: bool = True,
+        attention_gate: Literal["sigmoid", "softmax"] = "softmax",
+        distance_cutoff: bool = False,
         polynomial_order: Optional[int] = 4,
         cutoff_rmax: Optional[float] = 6.0,
     ):
