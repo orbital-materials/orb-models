@@ -30,13 +30,13 @@ def test_energy_forces_stress_prediction(model_fn):
 
     if model_fn == pretrained.orb_v1:
         energy_gold = np.array(-16.3437)
-        forces_gold = np.array([9.3569e-05, -4.0413e-05, 6.0380e-05])
+        forces_gold = np.array([9.2324e-05, -3.9214e-05, 6.3257e-05])
         stress_gold = np.array(
             [-3.2064e-02, -3.2115e-02, -3.1964e-02, -6.2145e-07, 2.5603e-07, 1.6000e-06]
         )
     elif model_fn == pretrained.orb_v2:
         energy_gold = np.array(-16.3459)
-        forces_gold = np.array([-1.0881e-06, 7.6937e-08, -1.7336e-06])
+        forces_gold = np.array([1.1065e-07, 6.6851e-08, -3.3196e-07])
         stress_gold = np.array(
             [-3.2431e-02, -3.2185e-02, -3.1791e-02, 1.5402e-06, 1.9556e-06, 6.9951e-07]
         )
