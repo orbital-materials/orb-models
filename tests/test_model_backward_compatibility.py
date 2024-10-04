@@ -1,14 +1,24 @@
 import pytest
 import numpy as np
+import torch
+import random
 from ase.build import bulk
 from ase.optimize import BFGS
 from orb_models.forcefield import atomic_system, pretrained
 from orb_models.forcefield.calculator import ORBCalculator
 
 
+def set_seed(seed):
+    """Set seed for reproducibility."""
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    random.seed(seed)
+
+
 @pytest.mark.parametrize("model_fn", [pretrained.orb_v1, pretrained.orb_v2])
 def test_energy_forces_stress_prediction(model_fn):
     """Tests model compatibility on energy, forces and stress."""
+    set_seed(42)
     orbff = model_fn(device="cpu")
     atoms = bulk("Cu", "fcc", a=3.58, cubic=True)
     graph = atomic_system.ase_atoms_to_atom_graphs(atoms, device="cpu")
@@ -39,6 +49,7 @@ def test_energy_forces_stress_prediction(model_fn):
 @pytest.mark.parametrize("model_fn", [pretrained.orb_v1, pretrained.orb_v2])
 def test_optimization(model_fn):
     """Tests model compatibility on optimization."""
+    set_seed(42)
     atoms = bulk("Cu", "fcc", a=3.58, cubic=True)
     orbff = model_fn(device="cpu")
     calc = ORBCalculator(orbff, device="cpu")
