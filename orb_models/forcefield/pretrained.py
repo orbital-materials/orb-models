@@ -112,6 +112,7 @@ def orb_v1(
             num_mlp_layers=1,
             mlp_hidden_dim=256,
             target="forces",
+            remove_mean=False,
         ),
         stress_head=GraphHead(
             latent_dim=256,
@@ -196,6 +197,7 @@ def orb_d3_v1(
             num_mlp_layers=1,
             mlp_hidden_dim=256,
             target="forces",
+            remove_mean=False,
         ),
         stress_head=GraphHead(
             latent_dim=256,
@@ -235,6 +237,7 @@ def orb_d3_sm_v1(
             num_mlp_layers=1,
             mlp_hidden_dim=256,
             target="forces",
+            remove_mean=False,
         ),
         stress_head=GraphHead(
             latent_dim=256,
@@ -273,6 +276,7 @@ def orb_d3_xs_v1(
             num_mlp_layers=1,
             mlp_hidden_dim=256,
             target="forces",
+            remove_mean=False,
         ),
         stress_head=GraphHead(
             latent_dim=256,
@@ -312,6 +316,7 @@ def orb_v1_mptraj_only(
             num_mlp_layers=1,
             mlp_hidden_dim=256,
             target="forces",
+            remove_mean=False,
         ),
         stress_head=GraphHead(
             latent_dim=256,
