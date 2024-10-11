@@ -89,48 +89,8 @@ def load_model_for_inference(
     return model
 
 
-def orb_v1(
-    weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orbff-v1-20240827.ckpt",  # noqa: E501
-    device: Union[torch.device, str] = None,
-):
-    """Load ORB v1."""
-    base = get_base()
-
-    model = GraphRegressor(
-        graph_head=EnergyHead(
-            latent_dim=256,
-            num_mlp_layers=1,
-            mlp_hidden_dim=256,
-            target="energy",
-            node_aggregation="mean",
-            reference_energy_name="vasp-shifted",
-            train_reference=True,
-            predict_atom_avg=True,
-        ),
-        node_head=NodeHead(
-            latent_dim=256,
-            num_mlp_layers=1,
-            mlp_hidden_dim=256,
-            target="forces",
-            remove_mean=False,
-        ),
-        stress_head=GraphHead(
-            latent_dim=256,
-            num_mlp_layers=1,
-            mlp_hidden_dim=256,
-            target="stress",
-            compute_stress=True,
-        ),
-        model=base,
-    )
-
-    model = load_model_for_inference(model, weights_path, device)
-
-    return model
-
-
 def orb_v2(
-    weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orbff-v2-20240930.ckpt",  # noqa: E501
+    weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-v2-20241011.ckpt",  # noqa: E501
     device: Union[torch.device, str] = None,
 ):
     """Load ORB v2."""
@@ -174,12 +134,17 @@ def orb_v2(
     return model
 
 
-def orb_d3_v1(
-    weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-d3-v1-20240902.ckpt",
+def orb_d3_v2(
+    weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-d3-v2-20241011.ckpt",  # noqa: E501
     device: Union[torch.device, str] = None,
 ):
-    """ORB v1 with D3 corrections."""
-    base = get_base()
+    """Load ORB D3 v2."""
+    base = get_base(
+        num_edge_in_features=23,
+        distance_cutoff=True,
+        attention_gate="sigmoid",
+        rbf_transform="gaussian",
+    )
 
     model = GraphRegressor(
         graph_head=EnergyHead(
@@ -197,7 +162,7 @@ def orb_d3_v1(
             num_mlp_layers=1,
             mlp_hidden_dim=256,
             target="forces",
-            remove_mean=False,
+            remove_mean=True,
         ),
         stress_head=GraphHead(
             latent_dim=256,
@@ -213,13 +178,19 @@ def orb_d3_v1(
 
     return model
 
-
-def orb_d3_sm_v1(
-    weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-d3-sm-v1-20240902.ckpt",
+def orb_d3_sm_v2(
+    weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-d3-sm-v2-20241011.ckpt",  # noqa: E501
     device: Union[torch.device, str] = None,
 ):
-    """A 10 layer model pretrained on bulk data."""
-    base = get_base(num_message_passing_steps=10)
+    """Load ORB D3 v2."""
+    base = get_base(
+        num_edge_in_features=23,
+        distance_cutoff=True,
+        attention_gate="sigmoid",
+        rbf_transform="gaussian",
+        num_message_passing_steps=10,
+
+    )
 
     model = GraphRegressor(
         graph_head=EnergyHead(
@@ -237,7 +208,7 @@ def orb_d3_sm_v1(
             num_mlp_layers=1,
             mlp_hidden_dim=256,
             target="forces",
-            remove_mean=False,
+            remove_mean=True,
         ),
         stress_head=GraphHead(
             latent_dim=256,
@@ -253,52 +224,18 @@ def orb_d3_sm_v1(
 
     return model
 
-
-def orb_d3_xs_v1(
-    weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-d3-xs-v1-20240902.ckpt",
+def orb_d3_xs_v2(
+    weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-d3-xs-v2-20241011.ckpt",  # noqa: E501
     device: Union[torch.device, str] = None,
 ):
-    """A 5 layer model pretrained on bulk data."""
-    base = get_base(num_message_passing_steps=5)
-    model = GraphRegressor(
-        graph_head=EnergyHead(
-            latent_dim=256,
-            num_mlp_layers=1,
-            mlp_hidden_dim=256,
-            target="energy",
-            node_aggregation="mean",
-            reference_energy_name="vasp-shifted",
-            train_reference=True,
-            predict_atom_avg=True,
-        ),
-        node_head=NodeHead(
-            latent_dim=256,
-            num_mlp_layers=1,
-            mlp_hidden_dim=256,
-            target="forces",
-            remove_mean=False,
-        ),
-        stress_head=GraphHead(
-            latent_dim=256,
-            num_mlp_layers=1,
-            mlp_hidden_dim=256,
-            target="stress",
-            compute_stress=True,
-        ),
-        model=base,
+    """Load ORB D3 xs v2."""
+    base = get_base(
+        num_edge_in_features=23,
+        distance_cutoff=True,
+        attention_gate="sigmoid",
+        rbf_transform="gaussian",
+        num_message_passing_steps=5,
     )
-
-    model = load_model_for_inference(model, weights_path, device)
-
-    return model
-
-
-def orb_v1_mptraj_only(
-    weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orbff-mptraj-only-v1-20240827.ckpt",
-    device: Union[torch.device, str] = None,
-):
-    """A 10 layer model pretrained on bulk data."""
-    base = get_base()
 
     model = GraphRegressor(
         graph_head=EnergyHead(
@@ -316,7 +253,7 @@ def orb_v1_mptraj_only(
             num_mlp_layers=1,
             mlp_hidden_dim=256,
             target="forces",
-            remove_mean=False,
+            remove_mean=True,
         ),
         stress_head=GraphHead(
             latent_dim=256,
@@ -331,13 +268,14 @@ def orb_v1_mptraj_only(
     model = load_model_for_inference(model, weights_path, device)
 
     return model
+
+
+
 
 
 ORB_PRETRAINED_MODELS = {
-    "orb-v1": orb_v1,
     "orb-v2": orb_v2,
-    "orb-d3-v1": orb_d3_v1,
-    "orb-d3-sm-v1": orb_d3_sm_v1,
-    "orb-d3-xs-v1": orb_d3_xs_v1,
-    "orb-v1-mptraj-only": orb_v1_mptraj_only,
+    "orb-d3-v2": orb_d3_v2,
+    "orb-d3-sm-v2": orb_d3_sm_v2,
+    "orb-d3-xs-v2": orb_d3_xs_v2,
 }

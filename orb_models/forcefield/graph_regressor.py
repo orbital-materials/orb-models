@@ -451,9 +451,6 @@ class GraphRegressor(nn.Module):
             node_head : The regression head to use for node prediction.
             graph_head: The regression head to use for graph prediction.
             model: An optional pre-constructed, pretrained model to use for transfer learning/finetuning.
-            model_artifact: A path to a directory containing a wandb model artifact
-                or a wandb artifact identifier to be downloaded. This can either be a
-                base Diffusion model or a GraphRegressor model.
             model_requires_grad: Whether the underlying model should
                 be finetuned or not.
         """
