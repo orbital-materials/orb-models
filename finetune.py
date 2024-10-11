@@ -10,7 +10,10 @@ import tqdm
 from torch.optim.lr_scheduler import _LRScheduler
 from torch.utils.data import BatchSampler, DataLoader, RandomSampler
 
-import wandb
+try:
+    import wandb
+except ImportError:
+    raise ImportError("wandb is not installed. Please install it with `pip install wandb`.")
 from orb_models import utils
 from orb_models.dataset.ase_dataset import AseSqliteDataset
 from orb_models.forcefield import base, pretrained
@@ -19,6 +22,26 @@ from wandb import wandb_run
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
+
+
+def init_wandb_from_config(dataset: str, job_type: str, entity: str) -> wandb_run.Run:
+
+    """Initialise wandb."""
+    wandb.init(  # type: ignore
+        job_type=job_type,
+        dir=os.path.join(os.getcwd(), "wandb"),
+        name=f"{dataset}-{job_type}",
+        project="orb-experiment",
+        entity=entity,
+        mode="online",
+        sync_tensorboard=False,
+    )
+    assert wandb.run is not None
+    return wandb.run
+
+
+
+
 
 
 def finetune(
@@ -213,7 +236,7 @@ def run(args):
     # Logger instantiation/configuration
     if args.wandb:
         logging.info("Instantiating WandbLogger.")
-        wandb_run = utils.init_wandb_from_config(
+        wandb_run = init_wandb_from_config(
             dataset=args.dataset, job_type="finetuning", entity=args.wandb_entity
         )
 
