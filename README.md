@@ -19,19 +19,33 @@ Pynanoflann is not available on PyPI, so you must install it from the git reposi
 
 Orb models are expected to work on MacOS and Linux. Windows support is not guaranteed.
 
+### Updates
+
+**Oct 2024**: We have released a new version of the models, `orb-v2`. This version has 2 major changes:
+- v2 models use a smoothed cosine distance cutoff for the attention mechanism. This is a more physically motivated cutoff that is better suited for MPNNs.
+- The force predictions now have net zero forces, meaning they are much more stable for MD simulations.
+- The models are generally more accurate (Increase in 2-3% on the matbench discovery dataset).
+
+These models are substantially better for all use cases, so we have removed the v1 models from the new orb-models package. To load the v1 models, please install the v0.3.2 version of orb-models.
+
+**Sept 2024**: v1 models released - state of the art performance on the matbench discovery dataset.
+
+
 ### Pretrained models
 
 We provide several pretrained models that can be used to calculate energies, forces & stresses of atomic systems. All models are provided in the `orb_models.forcefield.pretrained` module.
 
-- `orb-v1` - trained on [MPTraj](https://figshare.com/articles/dataset/Materials_Project_Trjectory_MPtrj_Dataset/23713842?file=41619375) + [Alexandria](https://alexandria.icams.rub.de/).
-- `orb-mptraj-only-v1` - trained on the MPTraj dataset only to reproduce our second Matbench Discovery result. We do not recommend using this model for general use.
-- `orb-d3-v1` - trained on MPTraj + Alexandria with integrated D3 corrections. In general, we recommend using this model, particularly for systems where dispersion interactions are important. This model was trained to predict D3-corrected targets and hence is the same speed as `orb-v1`. Incorporating D3 into the model like this is substantially faster than using analytical D3 corrections.
-- `orb-d3-{sm,xs}-v1` - Smaller versions of `orb-d3-v1`. The `sm` model has 10 layers, whilst the `xs` model has 5 layers.
+- `orb-v2` - trained on [MPTraj](https://figshare.com/articles/dataset/Materials_Project_Trjectory_MPtrj_Dataset/23713842?file=41619375) + [Alexandria](https://alexandria.icams.rub.de/).
+- `orb-mptraj-only-v2` - trained on the MPTraj dataset only to reproduce our second Matbench Discovery result. We do not recommend using this model for general use.
+- `orb-d3-v2` - trained on MPTraj + Alexandria with integrated D3 corrections. In general, we recommend using this model, particularly for systems where dispersion interactions are important. This model was trained to predict D3-corrected targets and hence is the same speed as `orb-v2`. Incorporating D3 into the model like this is substantially faster than using analytical D3 corrections.
+- `orb-d3-{sm,xs}-v2` - Smaller versions of `orb-d3-v2`. The `sm` model has 10 layers, whilst the `xs` model has 5 layers.
 
 For more information on the models, please see the [MODELS.md](MODELS.md) file.
 
 
 ### Usage
+
+Note: These examples are designed to run on the `main` branch of orb-models. If you are using a pip installed version of `orb-models`, you may want to look at the corresponding [README.md from that tag](https://github.com/orbital-materials/orb-models/tags).
 
 #### Direct usage
 ```python
@@ -43,7 +57,7 @@ from orb_models.forcefield import atomic_system, pretrained
 from orb_models.forcefield.base import batch_graphs
 
 device = "cpu"  # or device="cuda"
-orbff = pretrained.orb_v1(device=device)
+orbff = pretrained.orb_v2(device=device)
 atoms = bulk('Cu', 'fcc', a=3.58, cubic=True)
 graph = atomic_system.ase_atoms_to_atom_graphs(atoms, device=device)
 
@@ -71,7 +85,7 @@ from orb_models.forcefield import pretrained
 from orb_models.forcefield.calculator import ORBCalculator
 
 device="cpu" # or device="cuda"
-orbff = pretrained.orb_v1(device=device) # or choose another model using ORB_PRETRAINED_MODELS[model_name]()
+orbff = pretrained.orb_v2(device=device) # or choose another model using ORB_PRETRAINED_MODELS[model_name]()
 calc = ORBCalculator(orbff, device=device)
 atoms = bulk('Cu', 'fcc', a=3.58, cubic=True)
 
@@ -107,7 +121,7 @@ You can use the new model and load the checkpoint by:
 ```python
 from orb_models.forcefield import pretrained
 
-model = pretrained.orb_v1(weights_path=<path_to_ckpt>)
+model = pretrained.orb_v2(weights_path=<path_to_ckpt>)
 ```
 
 ### Citing
