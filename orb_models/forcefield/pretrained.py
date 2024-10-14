@@ -28,10 +28,10 @@ def get_base(
     latent_dim: int = 256,
     mlp_hidden_dim: int = 512,
     num_message_passing_steps: int = 15,
-    num_edge_in_features: int = 53,
-    distance_cutoff: bool = False,
-    attention_gate: str = "softmax",
-    rbf_transform: str = "exp_normal_smearing",
+    num_edge_in_features: int = 23,
+    distance_cutoff: bool = True,
+    attention_gate: str = "sigmoid",
+    rbf_transform: str = "gaussian",
 ) -> MoleculeGNS:
     """Define the base pretrained model architecture."""
     return MoleculeGNS(
@@ -94,12 +94,7 @@ def orb_v2(
     device: Union[torch.device, str] = None,
 ):
     """Load ORB v2."""
-    base = get_base(
-        num_edge_in_features=23,
-        distance_cutoff=True,
-        attention_gate="sigmoid",
-        rbf_transform="gaussian",
-    )
+    base = get_base()
 
     model = GraphRegressor(
         graph_head=EnergyHead(
@@ -139,12 +134,7 @@ def orb_d3_v2(
     device: Union[torch.device, str] = None,
 ):
     """Load ORB D3 v2."""
-    base = get_base(
-        num_edge_in_features=23,
-        distance_cutoff=True,
-        attention_gate="sigmoid",
-        rbf_transform="gaussian",
-    )
+    base = get_base()
 
     model = GraphRegressor(
         graph_head=EnergyHead(
@@ -177,6 +167,7 @@ def orb_d3_v2(
     model = load_model_for_inference(model, weights_path, device)
 
     return model
+
 
 def orb_d3_sm_v2(
     weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-d3-sm-v2-20241011.ckpt",  # noqa: E501
@@ -184,12 +175,7 @@ def orb_d3_sm_v2(
 ):
     """Load ORB D3 v2."""
     base = get_base(
-        num_edge_in_features=23,
-        distance_cutoff=True,
-        attention_gate="sigmoid",
-        rbf_transform="gaussian",
         num_message_passing_steps=10,
-
     )
 
     model = GraphRegressor(
@@ -224,16 +210,13 @@ def orb_d3_sm_v2(
 
     return model
 
+
 def orb_d3_xs_v2(
     weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-d3-xs-v2-20241011.ckpt",  # noqa: E501
     device: Union[torch.device, str] = None,
 ):
     """Load ORB D3 xs v2."""
     base = get_base(
-        num_edge_in_features=23,
-        distance_cutoff=True,
-        attention_gate="sigmoid",
-        rbf_transform="gaussian",
         num_message_passing_steps=5,
     )
 
@@ -268,9 +251,6 @@ def orb_d3_xs_v2(
     model = load_model_for_inference(model, weights_path, device)
 
     return model
-
-
-
 
 
 ORB_PRETRAINED_MODELS = {

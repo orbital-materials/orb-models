@@ -219,8 +219,8 @@ class AttentionInteractionNetwork(nn.Module):
         num_edge_out: int,
         num_mlp_layers: int,
         mlp_hidden_dim: int,
-        attention_gate: Literal["sigmoid", "softmax"] = "softmax",
-        distance_cutoff: bool = False,
+        attention_gate: Literal["sigmoid", "softmax"] = "sigmoid",
+        distance_cutoff: bool = True,
         polynomial_order: Optional[int] = 4,
         cutoff_rmax: Optional[float] = 6.0,
     ):
@@ -400,8 +400,8 @@ class MoleculeGNS(nn.Module):
         node_feature_names: List[str],
         edge_feature_names: List[str],
         rbf_transform: nn.Module,
-        use_embedding: bool = False,
-        interactions: Literal["default", "simple_attention"] = "default",
+        use_embedding: bool = True,
+        interactions: Literal["default", "simple_attention"] = "simple_attention",
         interaction_params: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Initializes the molecular GNS.

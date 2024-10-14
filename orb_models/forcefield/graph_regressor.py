@@ -117,7 +117,7 @@ class NodeHead(torch.nn.Module):
         mlp_hidden_dim: int,
         target: Union[str, PropertyDefinition],
         dropout: Optional[float] = None,
-        remove_mean: bool = False,
+        remove_mean: bool = True,
     ):
         """Initializes the NodeHead MLP.
 
@@ -127,6 +127,7 @@ class NodeHead(torch.nn.Module):
             mlp_hidden_dim (int): MLP hidden size.
             target: either the name of a PropertyDefinition or a PropertyDefinition itself.
             dropout: The level of dropout to apply.
+            remove_mean: Whether to remove the mean of the node features.
         """
         super().__init__()
         if isinstance(target, str):
