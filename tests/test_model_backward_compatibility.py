@@ -41,7 +41,7 @@ def test_optimization(model_fn):
     atoms = bulk("Cu", "fcc", a=3.58, cubic=True)
     orbff = model_fn(device="cpu")
     calc = ORBCalculator(orbff, device="cpu")
-    atoms.set_calculator(calc)
+    atoms.calc = calc
     atoms.rattle(0.5)
     rattled_energy = atoms.get_potential_energy()
     dyn = BFGS(atoms)
