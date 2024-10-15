@@ -157,8 +157,15 @@ def get_optim(
     optimizer = torch.optim.Adam(params, lr=lr)
 
     # Create the learning rate scheduler
+    div_factor = 10  # max lr will be 10 times larger than initial lr
+    final_div_factor = 10  # min lr will be 10 times smaller than initial lr
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
-        optimizer, max_lr=lr, total_steps=total_steps, pct_start=0.05
+        optimizer, 
+        max_lr=lr * div_factor, 
+        total_steps=total_steps, 
+        pct_start=0.05, 
+        div_factor=div_factor,
+        final_div_factor=final_div_factor,
     )
 
     return optimizer, scheduler

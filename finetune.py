@@ -272,8 +272,8 @@ def run(args):
             epoch=epoch,
         )
 
-        # Save checkpoint from last epoch
-        if epoch == args.max_epochs - 1:
+        # Save every 5 epochs and final epoch
+        if (epoch % args.save_every_x_epochs == 0) or (epoch == args.max_epochs - 1):
             # create ckpts folder if it does not exist
             if not os.path.exists(args.checkpoint_path):
                 os.makedirs(args.checkpoint_path)
@@ -340,6 +340,12 @@ def main():
         default=50,
         type=int,
         help="Maximum number of epochs to finetune.",
+    )
+    parser.add_argument(
+        "--save_every_x_epochs",
+        default=5,
+        type=int,
+        help="Save model every x epochs.",
     )
     parser.add_argument(
         "--num_steps",

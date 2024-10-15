@@ -124,6 +124,15 @@ from orb_models.forcefield import pretrained
 model = pretrained.orb_v2(weights_path=<path_to_ckpt>)
 ```
 
+> ⚠ **Caveats**
+>
+> Our finetuning script is designed for simplicity and advanced users may wish to develop it further. Please be aware that:
+> - The script assumes that your ASE database rows contain **energy, forces, and stress** data. To train on molecular data without stress, you will need to edit the code.
+> - **Early stopping** is not implemented. However, you can use the command line argument `save_every_x_epochs` (default is 5), so "retrospective" early stopping can be applied by selecting a suitable checkpoint.
+> - The **learning rate schedule is hardcoded** to be `torch.optim.lr_scheduler.OneCycleLR` with `pct_start=0.05`. The `max_lr`/`min_lr` will be 10x greater/smaller than the `lr` specified via the command line. To get the best performance, you may wish to try other schedulers.
+> - The defaults of `--num_steps=100` and `--max_epochs=50` are small. This may be suitable for very small finetuning datasets (e.g. 100s of systems), but you will likely want to increase the number of steps for larger datasets (e.g. 1000s of datapoints).
+> - The script only tracks a limited set of metrics (energy/force/stress MAEs) which may be insufficient for some downstream use-cases. For instance, if you wish to finetune a model for Molecular Dynamics simulations, we have found (anecdotally) that models that are just on the cusp of overfitting to force MAEs can be substantially worse for simulations. Ideally, more robust "rollout" metrics would be included in the finetuning training loop. In lieu of this, we recommend more aggressive early-stopping i.e. using models several epochs prior to any sign of overfitting.
+
 ### Citing
 
 We are currently preparing a preprint for publication.
