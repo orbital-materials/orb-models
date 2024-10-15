@@ -33,6 +33,7 @@ def main(model: str, core_model: str):
 
     assert torch.allclose(pred["graph_pred"], pred_orig["graph_pred"])
     assert torch.allclose(pred["node_pred"], pred_orig["node_pred"])
+    print("Model outputs are identical!")
 
 
 if __name__ == "__main__":

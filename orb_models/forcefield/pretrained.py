@@ -1,5 +1,5 @@
 # flake8: noqa: E501
-from typing import Union
+from typing import Union, Optional
 
 import torch
 from cached_path import cached_path
@@ -28,10 +28,10 @@ def get_base(
     latent_dim: int = 256,
     mlp_hidden_dim: int = 512,
     num_message_passing_steps: int = 15,
-    num_edge_in_features: int = 53,
-    distance_cutoff: bool = False,
-    attention_gate: str = "softmax",
-    rbf_transform: str = "exp_normal_smearing",
+    num_edge_in_features: int = 23,
+    distance_cutoff: bool = True,
+    attention_gate: str = "sigmoid",
+    rbf_transform: str = "gaussian",
 ) -> MoleculeGNS:
     """Define the base pretrained model architecture."""
     return MoleculeGNS(
@@ -89,11 +89,11 @@ def load_model_for_inference(
     return model
 
 
-def orb_v1(
-    weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orbff-v1-20240827.ckpt",  # noqa: E501
+def orb_v2(
+    weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-v2-20241011.ckpt",  # noqa: E501
     device: Union[torch.device, str] = None,
 ):
-    """Load ORB v1."""
+    """Load ORB v2."""
     base = get_base()
 
     model = GraphRegressor(
@@ -112,7 +112,7 @@ def orb_v1(
             num_mlp_layers=1,
             mlp_hidden_dim=256,
             target="forces",
-            remove_mean=False,
+            remove_mean=True,
         ),
         stress_head=GraphHead(
             latent_dim=256,
@@ -129,16 +129,62 @@ def orb_v1(
     return model
 
 
-def orb_v2(
-    weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orbff-v2-20240930.ckpt",  # noqa: E501
+def orb_mptraj_only_v2(
+    weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-mptraj-only-v2-20241014.ckpt",  # noqa: E501
     device: Union[torch.device, str] = None,
 ):
-    """Load ORB v2."""
+    """Load ORB MPTraj Only v2."""
+
+    return orb_v2(weights_path, device)
+
+
+def orb_d3_v2(
+    weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-d3-v2-20241011.ckpt",  # noqa: E501
+    device: Union[torch.device, str] = None,
+):
+    """Load ORB D3 v2."""
+    base = get_base()
+
+    model = GraphRegressor(
+        graph_head=EnergyHead(
+            latent_dim=256,
+            num_mlp_layers=1,
+            mlp_hidden_dim=256,
+            target="energy",
+            node_aggregation="mean",
+            reference_energy_name="vasp-shifted",
+            train_reference=True,
+            predict_atom_avg=True,
+        ),
+        node_head=NodeHead(
+            latent_dim=256,
+            num_mlp_layers=1,
+            mlp_hidden_dim=256,
+            target="forces",
+            remove_mean=True,
+        ),
+        stress_head=GraphHead(
+            latent_dim=256,
+            num_mlp_layers=1,
+            mlp_hidden_dim=256,
+            target="stress",
+            compute_stress=True,
+        ),
+        model=base,
+    )
+
+    model = load_model_for_inference(model, weights_path, device)
+
+    return model
+
+
+def orb_d3_sm_v2(
+    weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-d3-sm-v2-20241011.ckpt",  # noqa: E501
+    device: Union[torch.device, str] = None,
+):
+    """Load ORB D3 v2."""
     base = get_base(
-        num_edge_in_features=23,
-        distance_cutoff=True,
-        attention_gate="sigmoid",
-        rbf_transform="gaussian",
+        num_message_passing_steps=10,
     )
 
     model = GraphRegressor(
@@ -174,12 +220,14 @@ def orb_v2(
     return model
 
 
-def orb_d3_v1(
-    weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-d3-v1-20240902.ckpt",
+def orb_d3_xs_v2(
+    weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-d3-xs-v2-20241011.ckpt",  # noqa: E501
     device: Union[torch.device, str] = None,
 ):
-    """ORB v1 with D3 corrections."""
-    base = get_base()
+    """Load ORB D3 xs v2."""
+    base = get_base(
+        num_message_passing_steps=5,
+    )
 
     model = GraphRegressor(
         graph_head=EnergyHead(
@@ -197,7 +245,7 @@ def orb_d3_v1(
             num_mlp_layers=1,
             mlp_hidden_dim=256,
             target="forces",
-            remove_mean=False,
+            remove_mean=True,
         ),
         stress_head=GraphHead(
             latent_dim=256,
@@ -212,130 +260,68 @@ def orb_d3_v1(
     model = load_model_for_inference(model, weights_path, device)
 
     return model
+
+
+def _deprecated_model(model_name: str):
+    """Deprecated model."""
+
+    raise ValueError(
+        f"{model_name} is deprecated. Please use orb-v2 instead."
+        "Orb V2 models are more accurate, more robust under simulation, and run faster."
+    )
+
+
+def orb_v1(
+    weights_path: Optional[str] = None,
+    device: Union[torch.device, str] = None,
+):
+    """Deprecated model."""
+
+    _deprecated_model("orb-v1")
+
+
+def orb_d3_v1(
+    weights_path: Optional[str] = None,
+    device: Union[torch.device, str] = None,
+):
+    """Deprecated model."""
+
+    _deprecated_model("orb-d3-v1")
 
 
 def orb_d3_sm_v1(
-    weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-d3-sm-v1-20240902.ckpt",
+    weights_path: Optional[str] = None,
     device: Union[torch.device, str] = None,
 ):
-    """A 10 layer model pretrained on bulk data."""
-    base = get_base(num_message_passing_steps=10)
+    """Deprecated model."""
 
-    model = GraphRegressor(
-        graph_head=EnergyHead(
-            latent_dim=256,
-            num_mlp_layers=1,
-            mlp_hidden_dim=256,
-            target="energy",
-            node_aggregation="mean",
-            reference_energy_name="vasp-shifted",
-            train_reference=True,
-            predict_atom_avg=True,
-        ),
-        node_head=NodeHead(
-            latent_dim=256,
-            num_mlp_layers=1,
-            mlp_hidden_dim=256,
-            target="forces",
-            remove_mean=False,
-        ),
-        stress_head=GraphHead(
-            latent_dim=256,
-            num_mlp_layers=1,
-            mlp_hidden_dim=256,
-            target="stress",
-            compute_stress=True,
-        ),
-        model=base,
-    )
-
-    model = load_model_for_inference(model, weights_path, device)
-
-    return model
+    _deprecated_model("orb-d3-sm-v1")
 
 
 def orb_d3_xs_v1(
-    weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-d3-xs-v1-20240902.ckpt",
+    weights_path: Optional[str] = None,
     device: Union[torch.device, str] = None,
 ):
-    """A 5 layer model pretrained on bulk data."""
-    base = get_base(num_message_passing_steps=5)
-    model = GraphRegressor(
-        graph_head=EnergyHead(
-            latent_dim=256,
-            num_mlp_layers=1,
-            mlp_hidden_dim=256,
-            target="energy",
-            node_aggregation="mean",
-            reference_energy_name="vasp-shifted",
-            train_reference=True,
-            predict_atom_avg=True,
-        ),
-        node_head=NodeHead(
-            latent_dim=256,
-            num_mlp_layers=1,
-            mlp_hidden_dim=256,
-            target="forces",
-            remove_mean=False,
-        ),
-        stress_head=GraphHead(
-            latent_dim=256,
-            num_mlp_layers=1,
-            mlp_hidden_dim=256,
-            target="stress",
-            compute_stress=True,
-        ),
-        model=base,
-    )
-
-    model = load_model_for_inference(model, weights_path, device)
-
-    return model
+    """Deprecated model."""
+    _deprecated_model("orb-d3-xs-v1")
 
 
 def orb_v1_mptraj_only(
-    weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orbff-mptraj-only-v1-20240827.ckpt",
+    weights_path: Optional[str] = None,
     device: Union[torch.device, str] = None,
 ):
-    """A 10 layer model pretrained on bulk data."""
-    base = get_base()
-
-    model = GraphRegressor(
-        graph_head=EnergyHead(
-            latent_dim=256,
-            num_mlp_layers=1,
-            mlp_hidden_dim=256,
-            target="energy",
-            node_aggregation="mean",
-            reference_energy_name="vasp-shifted",
-            train_reference=True,
-            predict_atom_avg=True,
-        ),
-        node_head=NodeHead(
-            latent_dim=256,
-            num_mlp_layers=1,
-            mlp_hidden_dim=256,
-            target="forces",
-            remove_mean=False,
-        ),
-        stress_head=GraphHead(
-            latent_dim=256,
-            num_mlp_layers=1,
-            mlp_hidden_dim=256,
-            target="stress",
-            compute_stress=True,
-        ),
-        model=base,
-    )
-
-    model = load_model_for_inference(model, weights_path, device)
-
-    return model
+    """Deprecated model."""
+    _deprecated_model("orb-mptraj-only-v1")
 
 
 ORB_PRETRAINED_MODELS = {
-    "orb-v1": orb_v1,
     "orb-v2": orb_v2,
+    "orb-d3-v2": orb_d3_v2,
+    "orb-d3-sm-v2": orb_d3_sm_v2,
+    "orb-d3-xs-v2": orb_d3_xs_v2,
+    "orb-mptraj-only-v2": orb_mptraj_only_v2,
+    # Deprecated models
+    "orb-v1": orb_v1,
     "orb-d3-v1": orb_d3_v1,
     "orb-d3-sm-v1": orb_d3_sm_v1,
     "orb-d3-xs-v1": orb_d3_xs_v1,

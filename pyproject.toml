@@ -23,7 +23,6 @@ dependencies = [
     "torch==2.2.0",
     "dm-tree>=0.1.8",
     "tqdm>=4.66.5",
-    "wandb>=0.17.7"
 ]
 
 [build-system]

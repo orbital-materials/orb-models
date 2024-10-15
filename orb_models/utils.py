@@ -1,7 +1,6 @@
 """Experiment utilities."""
 
 import math
-import os
 import random
 import re
 from collections import defaultdict
@@ -10,9 +9,7 @@ from typing import Dict, List, Mapping, Optional, Tuple, TypeVar
 import numpy as np
 import torch
 
-import wandb
 from orb_models.forcefield import base
-from wandb import wandb_run
 
 T = TypeVar("T")
 
@@ -81,21 +78,6 @@ def seed_everything(seed: int, rank: int = 0) -> None:
     random.seed(seed + rank)
     np.random.seed(seed + rank)
     torch.manual_seed(seed + rank)
-
-
-def init_wandb_from_config(dataset: str, job_type: str, entity: str) -> wandb_run.Run:
-    """Initialise wandb."""
-    wandb.init(  # type: ignore
-        job_type=job_type,
-        dir=os.path.join(os.getcwd(), "wandb"),
-        name=f"{dataset}-{job_type}",
-        project="orb-experiment",
-        entity=entity,
-        mode="online",
-        sync_tensorboard=False,
-    )
-    assert wandb.run is not None
-    return wandb.run
 
 
 class ScalarMetricTracker:

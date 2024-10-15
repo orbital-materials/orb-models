@@ -117,7 +117,7 @@ class NodeHead(torch.nn.Module):
         mlp_hidden_dim: int,
         target: Union[str, PropertyDefinition],
         dropout: Optional[float] = None,
-        remove_mean: bool = False,
+        remove_mean: bool = True,
     ):
         """Initializes the NodeHead MLP.
 
@@ -127,6 +127,7 @@ class NodeHead(torch.nn.Module):
             mlp_hidden_dim (int): MLP hidden size.
             target: either the name of a PropertyDefinition or a PropertyDefinition itself.
             dropout: The level of dropout to apply.
+            remove_mean: Whether to remove the mean of the node features.
         """
         super().__init__()
         if isinstance(target, str):
@@ -451,9 +452,6 @@ class GraphRegressor(nn.Module):
             node_head : The regression head to use for node prediction.
             graph_head: The regression head to use for graph prediction.
             model: An optional pre-constructed, pretrained model to use for transfer learning/finetuning.
-            model_artifact: A path to a directory containing a wandb model artifact
-                or a wandb artifact identifier to be downloaded. This can either be a
-                base Diffusion model or a GraphRegressor model.
             model_requires_grad: Whether the underlying model should
                 be finetuned or not.
         """
