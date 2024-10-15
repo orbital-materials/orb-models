@@ -118,6 +118,7 @@ class NodeHead(torch.nn.Module):
         target: Union[str, PropertyDefinition],
         dropout: Optional[float] = None,
         remove_mean: bool = True,
+        remove_torque_for_nonpbc_systems: bool = True,
     ):
         """Initializes the NodeHead MLP.
 
@@ -128,6 +129,8 @@ class NodeHead(torch.nn.Module):
             target: either the name of a PropertyDefinition or a PropertyDefinition itself.
             dropout: The level of dropout to apply.
             remove_mean: Whether to remove the mean of the node features.
+            remove_torque_for_nonpbc_systems: Whether to remove net torque from the 
+                force predictions for non-PBC systems.
         """
         super().__init__()
         if isinstance(target, str):
@@ -153,11 +156,13 @@ class NodeHead(torch.nn.Module):
         )
 
         self.remove_mean = remove_mean
+        self.remove_torque_for_nonpbc_systems = remove_torque_for_nonpbc_systems
 
     def forward(self, batch: base.AtomGraphs) -> base.AtomGraphs:
         """Predictions with raw logits (no sigmoid/softmax or any inverse transformations)."""
         feat = batch.node_features[_KEY]
         pred = self.mlp(feat)
+
         if self.remove_mean:
             system_means = segment_ops.aggregate_nodes(
                 pred, batch.n_node, reduction="mean"
@@ -166,6 +171,12 @@ class NodeHead(torch.nn.Module):
                 system_means, batch.n_node, dim=0
             )
             pred = pred - node_broadcasted_means
+
+        if self.remove_torque_for_nonpbc_systems:
+            pred = selectively_remove_net_torque_for_nonpbc_systems(
+                pred, batch.positions, batch.system_features["cell"], batch.n_node
+            )
+
         batch.node_features["node_pred"] = pred
         return batch
 
@@ -723,3 +734,114 @@ def cross_entropy_loss(
             f"{metric_prefix}_loss": loss.item(),
         },
     )
+
+def selectively_remove_net_torque_for_nonpbc_systems(
+    pred: torch.Tensor,
+    positions: torch.Tensor,
+    cell: torch.Tensor,
+    n_node: torch.Tensor,
+):
+    """Remove net torque from non-PBC-system forces, but preserve PBC-system forces.
+
+    Args:
+        pred: The predicted forces of shape (n_atoms_in_batch, 3).
+        positions: The positions of shape (n_atoms_in_batch, 3).
+        cell: The cell of shape (n_batch, 3, 3).
+        n_node: The number of nodes per graph, of shape (n_batch,).
+    """
+    nopbc_graph = torch.all(cell == 0.0, dim=(1, 2))
+    if torch.any(nopbc_graph):
+        if torch.all(nopbc_graph):
+            pred = remove_net_torque(positions, pred, n_node)
+        else:
+            # Handle a mixed batch of pbc and non-pbc systems
+            batch_indices = torch.repeat_interleave(
+                torch.arange(cell.size(0), device=n_node.device), n_node
+            )
+            nopbc_atom = nopbc_graph[batch_indices]
+            adjusted_pred_non_pbc = remove_net_torque(
+                positions[nopbc_atom], pred[nopbc_atom], n_node[nopbc_graph]
+            )
+            pred = pred.clone()
+            pred[nopbc_atom] = adjusted_pred_non_pbc
+
+    return pred
+
+
+def remove_net_torque(
+    positions: torch.Tensor,
+    forces: torch.Tensor,
+    n_nodes: torch.Tensor,
+) -> torch.Tensor:
+    """Adjust the predicted forces to eliminate net torque for each graph in the batch.
+
+    We frame the problem of net-torque-elimination as a constrained optimisation problem;
+    what is the minimal additive adjustment (in L2 norm) that eliminates net torque?
+
+    This analytically solvable with Lagrange multipliers and the solution involves cheap
+    linear algebra operations (cross products and the inversion of 3x3 matrices).
+
+    Args:
+        positions : torch.Tensor of shape (N, 3)
+            Positions of atoms (concatenated for all graphs in the batch).
+        forces : torch.Tensor of shape (N, 3)
+            Predicted forces on atoms.
+        n_nodes : torch.Tensor of shape (B,)
+            Number of nodes in each graph, where B is the number of graphs in the batch.
+
+    Returns:
+        adjusted_forces : torch.Tensor of shape (N, 3)
+            Adjusted forces with zero net torque and net force for each graph.
+    """
+    B = n_nodes.shape[0]
+    tau_total, r = compute_net_torque(positions, forces, n_nodes)
+
+    # Compute scalar s per graph: sum_i ||r_i||^2
+    r_squared = torch.sum(r**2, dim=1)  # Shape: (N,)
+    s = segment_ops.aggregate_nodes(r_squared, n_nodes, "sum")  # Shape: (B,)
+
+    # Compute matrix S per graph: sum_i outer(r_i, r_i)
+    r_unsqueezed = r.unsqueeze(2)  # Shape: (N, 3, 1)
+    r_T_unsqueezed = r.unsqueeze(1)  # Shape: (N, 1, 3)
+    outer_products = r_unsqueezed @ r_T_unsqueezed  # Shape: (N, 3, 3)
+    S = segment_ops.aggregate_nodes(outer_products, n_nodes, "sum")  # Shape: (B, 3, 3)
+
+    # Compute M = S - sI
+    I = (  # noqa: E741
+        torch.eye(3, device=positions.device).unsqueeze(0).expand(B, -1, -1)
+    )  # Shape: (B, 3, 3)
+    M = S - (s.view(-1, 1, 1)) * I  # Shape: (B, 3, 3)
+
+    # Right-hand side vector b per graph
+    b = -tau_total  # Shape: (B, 3)
+
+    # Solve M * mu = b for mu per graph
+    try:
+        mu = torch.linalg.solve(M, b.unsqueeze(2)).squeeze(2)  # Shape: (B, 3)
+    except RuntimeError:
+        # Handle singular matrix M by using the pseudo-inverse
+        M_pinv = torch.linalg.pinv(M)  # Shape: (B, 3, 3)
+        mu = torch.bmm(M_pinv, b.unsqueeze(2)).squeeze(2)  # Shape: (B, 3)
+
+    # Compute adjustments to forces
+    mu_batch = torch.repeat_interleave(mu, n_nodes, dim=0)  # Shape: (N, 3)
+    forces_delta = torch.linalg.cross(r, mu_batch)  # Shape: (N, 3)
+
+    # Adjusted forces
+    adjusted_forces = forces + forces_delta  # Shape: (N, 3)
+
+    return adjusted_forces
+
+
+def compute_net_torque(
+    positions: torch.Tensor,
+    forces: torch.Tensor,
+    n_nodes: torch.Tensor,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Compute the net torque on a system of particles."""
+    com = segment_ops.aggregate_nodes(positions, n_nodes, "mean")
+    com_repeat = torch.repeat_interleave(com, n_nodes, dim=0)  # Shape: (N, 3)
+    com_relative_positions = positions - com_repeat  # Shape: (N, 3)
+    torques = torch.linalg.cross(com_relative_positions, forces)  # Shape: (N, 3)
+    net_torque = segment_ops.aggregate_nodes(torques, n_nodes, "sum")
+    return net_torque, com_relative_positions
