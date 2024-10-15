@@ -1,5 +1,5 @@
 # flake8: noqa: E501
-from typing import Union
+from typing import Union, Optional
 
 import torch
 from cached_path import cached_path
@@ -262,10 +262,68 @@ def orb_d3_xs_v2(
     return model
 
 
+def _deprecated_model(model_name: str):
+    """Deprecated model."""
+
+    raise ValueError(
+        f"{model_name} is deprecated. Please use orb-v2 instead."
+        "Orb V2 models are more accurate, more robust under simulation, and run faster."
+    )
+
+
+def orb_v1(
+    weights_path: Optional[str] = None,
+    device: Union[torch.device, str] = None,
+):
+    """Deprecated model."""
+
+    _deprecated_model("orb-v1")
+
+
+def orb_d3_v1(
+    weights_path: Optional[str] = None,
+    device: Union[torch.device, str] = None,
+):
+    """Deprecated model."""
+
+    _deprecated_model("orb-d3-v1")
+
+
+def orb_d3_sm_v1(
+    weights_path: Optional[str] = None,
+    device: Union[torch.device, str] = None,
+):
+    """Deprecated model."""
+
+    _deprecated_model("orb-d3-sm-v1")
+
+
+def orb_d3_xs_v1(
+    weights_path: Optional[str] = None,
+    device: Union[torch.device, str] = None,
+):
+    """Deprecated model."""
+    _deprecated_model("orb-d3-xs-v1")
+
+
+def orb_v1_mptraj_only(
+    weights_path: Optional[str] = None,
+    device: Union[torch.device, str] = None,
+):
+    """Deprecated model."""
+    _deprecated_model("orb-mptraj-only-v1")
+
+
 ORB_PRETRAINED_MODELS = {
     "orb-v2": orb_v2,
     "orb-d3-v2": orb_d3_v2,
     "orb-d3-sm-v2": orb_d3_sm_v2,
     "orb-d3-xs-v2": orb_d3_xs_v2,
     "orb-mptraj-only-v2": orb_mptraj_only_v2,
+    # Deprecated models
+    "orb-v1": orb_v1,
+    "orb-d3-v1": orb_d3_v1,
+    "orb-d3-sm-v1": orb_d3_sm_v1,
+    "orb-d3-xs-v1": orb_d3_xs_v1,
+    "orb-v1-mptraj-only": orb_v1_mptraj_only,
 }
