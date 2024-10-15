@@ -129,6 +129,15 @@ def orb_v2(
     return model
 
 
+def orb_mptraj_only_v2(
+    weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-mptraj-only-v2-20241014.ckpt",  # noqa: E501
+    device: Union[torch.device, str] = None,
+):
+    """Load ORB MPTraj Only v2."""
+
+    return orb_v2(weights_path, device)
+
+
 def orb_d3_v2(
     weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-d3-v2-20241011.ckpt",  # noqa: E501
     device: Union[torch.device, str] = None,
@@ -258,4 +267,5 @@ ORB_PRETRAINED_MODELS = {
     "orb-d3-v2": orb_d3_v2,
     "orb-d3-sm-v2": orb_d3_sm_v2,
     "orb-d3-xs-v2": orb_d3_xs_v2,
+    "orb-mptraj-only-v2": orb_mptraj_only_v2,
 }
