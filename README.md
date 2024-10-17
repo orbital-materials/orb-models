@@ -140,10 +140,9 @@ We are currently preparing a preprint for publication.
 
 ### License
 
-ORB models are licensed under the ORB Community License Agreement, Version 1. Please see the [LICENSE](LICENSE) file for details.
+ORB models are licensed under the Apache License, Version 2.0. Please see the [LICENSE](LICENSE) file for details.
 
 **If you have an interesting use case or benchmark for an Orb model, please let us know!** We are happy to work with the community to make these models useful for as many applications as possible.
-Please fill in the [commercial license form](https://www.orbitalmaterials.com/commercial-license-form), or open an issue on GitHub.
 
 ### Community
 

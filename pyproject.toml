@@ -5,7 +5,7 @@ description = "Foundation models for computational chemistry."
 readme = "README.md"
 requires-python = ">=3.8"
 authors = [{name = "Orbital Materials"}]
-license = {text = "ORB Community License Agreement, Version 1."}
+license = {text = "Apache License, Version 2.0"}
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
