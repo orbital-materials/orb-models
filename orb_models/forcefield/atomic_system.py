@@ -133,6 +133,7 @@ def ase_atoms_to_atom_graphs(
         system_config.radius,
         system_config.max_num_neighbors,
         brute_force=brute_force_knn,
+        device=device,
     )
 
     num_atoms = len(node_feats["positions"])  # type: ignore
@@ -159,6 +160,9 @@ def _get_edge_feats(
     radius: float,
     max_num_neighbours: int,
     brute_force: Optional[bool] = None,
+    device: Optional[torch.device] = torch.device(
+        "cuda" if torch.cuda.is_available() else "cpu"
+    ),
 ):
     """Get edge features.
 
@@ -169,6 +173,7 @@ def _get_edge_feats(
         max_num_neighbours: maximum number of neighbours each node can send messages to.
         n_kdtree_workers: number of workers to use for kdtree construction.
         brute_force: whether to use brute force for kdtree construction.
+        device: device to put the tensors on.
     """
     # Construct a graph from a 3x3 supercell (as opposed to an infinite supercell).
     # This could be innaccurate for thin unit cells, but we have yet to encounter a
@@ -182,6 +187,7 @@ def _get_edge_feats(
         radius=radius,
         max_number_neighbors=max_num_neighbours,
         brute_force=brute_force,
+        device=device,
     )
     edge_feats = {
         "vectors": edge_vectors.to(torch.float32),

@@ -13,7 +13,7 @@ DistanceFeaturizer = Callable[[torch.Tensor], torch.Tensor]
 
 
 def get_device(
-    requested_device: Optional[Union[torch.device, str, int]] = None
+    requested_device: Optional[Union[torch.device, str, int]],
 ) -> torch.device:
     """Get a torch device, defaulting to gpu if available."""
     if requested_device is None:
@@ -221,6 +221,7 @@ def compute_pbc_radius_graph(
     brute_force: Optional[bool] = None,
     library: str = "pynanoflann",
     n_workers: int = 1,
+    device: Optional[Union[torch.device, str, int]] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Computes periodic condition radius graph from positions.
 
@@ -234,12 +235,14 @@ def compute_pbc_radius_graph(
             system size).
         library (str, optional): The KDTree library to use. Currently, either 'scipy' or 'pynanoflann'.
         n_workers (int, optional): The number of workers to use for KDTree construction. Defaults to 1.
+        device (Optional[Union[torch.device, str, int]], optional): The device to use for computation. Defaults to None,
+            in which case GPU is used if available.
 
     Returns:
         Tuple[torch.Tensor, torch.Tensor]: A 2-Tuple. First, an edge_index tensor, where the first index are the
         sender indices and the second are the receiver indices. Second, the vector displacements between edges.
     """
-    device = get_device()
+    device = get_device(requested_device=device)
     if brute_force is None:
         # use brute force if positions are already on gpu
         brute_force = device.type != "cpu"
@@ -410,6 +413,7 @@ def batch_compute_pbc_radius_graph(
     max_number_neighbors: int = 20,
     brute_force: Optional[bool] = None,
     library: str = "scipy",
+    device: Optional[Union[torch.device, str, int]] = None,
 ):
     """Computes batched periodic boundary condition radius graph from positions.
 
@@ -428,6 +432,8 @@ def batch_compute_pbc_radius_graph(
         brute_force (bool, optional): Whether to use brute force knn. Defaults to None, in which case brute_force
             is used if we are on GPU (2-6x faster), but not on CPU (1.5x faster - 4x slower).
         library (str, optional): The KDTree library to use. Currently, either 'scipy' or 'pynanoflann'.
+        device (Optional[Union[torch.device, str, int]], optional): The device to use for computation. Defaults to None,
+            in which case GPU is used if available.
 
     Returns:
         Tuple[torch.Tensor, torch.Tensor]: A 2-Tuple. First, an edge_index tensor, where the first index are the
@@ -450,6 +456,7 @@ def batch_compute_pbc_radius_graph(
             max_number_neighbors=max_number_neighbors,
             brute_force=brute_force,
             library=library,
+            device=device,
         )
         if idx == 0:
             offset = 0
