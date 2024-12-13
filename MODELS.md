@@ -3,11 +3,11 @@
 
 | Model Name | Link | MD5 Hash | Matbench Discovery | D3 Corrections | Notes |
 |------------|------|----------|---------------------|-----------------|-------|
-| **orb-v1** | [link](https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orbff-v1-20240827.ckpt) | 92897eda08609425ee001955c7885139 | Yes | No | Full dataset pretraining, MPTraj + Alexandria finetuning |
-| **orb-mptraj-only-v1** | [link](https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orbff-mptraj-only-v1-20240827.ckpt) | ff42a2bc1e1f50b5f3ee2a20b83cf3a2 | Yes | No | MPTraj pretraining and finetuning only |
-| **orb-d3-v1** | [link](https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-d3-v1-20240902.ckpt) | 470c7d3482ead3bc97cd4b46382d5e47 | No | Yes | Full dataset pretraining, MPTraj + Alexandria finetuning, integrated D3 corrections |
-| **orb-d3-sm-v1** | [link](https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-d3-sm-v1-20240902.ckpt) | 64fe91603e46ad5fa695525e3f1e9397 | No | Yes | First 10 layers of a pretrained model finetuned on mptrj + alexandria with D3 corrections |
-| **orb-d3-xs-v1** | [link](https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-d3-xs-v1-20240902.ckpt) | 79d042f9f16c4407795426a75498fbb7 | No | Yes | First 5 layers of a pretrained model finetuned on mptrj + alexandria with D3 corrections |
+| **orb-v1** | [link](https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orbff-v1-20240827.ckpt) | 92897eda08609425ee001955c7885139 | Yes | No | Full dataset pretraining, MPTraj + Alexandria finetuning |
+| **orb-mptraj-only-v1** | [link](https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orbff-mptraj-only-v1-20240827.ckpt) | ff42a2bc1e1f50b5f3ee2a20b83cf3a2 | Yes | No | MPTraj pretraining and finetuning only |
+| **orb-d3-v1** | [link](https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-d3-v1-20240902.ckpt) | 470c7d3482ead3bc97cd4b46382d5e47 | No | Yes | Full dataset pretraining, MPTraj + Alexandria finetuning, integrated D3 corrections |
+| **orb-d3-sm-v1** | [link](https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-d3-sm-v1-20240902.ckpt) | 64fe91603e46ad5fa695525e3f1e9397 | No | Yes | First 10 layers of a pretrained model finetuned on mptrj + alexandria with D3 corrections |
+| **orb-d3-xs-v1** | [link](https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-d3-xs-v1-20240902.ckpt) | 79d042f9f16c4407795426a75498fbb7 | No | Yes | First 5 layers of a pretrained model finetuned on mptrj + alexandria with D3 corrections |
 
 
 
