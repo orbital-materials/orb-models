@@ -18,9 +18,9 @@ classifiers = [
 dependencies = [
     "cached_path>=1.6.2",
     "ase>=3.23.0",
-    "numpy>=1.26.4, <2.0.0",
+    "numpy>=1.26.4",
     "scipy>=1.13.1",
-    "torch==2.2.0",
+    "torch>=2.2.0, <3.0.0",
     "dm-tree>=0.1.8",
     "tqdm>=4.66.5",
 ]
