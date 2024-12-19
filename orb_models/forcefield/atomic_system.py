@@ -126,7 +126,7 @@ def ase_atoms_to_atom_graphs(
     ).type(torch.float32)
 
     positions = torch.from_numpy(atoms.positions).to(torch.float32)
-    cell = torch.from_numpy(atoms.cell.array[None, ...]).to(torch.float32)
+    cell = torch.from_numpy(atoms.cell.array).to(torch.float32)
     if wrap and torch.any(cell != 0):
         positions = featurization_utilities.map_to_pbc_cell(positions, cell)
 
@@ -137,10 +137,10 @@ def ase_atoms_to_atom_graphs(
         # but not actually used as input features to the model.
         "positions": positions,
     }
-    system_feats = {"cell": cell}
+    system_feats = {"cell": cell.unsqueeze(0)}
     edge_feats, senders, receivers = _get_edge_feats(
         positions,
-        cell[0],
+        cell,
         system_config.radius,
         system_config.max_num_neighbors,
         brute_force=brute_force_knn,
