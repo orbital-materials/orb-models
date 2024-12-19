@@ -365,6 +365,30 @@ def compute_pbc_radius_graph(
         return torch.stack((senders_torch, receivers), dim=0), vectors
 
 
+def map_to_pbc_cell(
+    positions: torch.Tensor,
+    periodic_boundary_conditions: torch.Tensor,
+) -> torch.Tensor:
+    """Maps positions to within a periodic boundary cell.
+
+    Args:
+        positions (torch.Tensor): The positions to be mapped. Shape [num_particles, 3]
+        periodic_boundary_conditions (torch.Tensor): The periodic boundary conditions. Shape 3x3.
+
+    Returns:
+        torch.Tensor: Positions mapped to within a periodic boundary cell.
+    """
+    # Inverses are a lot more reliable in double precision, so we'll do the whole
+    # thing in double then go back to single.
+    positions = positions.double()
+    periodic_boundary_conditions = periodic_boundary_conditions.double()
+    # The strategy here is to map our positions to fractional or internal coordinates.
+    # Then we take the modulo, then map back to euclidian co-ordinates.
+    fractional_pos = torch.linalg.solve(periodic_boundary_conditions.T, positions.T).T
+    fractional_pos = fractional_pos % 1.0
+    return (fractional_pos @ periodic_boundary_conditions).float()
+
+
 def batch_map_to_pbc_cell(
     positions: torch.Tensor,
     periodic_boundary_conditions: torch.Tensor,
