@@ -90,7 +90,7 @@ def load_model_for_inference(
 
 
 def orb_v2(
-    weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-v2-20241011.ckpt",  # noqa: E501
+    weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-v2-20241011.ckpt",  # noqa: E501
     device: Union[torch.device, str] = None,
 ):
     """Load ORB v2."""
@@ -130,7 +130,7 @@ def orb_v2(
 
 
 def orb_mptraj_only_v2(
-    weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-mptraj-only-v2-20241014.ckpt",  # noqa: E501
+    weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-mptraj-only-v2-20241014.ckpt",  # noqa: E501
     device: Union[torch.device, str] = None,
 ):
     """Load ORB MPTraj Only v2."""
@@ -139,7 +139,7 @@ def orb_mptraj_only_v2(
 
 
 def orb_d3_v2(
-    weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-d3-v2-20241011.ckpt",  # noqa: E501
+    weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-d3-v2-20241011.ckpt",  # noqa: E501
     device: Union[torch.device, str] = None,
 ):
     """Load ORB D3 v2."""
@@ -179,7 +179,7 @@ def orb_d3_v2(
 
 
 def orb_d3_sm_v2(
-    weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-d3-sm-v2-20241011.ckpt",  # noqa: E501
+    weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-d3-sm-v2-20241011.ckpt",  # noqa: E501
     device: Union[torch.device, str] = None,
 ):
     """Load ORB D3 v2."""
@@ -221,7 +221,7 @@ def orb_d3_sm_v2(
 
 
 def orb_d3_xs_v2(
-    weights_path: str = "https://storage.googleapis.com/orbitalmaterials-public-models/forcefields/orb-d3-xs-v2-20241011.ckpt",  # noqa: E501
+    weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-d3-xs-v2-20241011.ckpt",  # noqa: E501
     device: Union[torch.device, str] = None,
 ):
     """Load ORB D3 xs v2."""
