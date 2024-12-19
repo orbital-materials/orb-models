@@ -90,46 +90,57 @@ def atom_graphs_to_ase_atoms(
 
 def ase_atoms_to_atom_graphs(
     atoms: ase.Atoms,
-    system_config: SystemConfig = SystemConfig(
-        radius=10.0, max_num_neighbors=20, use_timestep_0=True
-    ),
-    system_id: Optional[int] = None,
+    *,
+    wrap: bool = True,
     brute_force_knn: Optional[bool] = None,
-    device: Optional[torch.device] = torch.device(
-        "cuda" if torch.cuda.is_available() else "cpu"
-    ),
+    device: Optional[torch.device] = None,
+    system_config: Optional[SystemConfig] = None,
+    system_id: Optional[int] = None,
 ) -> AtomGraphs:
     """Generate AtomGraphs from an ase.Atoms object.
 
     Args:
         atoms: ase.Atoms object
-        system_config: SystemConfig object
-        system_id: Optional system_id
+        wrap: whether to wrap atomic positions into the central unit cell (if there is one).
+            NOTE: there can be numerical differences from ase's .wrap() method when an atom is near a cell boundary.
         brute_force_knn: whether to use a 'brute force' knn approach with torch.cdist for kdtree construction.
             Defaults to None, in which case brute_force is used if we a GPU is avaiable (2-6x faster),
             but not on CPU (1.5x faster - 4x slower). For very large systems, brute_force may OOM on GPU,
             so it is recommended to set to False in that case.
-        device: device to put the tensors on.
+        device: device to put the tensors on. By default, uses the GPU if available.
+        system_config: SystemConfig object, specifying the max radius and max num_neighbors 
+            used in the k-nearest neighbors graph construction.
+        system_id: Optional index, for tracking the identity of a datapoint.
 
     Returns:
         AtomGraphs object
     """
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if system_config is None:
+        system_config = SystemConfig(radius=10.0, max_num_neighbors=20)
+
     atomic_numbers = torch.from_numpy(atoms.numbers).to(torch.long)
     atom_type_embedding = torch.nn.functional.one_hot(
         atomic_numbers, num_classes=118
     ).type(torch.float32)
+
+    positions = torch.from_numpy(atoms.positions).to(torch.float32)
+    cell = torch.from_numpy(atoms.cell.array).to(torch.float32)
+    if wrap and torch.any(cell != 0):
+        positions = featurization_utilities.map_to_pbc_cell(positions, cell)
 
     node_feats = {
         "atomic_numbers": atomic_numbers.to(torch.int64),
         "atomic_numbers_embedding": atom_type_embedding.to(torch.float32),
         # NOTE: positions are stored as features on the AtomGraphs,
         # but not actually used as input features to the model.
-        "positions": torch.from_numpy(atoms.positions).to(torch.float32),
+        "positions": positions,
     }
-    system_feats = {"cell": torch.Tensor(atoms.cell.array[None, ...]).to(torch.float)}
+    system_feats = {"cell": cell.unsqueeze(0)}
     edge_feats, senders, receivers = _get_edge_feats(
-        node_feats["positions"],  # type: ignore
-        system_feats["cell"][0],
+        positions,
+        cell,
         system_config.radius,
         system_config.max_num_neighbors,
         brute_force=brute_force_knn,
@@ -159,10 +170,8 @@ def _get_edge_feats(
     cell: torch.Tensor,
     radius: float,
     max_num_neighbours: int,
-    brute_force: Optional[bool] = None,
-    device: Optional[torch.device] = torch.device(
-        "cuda" if torch.cuda.is_available() else "cpu"
-    ),
+    brute_force: Optional[bool],
+    device: torch.device,
 ):
     """Get edge features.
 
