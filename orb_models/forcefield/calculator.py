@@ -10,7 +10,7 @@ from orb_models.forcefield.graph_regressor import GraphRegressor
 class ORBCalculator(Calculator):
     """ORB ASE Calculator.
 
-    args:
+    Args:
         model: torch.nn.Module finetuned Graph regressor
     """
 
@@ -69,8 +69,9 @@ class ORBCalculator(Calculator):
             atoms,
             system_config=self.system_config,
             brute_force_knn=self.brute_force_knn,
+            device=self.device,
+
         )
-        batch = batch.to(self.device)  # type: ignore
         self.model = self.model.to(self.device)  # type: ignore
 
         self.results = {}
