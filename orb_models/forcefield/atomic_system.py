@@ -170,10 +170,8 @@ def _get_edge_feats(
     cell: torch.Tensor,
     radius: float,
     max_num_neighbours: int,
-    brute_force: Optional[bool] = None,
-    device: Optional[torch.device] = torch.device(
-        "cuda" if torch.cuda.is_available() else "cpu"
-    ),
+    brute_force: Optional[bool],
+    device: torch.device,
 ):
     """Get edge features.
 
