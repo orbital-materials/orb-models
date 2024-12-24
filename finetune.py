@@ -121,7 +121,7 @@ def finetune(
         step_metrics["batch_num_edges"] += batch.n_edge.sum()
         step_metrics["batch_num_nodes"] += batch.n_node.sum()
 
-        with torch.cuda.amp.autocast(enabled=False):
+        with torch.autocast("cuda", enabled=False):
             batch_outputs = model.loss(batch)
             loss = batch_outputs.loss
             metrics.update(batch_outputs.log)
