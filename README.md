@@ -4,6 +4,11 @@
 </p>
 <br/>
 
+## Announcement
+
+**Important Notice**: All models pre version 4.1.0 will reach End of Life (EOL) on 26th January due to removal of the old model weights. Please ensure to update to the latest version to continue receiving support and updates.
+
+
 # Pretrained models for atomic simulations
 
 ![example workflow](https://github.com/orbital-materials/orb-models/actions/workflows/test.yml/badge.svg)
