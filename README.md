@@ -140,7 +140,7 @@ model = pretrained.orb_v2(weights_path=<path_to_ckpt>)
 
 ### Citing
 
-We are currently preparing a preprint for publication.
+A preprint describing the model in more detail can be found here: https://arxiv.org/abs/2410.22570
 
 
 ### License
