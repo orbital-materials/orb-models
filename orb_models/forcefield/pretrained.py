@@ -63,7 +63,7 @@ def get_base(
 def load_model_for_inference(
     model: torch.nn.Module,
     weights_path: str,
-    device: Union[torch.device, str] = None,
+    device: Union[torch.device, str, None] = None,
 ) -> torch.nn.Module:
     """Load a pretrained model in inference mode, using GPU if available."""
     global HAS_MESSAGED_FOR_TF32_MATMUL
@@ -91,8 +91,8 @@ def load_model_for_inference(
 
 def orb_v2(
     weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-v2-20241011.ckpt",  # noqa: E501
-    device: Union[torch.device, str] = None,
-):
+    device: Union[torch.device, str, None] = None,
+) -> GraphRegressor:
     """Load ORB v2."""
     base = get_base()
 
@@ -131,7 +131,7 @@ def orb_v2(
 
 def orb_mptraj_only_v2(
     weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-mptraj-only-v2-20241014.ckpt",  # noqa: E501
-    device: Union[torch.device, str] = None,
+    device: Union[torch.device, str, None] = None,
 ):
     """Load ORB MPTraj Only v2."""
 
@@ -140,8 +140,8 @@ def orb_mptraj_only_v2(
 
 def orb_d3_v2(
     weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-d3-v2-20241011.ckpt",  # noqa: E501
-    device: Union[torch.device, str] = None,
-):
+    device: Union[torch.device, str, None] = None,
+) -> GraphRegressor:
     """Load ORB D3 v2."""
     base = get_base()
 
@@ -180,8 +180,8 @@ def orb_d3_v2(
 
 def orb_d3_sm_v2(
     weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-d3-sm-v2-20241011.ckpt",  # noqa: E501
-    device: Union[torch.device, str] = None,
-):
+    device: Union[torch.device, str, None] = None,
+) -> GraphRegressor:
     """Load ORB D3 v2."""
     base = get_base(
         num_message_passing_steps=10,
@@ -222,8 +222,8 @@ def orb_d3_sm_v2(
 
 def orb_d3_xs_v2(
     weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-d3-xs-v2-20241011.ckpt",  # noqa: E501
-    device: Union[torch.device, str] = None,
-):
+    device: Union[torch.device, str, None] = None,
+) -> GraphRegressor:
     """Load ORB D3 xs v2."""
     base = get_base(
         num_message_passing_steps=5,
@@ -273,7 +273,7 @@ def _deprecated_model(model_name: str):
 
 def orb_v1(
     weights_path: Optional[str] = None,
-    device: Union[torch.device, str] = None,
+    device: Union[torch.device, str, None] = None,
 ):
     """Deprecated model."""
 
@@ -282,7 +282,7 @@ def orb_v1(
 
 def orb_d3_v1(
     weights_path: Optional[str] = None,
-    device: Union[torch.device, str] = None,
+    device: Union[torch.device, str, None] = None,
 ):
     """Deprecated model."""
 
@@ -291,7 +291,7 @@ def orb_d3_v1(
 
 def orb_d3_sm_v1(
     weights_path: Optional[str] = None,
-    device: Union[torch.device, str] = None,
+    device: Union[torch.device, str, None] = None,
 ):
     """Deprecated model."""
 
@@ -300,7 +300,7 @@ def orb_d3_sm_v1(
 
 def orb_d3_xs_v1(
     weights_path: Optional[str] = None,
-    device: Union[torch.device, str] = None,
+    device: Union[torch.device, str, None] = None,
 ):
     """Deprecated model."""
     _deprecated_model("orb-d3-xs-v1")
@@ -308,7 +308,7 @@ def orb_d3_xs_v1(
 
 def orb_v1_mptraj_only(
     weights_path: Optional[str] = None,
-    device: Union[torch.device, str] = None,
+    device: Union[torch.device, str, None] = None,
 ):
     """Deprecated model."""
     _deprecated_model("orb-mptraj-only-v1")
