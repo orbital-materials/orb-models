@@ -141,7 +141,7 @@ def orb_mptraj_only_v2(
 def orb_d3_v2(
     weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-d3-v2-20241011.ckpt",  # noqa: E501
     device: Union[torch.device, str, None] = None,
-):
+) -> GraphRegressor:
     """Load ORB D3 v2."""
     base = get_base()
 
@@ -181,7 +181,7 @@ def orb_d3_v2(
 def orb_d3_sm_v2(
     weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-d3-sm-v2-20241011.ckpt",  # noqa: E501
     device: Union[torch.device, str, None] = None,
-):
+) -> GraphRegressor:
     """Load ORB D3 v2."""
     base = get_base(
         num_message_passing_steps=10,
@@ -223,7 +223,7 @@ def orb_d3_sm_v2(
 def orb_d3_xs_v2(
     weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-d3-xs-v2-20241011.ckpt",  # noqa: E501
     device: Union[torch.device, str, None] = None,
-):
+) -> GraphRegressor:
     """Load ORB D3 xs v2."""
     base = get_base(
         num_message_passing_steps=5,
