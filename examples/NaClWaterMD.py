@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from ase.io import read
+from ase.io import read, write
 from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 from ase.md.langevin import Langevin
 from ase import units
@@ -8,56 +8,78 @@ from orb_models.forcefield import atomic_system, pretrained
 from ase.calculators.calculator import Calculator, all_properties
 from ase.build import molecule, make_supercell
 from ase.md import MDLogger
-from ase.io import write
+from orb_models.forcefield.calculator import ORBCalculator
 
-# Device setup this should enable use of both NVIDIA and Mac GPUs
-if torch.cuda.is_available():
-    device = torch.device("cuda")
-elif torch.backends.mps.is_available():
-    device = torch.device("mps")
-else:
-    device = torch.device("cpu")
-print(f"Using device: {device}")
 
-# Basic configuration
-input_file = "NaClWater.xyz"
-cell_size = 25.25  
+def setup_device():
+    """Set up and return the appropriate compute device."""
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
+    print(f"Using device: {device}")
+    return device
 
-# Define the OrbD3Calculator class
-class OrbD3Calculator(Calculator):
-    def __init__(self, model, **kwargs):
-        self.implemented_properties = ['energy', 'forces']
-        super().__init__(**kwargs)
-        self.model = model.to(device)
 
-    def calculate(self, atoms=None, properties=['energy', 'forces'], system_changes=all_properties):
-        super().calculate(atoms, properties, system_changes)
-        graph = atomic_system.ase_atoms_to_atom_graphs(atoms).to(device)
-        result = self.model.predict(graph)
-        self.results['energy'] = float(result["graph_pred"].cpu().detach())
-        self.results['forces'] = result["node_pred"].cpu().detach().numpy()
+def run_md_simulation(
+    input_file: str = "NaClWater.xyz",
+    cell_size: float = 25.25,
+    temperature_K: float = 300,
+    timestep: float = 0.5 * units.fs,
+    friction: float = 0.01 / units.fs,
+    total_steps: int = 100,
+    traj_interval: int = 20,
+    log_interval: int = 1,
+):
+    """Run molecular dynamics simulation with specified parameters.
+    
+    Args:
+        input_file: Path to input XYZ file
+        cell_size: Size of cubic simulation cell
+        temperature_K: Temperature in Kelvin
+        timestep: MD timestep
+        friction: Langevin friction coefficient
+        total_steps: Total number of MD steps
+        traj_interval: Interval for trajectory writing
+        log_interval: Interval for log writing
+    """
+    # Set up device
+    device = setup_device()
+    
+    # Read in the system from file and set the cell size and pbc
+    atoms = read(input_file)
+    atoms.set_cell([cell_size] * 3)
+    atoms.set_pbc([True] * 3)
 
-# Read in the system from file and set the cell size and pbc
-atoms = read(input_file)
-atoms.set_cell([cell_size] * 3)
-atoms.set_pbc([True] * 3)
+    # Set the calculator
+    atoms.calc = ORBCalculator(
+        model=pretrained.orb_d3_v2(),
+        device=device
+    )
 
-# Set the calculator
-atoms.calc = OrbD3Calculator(model=pretrained.orb_d3_v2())
+    # Set the initial velocities
+    MaxwellBoltzmannDistribution(atoms, temperature_K=temperature_K)
 
-# Adjust simulation parameters
-temperature_K = 300
-timestep = 0.5 * units.fs
+    # Set the dynamics
+    dyn = Langevin(atoms, timestep, temperature_K=temperature_K, friction=friction)
 
-# Set the initial velocities
-MaxwellBoltzmannDistribution(atoms, temperature_K=temperature_K)
+    # Define output functions and attach to dynamics
+    dyn.attach(
+        lambda: write('NaClWaterMD.xyz', atoms, append=True), 
+        interval=traj_interval
+    )
+    dyn.attach(MDLogger(dyn, atoms, "md_nvt.log"), interval=log_interval)
 
-# Set the dynamics
-dyn = Langevin(atoms, timestep, temperature_K=temperature_K, friction=0.01 / units.fs)
+    # Run the dynamics
+    dyn.run(steps=total_steps)
 
-# Define output functions and attach to dynamics
-dyn.attach(lambda: write('NaClWaterMD.xyz', atoms, append=True), interval=20)
-dyn.attach(MDLogger(dyn, atoms, "md_nvt.log"), interval=1)
 
-# Run the dynamics
-dyn.run(steps=100000)
+def main():
+    """Main entry point for the script."""
+    run_md_simulation()
+
+
+if __name__ == "__main__":
+    main()
