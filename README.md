@@ -113,6 +113,8 @@ dyn.run(fmax=0.01)
 print("Optimized Energy:", atoms.get_potential_energy())
 ```
 
+Or you can use it to run MD simulations. The script and an example input xyz file are available in the [examples directory.](./examples) This should work with any input, simply modify the input_file and cell_size parameters. We recommend using constant volume simulations. 
+
 
 ### Finetuning
 You can finetune the model using your custom dataset.
@@ -138,10 +140,25 @@ model = pretrained.orb_v2(weights_path=<path_to_ckpt>)
 > - The defaults of `--num_steps=100` and `--max_epochs=50` are small. This may be suitable for very small finetuning datasets (e.g. 100s of systems), but you will likely want to increase the number of steps for larger datasets (e.g. 1000s of datapoints).
 > - The script only tracks a limited set of metrics (energy/force/stress MAEs) which may be insufficient for some downstream use-cases. For instance, if you wish to finetune a model for Molecular Dynamics simulations, we have found (anecdotally) that models that are just on the cusp of overfitting to force MAEs can be substantially worse for simulations. Ideally, more robust "rollout" metrics would be included in the finetuning training loop. In lieu of this, we recommend more aggressive early-stopping i.e. using models several epochs prior to any sign of overfitting.
 
+
+
+
+
 ### Citing
 
-We are currently preparing a preprint for publication.
+A preprint describing the model in more detail can be found here: https://arxiv.org/abs/2410.22570
 
+```bibtex
+@misc{neumann2024orbfastscalableneural,
+      title={Orb: A Fast, Scalable Neural Network Potential}, 
+      author={Mark Neumann and James Gin and Benjamin Rhodes and Steven Bennett and Zhiyi Li and Hitarth Choubisa and Arthur Hussey and Jonathan Godwin},
+      year={2024},
+      eprint={2410.22570},
+      archivePrefix={arXiv},
+      primaryClass={cond-mat.mtrl-sci},
+      url={https://arxiv.org/abs/2410.22570}, 
+}
+```
 
 ### License
 
