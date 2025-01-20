@@ -113,7 +113,7 @@ dyn.run(fmax=0.01)
 print("Optimized Energy:", atoms.get_potential_energy())
 ```
 
-Or you can use it to run MD simulations. The script and an example input xyz file are available in the [examples directory.](./examples) This should work with any input, simply modify the input_file and cell_size parameters. We recommend using constant volume simulations. 
+Or you can use it to run MD simulations. The script, an example input xyz file and a Colab notebook demonstration are available in the [examples directory.](./examples) This should work with any input, simply modify the input_file and cell_size parameters. We recommend using constant volume simulations.
 
 
 ### Finetuning
