@@ -41,12 +41,10 @@ class ORBCalculator(Calculator):
         self.system_config = system_config
         self.brute_force_knn = brute_force_knn
 
-        # NOTE: we currently do not predict stress, but when we do,
-        # we should add it here and also update calculate() below.
         properties = []
-        if model.node_head is not None:
-            properties += ["energy", "free_energy"]
         if model.graph_head is not None:
+            properties += ["energy", "free_energy"]
+        if model.node_head is not None:
             properties += ["forces"]
         if model.stress_head is not None:
             properties += ["stress"]
