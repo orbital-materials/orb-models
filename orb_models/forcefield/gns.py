@@ -485,15 +485,14 @@ class MoleculeGNS(nn.Module):
 
     def featurize_nodes(self, batch: base.AtomGraphs) -> base.AtomGraphs:
         """Featurize the nodes of a graph."""
-        one_hot_atomic = torch.nn.functional.one_hot(
-            batch.node_features["atomic_numbers"], num_classes=118
-        ).type(torch.float32)
-
         if self.use_embedding:
             # The AtomicEmbedding is expecting indices with type Long
             atomic_number_rep = batch.node_features["atomic_numbers"].long()
             atomic_embedding = self.atom_emb(atomic_number_rep)
         else:
+            one_hot_atomic = torch.nn.functional.one_hot(
+                batch.node_features["atomic_numbers"], num_classes=118
+            ).type(torch.float32)
             atomic_embedding = one_hot_atomic
 
         return batch._replace(
