@@ -2,6 +2,7 @@ from typing import Optional
 
 import torch
 from ase.calculators.calculator import Calculator, all_changes
+from ase.data.vdw_alvarez import vdw_radii
 
 from orb_models.forcefield.atomic_system import SystemConfig, ase_atoms_to_atom_graphs
 from orb_models.forcefield.graph_regressor import GraphRegressor
@@ -20,6 +21,8 @@ class ORBCalculator(Calculator):
         brute_force_knn: Optional[bool] = None,
         system_config: SystemConfig = SystemConfig(radius=10.0, max_num_neighbors=20),
         device: Optional[torch.device] = None,
+        return_bonding_graph: bool = False,
+        vdw_multiplier: float = 0.5,  # Multiplier for the sum of VDW radii used as cutoff for bonding (default changed to 0.5)
         **kwargs,
     ):
         """Initializes the calculator.
@@ -31,8 +34,10 @@ class ORBCalculator(Calculator):
                 but not on CPU (1.5x faster - 4x slower). For very large systems (>10k atoms),
                 brute_force may OOM on GPU, so it is recommended to set to False in that case.
             system_config (SystemConfig): The config defining how an atomic system is featurized.
-            device (Optional[torch.device], optional): The device to use for the model.
-            **kwargs: Additional keyword arguments for parent Calculator class.
+            device (Optional[torch.device]): The device to use for the model.
+            return_bonding_graph (bool): If True, includes a bonding graph in results.
+            vdw_multiplier (float): Multiplier for the sum of VDW radii to determine bond cutoff (default: 0.5).
+            **kwargs: Additional keyword arguments for the parent Calculator class.
         """
         Calculator.__init__(self, **kwargs)
         self.results = {}  # type: ignore
@@ -40,9 +45,9 @@ class ORBCalculator(Calculator):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.system_config = system_config
         self.brute_force_knn = brute_force_knn
+        self.return_bonding_graph = return_bonding_graph
+        self.vdw_multiplier = vdw_multiplier
 
-        # NOTE: we currently do not predict stress, but when we do,
-        # we should add it here and also update calculate() below.
         properties = []
         if model.node_head is not None:
             properties += ["energy", "free_energy"]
@@ -50,6 +55,8 @@ class ORBCalculator(Calculator):
             properties += ["forces"]
         if model.stress_head is not None:
             properties += ["stress"]
+        if return_bonding_graph:
+            properties += ["bonding_graph"]
         assert len(properties) > 0, "Model must have at least one output head."
         self.implemented_properties = properties
 
@@ -70,7 +77,6 @@ class ORBCalculator(Calculator):
             system_config=self.system_config,
             brute_force_knn=self.brute_force_knn,
             device=self.device,
-
         )
         self.model = self.model.to(self.device)  # type: ignore
 
@@ -89,3 +95,45 @@ class ORBCalculator(Calculator):
             self.results["stress"] = (
                 raw_stress[0] if len(raw_stress.shape) > 1 else raw_stress
             )
+
+        if self.return_bonding_graph:
+            # Keep tensors on device
+            atomic_numbers = batch.atomic_numbers
+            senders = batch.senders
+            receivers = batch.receivers
+            vectors = batch.edge_features["vectors"]
+            
+            # Create VDW radii tensor on device with float32
+            vdw_radii_tensor = torch.tensor(vdw_radii, device=self.device, dtype=torch.float32)
+            
+            # Calculate actual distances
+            bond_lengths = torch.norm(vectors, dim=1)
+            
+            # Get VDW radii for each atom in the pair using device tensors
+            sender_vdw = vdw_radii_tensor[atomic_numbers[senders]]
+            receiver_vdw = vdw_radii_tensor[atomic_numbers[receivers]]
+            
+            # Use a fraction of the sum of VDW radii as the cutoff
+            vdw_cutoff = self.vdw_multiplier * (sender_vdw + receiver_vdw)
+            
+            # Never bond H-H
+            is_h_h = (atomic_numbers[senders] == 1) & (atomic_numbers[receivers] == 1)
+            vdw_cutoff[is_h_h] = 0.0
+
+            # **New: Save actual calculated values in the results dictionary**
+            self.results["pair_bond_lengths"] = bond_lengths.cpu().numpy()
+            self.results["pair_vdw_cutoffs"] = vdw_cutoff.cpu().numpy()
+            self.results["pair_senders"] = senders.cpu().numpy()
+            self.results["pair_receivers"] = receivers.cpu().numpy()
+            
+            # Create bonding matrix on device
+            n_atoms = len(atoms)
+            bonding_graph = torch.zeros((n_atoms, n_atoms), device=self.device)
+            is_bonded = bond_lengths < vdw_cutoff
+            
+            # Fill the bonding matrix (symmetric)
+            bonding_graph[senders[is_bonded], receivers[is_bonded]] = 1
+            bonding_graph[receivers[is_bonded], senders[is_bonded]] = 1
+            
+            # Only convert to numpy at the very end
+            self.results["bonding_graph"] = bonding_graph.cpu().numpy()
