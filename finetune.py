@@ -13,11 +13,16 @@ from torch.utils.data import BatchSampler, DataLoader, RandomSampler
 try:
     import wandb
 except ImportError:
-    raise ImportError("wandb is not installed. Please install it with `pip install wandb`.")
-from orb_models import utils
-from orb_models.dataset.ase_dataset import AseSqliteDataset
-from orb_models.forcefield import base, pretrained
+    raise ImportError(
+        "wandb is not installed. Please install it with `pip install wandb`."
+    )
 from wandb import wandb_run
+
+from orb_models import utils
+from orb_models.dataset.ase_sqlite_dataset import AseSqliteDataset
+from orb_models.forcefield import base, pretrained, atomic_system, property_definitions
+from orb_models.dataset import augmentations
+
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -25,7 +30,6 @@ logging.basicConfig(
 
 
 def init_wandb_from_config(dataset: str, job_type: str, entity: str) -> wandb_run.Run:
-
     """Initialise wandb."""
     wandb.init(  # type: ignore
         job_type=job_type,
@@ -38,10 +42,6 @@ def init_wandb_from_config(dataset: str, job_type: str, entity: str) -> wandb_ru
     )
     assert wandb.run is not None
     return wandb.run
-
-
-
-
 
 
 def finetune(
@@ -162,28 +162,43 @@ def finetune(
 
 
 def build_train_loader(
+    dataset_name: str,
     dataset_path: str,
     num_workers: int,
     batch_size: int,
     augmentation: Optional[bool] = True,
     target_config: Optional[Dict] = None,
+    system_config: Optional[atomic_system.SystemConfig] = None,
     **kwargs,
 ) -> DataLoader:
     """Builds the train dataloader from a config file.
 
     Args:
+        dataset_name: The name of the dataset.
         dataset_path: Dataset path.
         num_workers: The number of workers for each dataset.
         batch_size: The batch_size config for each dataset.
         augmentation: If rotation augmentation is used.
         target_config: The target config.
+        system_config: The system config.
 
     Returns:
         The train Dataloader.
     """
     log_train = "Loading train datasets:\n"
+    aug = []
+    if augmentation:
+        aug = [augmentations.rotate_randomly]
+    if system_config is None:
+        system_config = atomic_system.SystemConfig(radius=6.0, max_num_neighbors=20)
+    target_config = property_definitions.instantiate_property_config(target_config)
     dataset = AseSqliteDataset(
-        dataset_path, target_config=target_config, augmentation=augmentation, **kwargs
+        dataset_name,
+        dataset_path,
+        system_config=system_config,
+        target_config=target_config,
+        augmentations=aug,
+        **kwargs,
     )
 
     log_train += f"Total train dataset size: {len(dataset)} samples"
@@ -218,10 +233,10 @@ def run(args):
     utils.seed_everything(args.random_seed)
 
     # Make sure to use this flag for matmuls on A100 and H100 GPUs.
-    torch.set_float32_matmul_precision("high")
+    precision = "float32-high"
 
     # Instantiate model
-    model = pretrained.orb_v2(device=device)
+    model = pretrained.orb_v2(device=device, precision=precision)
     for param in model.parameters():
         param.requires_grad = True
     model_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -244,6 +259,7 @@ def run(args):
         wandb.define_metric("finetune_step/*", step_metric="step")
 
     loader_args = dict(
+        dataset_name=args.dataset,
         dataset_path=args.data_path,
         num_workers=args.num_workers,
         batch_size=args.batch_size,

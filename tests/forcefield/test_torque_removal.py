@@ -1,8 +1,8 @@
 import pytest
 import torch
-from orb_models.forcefield.graph_regressor import (
-    remove_net_torque,
-    selectively_remove_net_torque_for_nonpbc_systems,
+from orb_models.forcefield.forcefield_utils import (
+    _remove_net_torque,
+    _selectively_remove_net_torque_for_nonpbc_systems,
 )
 
 
@@ -58,7 +58,7 @@ def random_batched_positions_forces_n_nodes():
 def _net_force_and_torque(positions, forces):
     net_force = forces.sum(dim=0)
     relative_positions = positions - positions.mean(dim=0)
-    net_torque = torch.cross(relative_positions, forces, dim=-1).sum(dim=0)
+    net_torque = torch.linalg.cross(relative_positions, forces).sum(dim=0)
     return net_force, net_torque
 
 
@@ -73,7 +73,7 @@ def test_adjust_forces_single_graph(positions_forces_n_nodes):
     assert torch.allclose(net_force, torch.zeros(3), atol=1e-6)
     assert not torch.allclose(net_torque, torch.zeros(3), atol=1e-6)
 
-    adjusted_forces = remove_net_torque(positions, forces, n_nodes)
+    adjusted_forces = _remove_net_torque(positions, forces, n_nodes)
 
     # Assert net force is still zero and net torque is now also zero
     net_force, net_torque = _net_force_and_torque(positions, adjusted_forces)
@@ -100,18 +100,20 @@ def test_adjust_forces_multiple_graphs(positions_forces_n_nodes):
         idx = batch_indices == i
         net_force = forces[idx].sum(dim=0)
         relative_positions = positions[idx] - positions[idx].mean(dim=0)
-        net_torque = torch.cross(relative_positions, forces[idx], dim=-1).sum(dim=0)
+        net_torque = torch.linalg.cross(relative_positions, forces[idx]).sum(dim=0)
         assert torch.allclose(net_force, torch.zeros(3), atol=1e-6)
         assert not torch.allclose(net_torque, torch.zeros(3), atol=1e-6)
 
-    adjusted_forces = remove_net_torque(positions, forces, n_nodes)
+    adjusted_forces = _remove_net_torque(positions, forces, n_nodes)
 
     # net force is still zero, net torque is now zero
     for i in range(2):
         idx = batch_indices == i
         net_force = adjusted_forces[idx].sum(dim=0)
         relative_positions = positions[idx] - positions[idx].mean(dim=0)
-        net_torque = torch.cross(relative_positions, adjusted_forces[idx], dim=-1).sum(dim=0)
+        net_torque = torch.linalg.cross(relative_positions, adjusted_forces[idx]).sum(
+            dim=0
+        )
         assert torch.allclose(net_force, torch.zeros(3), atol=1e-6)
         assert torch.allclose(net_torque, torch.zeros(3), atol=1e-6)
 
@@ -124,7 +126,7 @@ def test_adjust_forces_random_graphs(random_batched_positions_forces_n_nodes):
     num_graphs = n_nodes.size(0)
     batch_indices = torch.repeat_interleave(torch.arange(num_graphs), n_nodes)
 
-    adjusted_forces = remove_net_torque(positions, forces, n_nodes)
+    adjusted_forces = _remove_net_torque(positions, forces, n_nodes)
 
     # Check net force and net torque per graph
     for i in range(num_graphs):
@@ -145,7 +147,7 @@ def test_adjust_forces_zero_nodes():
     forces = torch.empty((0, 3), dtype=torch.float32)
     n_nodes = torch.tensor([0], dtype=torch.long)
 
-    adjusted_forces = remove_net_torque(positions, forces, n_nodes)
+    adjusted_forces = _remove_net_torque(positions, forces, n_nodes)
 
     # Adjusted forces should be empty
     assert adjusted_forces.shape == (0, 3)
@@ -168,7 +170,7 @@ def test_adjust_forces_singular_matrix():
     forces -= forces.mean(dim=0)
     n_nodes = torch.tensor([4], dtype=torch.long)
 
-    adjusted_forces = remove_net_torque(positions, forces, n_nodes)
+    adjusted_forces = _remove_net_torque(positions, forces, n_nodes)
 
     # Even if M is singular, the function should handle it
     net_force, net_torque = _net_force_and_torque(positions, adjusted_forces)
@@ -184,7 +186,7 @@ def test_adjust_forces_no_adjustment_needed():
     forces = torch.tensor([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]], dtype=torch.float32)
     n_nodes = torch.tensor([2], dtype=torch.long)
 
-    adjusted_forces = remove_net_torque(positions, forces, n_nodes)
+    adjusted_forces = _remove_net_torque(positions, forces, n_nodes)
 
     # Forces should remain unchanged
     assert torch.allclose(adjusted_forces, forces, atol=1e-6)
@@ -202,7 +204,7 @@ def test_adjust_forces_large_values(remove_mean):
         forces -= forces.mean(dim=0)
     n_nodes = torch.tensor([5], dtype=torch.long)
 
-    adjusted_forces = remove_net_torque(positions, forces, n_nodes)
+    adjusted_forces = _remove_net_torque(positions, forces, n_nodes)
 
     net_force = adjusted_forces.sum(dim=0)
     if remove_mean:
@@ -214,7 +216,7 @@ def test_adjust_forces_large_values(remove_mean):
 
     # net torque should be zero
     relative_positions = positions - positions.mean(dim=0)
-    net_torque = torch.cross(relative_positions, adjusted_forces, dim=-1).sum(dim=0)
+    net_torque = torch.linalg.cross(relative_positions, adjusted_forces).sum(dim=0)
     assert torch.allclose(net_torque, torch.zeros(3), atol=1e-2)
 
 
@@ -226,7 +228,7 @@ def test_adjust_forces_dtype(positions_forces_n_nodes):
     positions = positions.to(torch.float64)
     forces = forces.to(torch.float64)
 
-    adjusted_forces = remove_net_torque(positions, forces, n_nodes)
+    adjusted_forces = _remove_net_torque(positions, forces, n_nodes)
 
     assert adjusted_forces.dtype == torch.float64
 
@@ -282,7 +284,7 @@ def test_selectively_remove_net_torque_for_nonpbc_systems(
     net_torques_before = torch.stack(net_torques_before)  # type: ignore
 
     # Apply the function under test
-    adjusted_pred = selectively_remove_net_torque_for_nonpbc_systems(
+    adjusted_pred = _selectively_remove_net_torque_for_nonpbc_systems(
         pred=forces_batch,
         positions=positions_batch,
         cell=cell,

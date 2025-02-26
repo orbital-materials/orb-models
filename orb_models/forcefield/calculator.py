@@ -1,89 +1,114 @@
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 from ase.calculators.calculator import Calculator, all_changes
 
 from orb_models.forcefield.atomic_system import SystemConfig, ase_atoms_to_atom_graphs
 from orb_models.forcefield.graph_regressor import GraphRegressor
+from orb_models.forcefield.conservative_regressor import ConservativeForcefieldRegressor
+from orb_models.forcefield.featurization_utilities import EdgeCreationMethod
+from orb_models.utils import to_numpy
 
 
 class ORBCalculator(Calculator):
-    """ORB ASE Calculator.
-
-    Args:
-        model: torch.nn.Module finetuned Graph regressor
-    """
+    """ORB ASE Calculator."""
 
     def __init__(
         self,
-        model: GraphRegressor,
-        brute_force_knn: Optional[bool] = None,
-        system_config: SystemConfig = SystemConfig(radius=10.0, max_num_neighbors=20),
-        device: Optional[torch.device] = None,
-        **kwargs,
+        model: Union[GraphRegressor, ConservativeForcefieldRegressor],
+        *,
+        conservative: Optional[bool] = None,
+        edge_method: Optional[EdgeCreationMethod] = "knn_scipy",
+        system_config: SystemConfig = SystemConfig(radius=6.0, max_num_neighbors=20),
+        max_num_neighbors: Optional[int] = None,
+        half_supercell: Optional[bool] = None,
+        device: Optional[Union[torch.device, str]] = None,
+        directory: str = ".",
     ):
         """Initializes the calculator.
 
         Args:
-            model (GraphRegressor): The finetuned model to use for predictions.
-            brute_force_knn: whether to use a 'brute force' k-nearest neighbors method for graph construction.
-                Defaults to None, in which case brute_force is used if a GPU is available (2-6x faster),
-                but not on CPU (1.5x faster - 4x slower). For very large systems (>10k atoms),
-                brute_force may OOM on GPU, so it is recommended to set to False in that case.
+            model: The finetuned model to use for predictions.
             system_config (SystemConfig): The config defining how an atomic system is featurized.
+            conservative (bool, optional):
+                - Defaults to True if the model is a ConservativeForcefieldRegressor, otherwise False.
+                - If True, conservative forces and stresses are computed as the gradient of the energy.
+                  An error is raised if the model is not a ConservativeForcefieldRegressor.
+                - If False, direct force and stress predictions are used, not gradient-based ones.
+            max_number_neighbors (int): The maximum number of neighbors for each atom.
+                Larger values should generally increase performace, but the gains may be marginal,
+                whilst the increse in latency could be significant (depending on num atoms).
+                    - Defaults to system_config.max_num_neighbors.
+                    - 120 is sufficient to capture all edges under 6A across all systems in mp-traj validation set.
+            edge_method (EdgeCreationMethod, optional): The method to use for graph edge construction.
+                If None then knn_brute_force is used if tensors are on GPU (2-6x faster),
+                otherwise defaults to knn_scipy. For very large systems, knn_brute_force may OOM on GPU.
+            half_supercell (bool): Whether to use half the supercell for graph construction, and then symmetrize.
+                Defaults to None, in which case half_supercells are used when num_atoms > 5k.
+                This flag does not affect the resulting graph; it is purely an optimization that can double
+                throughput and half memory for very large cells (e.g. 5k+ atoms). For smaller systems, it can harm
+                performance due to additional computation to enforce max_num_neighbors.
             device (Optional[torch.device], optional): The device to use for the model.
-            **kwargs: Additional keyword arguments for parent Calculator class.
+            directory (Optional[str], optional): Working directory in which to read and write files and
+                perform calculations.
         """
-        Calculator.__init__(self, **kwargs)
+        Calculator.__init__(self, directory=directory)
         self.results = {}  # type: ignore
         self.model = model
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = self.model.to(self.device)  # type: ignore
         self.system_config = system_config
-        self.brute_force_knn = brute_force_knn
+        self.max_num_neighbors = max_num_neighbors
+        self.edge_method = edge_method
+        self.half_supercell = half_supercell
+        self.conservative = conservative
 
-        properties = []
-        if model.graph_head is not None:
-            properties += ["energy", "free_energy"]
-        if model.node_head is not None:
-            properties += ["forces"]
-        if model.stress_head is not None:
-            properties += ["stress"]
-        assert len(properties) > 0, "Model must have at least one output head."
-        self.implemented_properties = properties
+        model_is_conservative = hasattr(self.model, "grad_forces_name")
+        if self.conservative is None:
+            self.conservative = model_is_conservative
+
+        if self.conservative and not model_is_conservative:
+            raise ValueError(
+                "Conservative mode requested, but model is not a ConservativeForcefieldRegressor."
+            )
+
+        self.implemented_properties = model.properties  # type: ignore
 
     def calculate(self, atoms=None, properties=None, system_changes=all_changes):
         """Calculate properties.
 
-        :param atoms: ase.Atoms object
-        :param properties: [str], properties to be computed, used by ASE internally
-        :param system_changes: [str], system changes since last calculation, used by ASE internally
-        :return:
+        Args:
+            atoms (ase.Atoms): ASE Atoms object.
+            properties (list of str): Properties to be computed, used by ASE internally.
+            system_changes (list of str): System changes since last calculation, used by ASE internally.
+
+        Returns:
+            None. Results are stored in self.results.
         """
-        # call to base-class to set atoms attribute
         Calculator.calculate(self, atoms)
 
-        # prepare data
+        half_supercell = (
+            len(atoms.positions) >= 5_000
+            if self.half_supercell is None
+            else self.half_supercell
+        )
         batch = ase_atoms_to_atom_graphs(
             atoms,
             system_config=self.system_config,
-            brute_force_knn=self.brute_force_knn,
+            max_num_neighbors=self.max_num_neighbors,
+            edge_method=self.edge_method,
+            half_supercell=half_supercell,
             device=self.device,
-
         )
-        self.model = self.model.to(self.device)  # type: ignore
-
+        batch = batch.to(self.device)  # type: ignore
+        out = self.model.predict(batch)  # type: ignore
         self.results = {}
-        out = self.model.predict(batch)
-        if "energy" in self.implemented_properties:
-            self.results["energy"] = float(out["graph_pred"].detach().cpu().item())
-            self.results["free_energy"] = self.results["energy"]
+        for property in self.implemented_properties:
+            _property = "energy" if property == "free_energy" else property
+            self.results[property] = to_numpy(out[_property].squeeze())
 
-        if "forces" in self.implemented_properties:
-            self.results["forces"] = out["node_pred"].detach().cpu().numpy()
-
-        if "stress" in self.implemented_properties:
-            raw_stress = out["stress_pred"].detach().cpu().numpy()
-            # reshape from (1, 6) to (6,) if necessary
-            self.results["stress"] = (
-                raw_stress[0] if len(raw_stress.shape) > 1 else raw_stress
-            )
+        if self.conservative:
+            self.results["direct_forces"] = self.results["forces"]
+            self.results["direct_stress"] = self.results["stress"]
+            self.results["forces"] = self.results[self.model.grad_forces_name]
+            self.results["stress"] = self.results[self.model.grad_stress_name]

@@ -3,35 +3,40 @@ name = "orb-models"
 dynamic = ["version"]
 description = "Foundation models for computational chemistry."
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 authors = [{name = "Orbital Materials"}]
 license = {text = "Apache License, Version 2.0"}
 classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
 
 dependencies = [
-    "cached_path>=1.6.2",
-    "ase>=3.23.0",
+    "cached_path>=1.6.7",
+    "ase>=3.24.0",
     "numpy>=1.26.4",
-    "scipy>=1.13.1",
-    "torch>=2.2.0, <3.0.0",
+    "scipy>=1.15.1",
+    "torch>=2.6.0, <3.0.0",
     "dm-tree>=0.1.8",
     "tqdm>=4.66.5",
 ]
 
 [build-system]
-requires = ["setuptools"]
-build-backend = "setuptools.build_meta"
+requires = ["poetry-core>=1.0.0", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]
+build-backend = "poetry_dynamic_versioning.backend"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["orb_models*"]
+
+
+[tool.poetry-dynamic-versioning]
+enable = true
+
+[tool.poetry]
+version = "0.0.0"
 
 [project.urls]
 Homepage = "https://github.com/orbital-materials/orb-models"
