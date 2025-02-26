@@ -89,7 +89,7 @@ def test_regressor_can_predict_scaled(graph, gns_model, node_head, graph_head):
     regressor.eval()
     # update normalizer
     regressor.loss(graph)
-    forward_result = regressor(graph)
+    forward_result = regressor(graph, override_training=True)
 
     inference = regressor.predict(graph)
     assert (
@@ -167,7 +167,6 @@ def test_regressor_can_torch_compile(graph, gns_model, node_head, graph_head):
         heads=[node_head(), graph_head()],
         model=gns_model,
     )
-    regressor.eval()
     compiled = torch.compile(regressor, mode="default", dynamic=True, fullgraph=True)
     compiled(graph)
 
@@ -183,6 +182,5 @@ def test_regressor_module_compiles(graph, gns_model, node_head, graph_head):
         heads=[node_head(), graph_head()],
         model=gns_model,
     )
-    regressor.eval()
     regressor.compile(mode="default", dynamic=True, fullgraph=True)
     regressor(graph)

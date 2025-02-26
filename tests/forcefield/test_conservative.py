@@ -171,7 +171,7 @@ def test_regressor_can_torch_compile(conservative_regressor, batch):
     compiled = torch.compile(
         conservative_regressor, mode="default", dynamic=True, fullgraph=True
     )
-    compiled(batch)
+    compiled(batch, override_training=True)
 
 
 def test_regressor_module_compiles(conservative_regressor, batch):
@@ -183,4 +183,4 @@ def test_regressor_module_compiles(conservative_regressor, batch):
     """
     conservative_regressor.eval()
     conservative_regressor.compile(mode="default", dynamic=True, fullgraph=True)
-    conservative_regressor(batch)
+    conservative_regressor(batch, override_training=True)

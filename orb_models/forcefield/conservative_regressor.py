@@ -96,8 +96,16 @@ class ConservativeForcefieldRegressor(nn.Module):
             props.append("confidence")
         return props
 
-    def forward(self, batch: base.AtomGraphs) -> Dict[str, torch.Tensor]:
+    def forward(
+        self, batch: base.AtomGraphs, override_training: bool = True
+    ) -> Dict[str, torch.Tensor]:
         """Forward pass computing both direct and conservative predictions."""
+        if not self.training and not override_training:
+            raise RuntimeError(
+                "GraphRegressor's forward method is not intended to be used directly. "
+                "For model predictions use the predict method."
+            )
+
         vectors, stress_displacement, generator = (
             batch.compute_differentiable_edge_vectors()
         )
@@ -150,7 +158,7 @@ class ConservativeForcefieldRegressor(nn.Module):
         self, batch: base.AtomGraphs, split: bool = False
     ) -> Dict[str, torch.Tensor]:
         """Predict energy, forces, and stress."""
-        preds = self(batch)
+        preds = self(batch, override_training=True)
 
         out = {}
         out[self.energy_name] = self.heads[self.energy_name].denormalise_prediction(
@@ -184,7 +192,7 @@ class ConservativeForcefieldRegressor(nn.Module):
 
     def loss(self, batch: base.AtomGraphs) -> base.ModelOutput:
         """Compute loss including both direct and conservative terms."""
-        out = self(batch)
+        out = self(batch, override_training=True)
 
         # predictions
         energy_pred = out[self.energy_name]

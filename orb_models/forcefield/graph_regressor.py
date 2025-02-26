@@ -77,9 +77,15 @@ class GraphRegressor(nn.Module):
                 param.requires_grad = False
 
     def forward(
-        self, batch: base.AtomGraphs
+        self, batch: base.AtomGraphs, override_training: bool = False
     ) -> Dict[str, Union[torch.Tensor, Dict[str, torch.Tensor]]]:
         """Forward pass of GraphRegressor."""
+        if not self.training and not override_training:
+            raise RuntimeError(
+                "GraphRegressor's forward method is not intended to be used directly. "
+                "For model predictions use the predict method."
+            )
+
         out = self.model(batch)
         node_features = out["node_features"]
         for name, head in self.heads.items():
@@ -104,7 +110,7 @@ class GraphRegressor(nn.Module):
 
     def loss(self, batch: base.AtomGraphs) -> base.ModelOutput:
         """Loss function of GraphRegressor."""
-        out = self(batch)
+        out = self(batch, override_training=True)
         loss = torch.tensor(0.0, device=batch.positions.device)
         metrics: Dict = {}
 
