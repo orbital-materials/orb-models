@@ -160,8 +160,8 @@ You can also run the model using Docker:
 2. Run the Docker container:
 
    ```bash
-   docker run --gpus all --rm --name bioemu -it orb /bin/bash
-   # docker run --gpus all --rm --name bioemu -it cford38/orb:latest /bin/bash
+   docker run --gpus all --rm --name orb -it orb /bin/bash
+   # docker run --gpus all --rm --name orb -it cford38/orb:latest /bin/bash
    ```
 
 > [!NOTE]
