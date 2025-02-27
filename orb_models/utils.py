@@ -1,6 +1,6 @@
 """Experiment utilities."""
 
-import math
+import warnings
 import random
 import re
 from collections import defaultdict
@@ -12,6 +12,31 @@ import torch
 from orb_models.forcefield import base
 
 T = TypeVar("T")
+
+
+def set_torch_precision(precision: str = "float32-high") -> torch.dtype:
+    """Set the default dtype for the current process."""
+    if precision == "float64":
+        torch_dtype = torch.float64
+    elif precision == "float32-highest":
+        torch_dtype = torch.float32
+        torch.set_float32_matmul_precision("highest")
+    elif precision == "float32-high":
+        torch_dtype = torch.float32
+        torch.set_float32_matmul_precision("high")
+    else:
+        raise ValueError(f"Unknown precision: {precision}")
+
+    warnings.warn(f"Setting global torch default dtype to {torch_dtype}.")
+    if precision != "float32-high":
+        warnings.warn(
+            "Consider passing 'precision=float32-high' for significantly higher (>2x) "
+            "model throughput if high precision is not required."
+        )
+
+    torch.set_default_dtype(torch_dtype)
+
+    return torch_dtype
 
 
 def init_device(device_id: Optional[int] = None) -> torch.device:
@@ -160,158 +185,21 @@ def get_optim(
     div_factor = 10  # max lr will be 10 times larger than initial lr
     final_div_factor = 10  # min lr will be 10 times smaller than initial lr
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
-        optimizer, 
-        max_lr=lr * div_factor, 
-        total_steps=total_steps, 
-        pct_start=0.05, 
+        optimizer,
+        max_lr=lr * div_factor,
+        total_steps=total_steps,
+        pct_start=0.05,
         div_factor=div_factor,
         final_div_factor=final_div_factor,
     )
 
-    return optimizer, scheduler
+    return optimizer, scheduler  # type: ignore
 
 
-def rand_angles(*shape, requires_grad=False, dtype=None, device=None):
-    r"""random rotation angles
-
-    Parameters
-    ----------
-    *shape : int
-
-    Returns
-    -------
-    alpha : `torch.Tensor`
-        tensor of shape :math:`(\mathrm{shape})`
-
-    beta : `torch.Tensor`
-        tensor of shape :math:`(\mathrm{shape})`
-
-    gamma : `torch.Tensor`
-        tensor of shape :math:`(\mathrm{shape})`
-    """
-    alpha, gamma = 2 * math.pi * torch.rand(2, *shape, dtype=dtype, device=device)
-    beta = torch.rand(shape, dtype=dtype, device=device).mul(2).sub(1).acos()
-    alpha = alpha.detach().requires_grad_(requires_grad)
-    beta = beta.detach().requires_grad_(requires_grad)
-    gamma = gamma.detach().requires_grad_(requires_grad)
-    return alpha, beta, gamma
-
-
-def matrix_x(angle: torch.Tensor) -> torch.Tensor:
-    r"""matrix of rotation around X axis
-
-    Parameters
-    ----------
-    angle : `torch.Tensor`
-        tensor of any shape :math:`(...)`
-
-    Returns
-    -------
-    `torch.Tensor`
-        matrices of shape :math:`(..., 3, 3)`
-    """
-    c = angle.cos()
-    s = angle.sin()
-    o = torch.ones_like(angle)
-    z = torch.zeros_like(angle)
-    return torch.stack(
-        [
-            torch.stack([o, z, z], dim=-1),
-            torch.stack([z, c, -s], dim=-1),
-            torch.stack([z, s, c], dim=-1),
-        ],
-        dim=-2,
-    )
-
-
-def matrix_y(angle: torch.Tensor) -> torch.Tensor:
-    r"""matrix of rotation around Y axis
-
-    Parameters
-    ----------
-    angle : `torch.Tensor`
-        tensor of any shape :math:`(...)`
-
-    Returns
-    -------
-    `torch.Tensor`
-        matrices of shape :math:`(..., 3, 3)`
-    """
-    c = angle.cos()
-    s = angle.sin()
-    o = torch.ones_like(angle)
-    z = torch.zeros_like(angle)
-    return torch.stack(
-        [
-            torch.stack([c, z, s], dim=-1),
-            torch.stack([z, o, z], dim=-1),
-            torch.stack([-s, z, c], dim=-1),
-        ],
-        dim=-2,
-    )
-
-
-def matrix_z(angle: torch.Tensor) -> torch.Tensor:
-    r"""matrix of rotation around Z axis
-
-    Parameters
-    ----------
-    angle : `torch.Tensor`
-        tensor of any shape :math:`(...)`
-
-    Returns
-    -------
-    `torch.Tensor`
-        matrices of shape :math:`(..., 3, 3)`
-    """
-    c = angle.cos()
-    s = angle.sin()
-    o = torch.ones_like(angle)
-    z = torch.zeros_like(angle)
-    return torch.stack(
-        [
-            torch.stack([c, -s, z], dim=-1),
-            torch.stack([s, c, z], dim=-1),
-            torch.stack([z, z, o], dim=-1),
-        ],
-        dim=-2,
-    )
-
-
-def angles_to_matrix(alpha, beta, gamma):
-    r"""conversion from angles to matrix
-
-    Parameters
-    ----------
-    alpha : `torch.Tensor`
-        tensor of shape :math:`(...)`
-
-    beta : `torch.Tensor`
-        tensor of shape :math:`(...)`
-
-    gamma : `torch.Tensor`
-        tensor of shape :math:`(...)`
-
-    Returns
-    -------
-    `torch.Tensor`
-        matrices of shape :math:`(..., 3, 3)`
-    """
-    alpha, beta, gamma = torch.broadcast_tensors(alpha, beta, gamma)
-    return matrix_y(alpha) @ matrix_x(beta) @ matrix_y(gamma)
-
-
-def rand_matrix(*shape, requires_grad=False, dtype=None, device=None):
-    r"""random rotation matrix
-
-    Parameters
-    ----------
-    *shape : int
-
-    Returns
-    -------
-    `torch.Tensor`
-        tensor of shape :math:`(\mathrm{shape}, 3, 3)`
-    """
-    R = angles_to_matrix(*rand_angles(*shape, dtype=dtype, device=device))
-    return R.detach().requires_grad_(requires_grad)
+def to_numpy(x):
+    """If x is a tensor, convert it to a float (if 1 element) or np array (if > 1 element)."""
+    if isinstance(x, torch.Tensor):
+        if x.numel() == 1:
+            return x.item()
+        return x.detach().cpu().numpy()
+    return x

@@ -2,12 +2,23 @@
 
 from collections import defaultdict
 from copy import deepcopy
-from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Sequence, Union
+from typing import (
+    Any,
+    Dict,
+    List,
+    Mapping,
+    NamedTuple,
+    Optional,
+    Sequence,
+    Union,
+    Tuple,
+)
 
 import torch
 import tree
 
 from orb_models.forcefield import featurization_utilities
+from orb_models.forcefield.featurization_utilities import TORCH_FLOAT_DTYPES
 
 Metric = Union[torch.Tensor, int, float]
 TensorDict = Mapping[str, Optional[torch.Tensor]]
@@ -32,14 +43,19 @@ class AtomGraphs(NamedTuple):
             It will always contain "atomic_numbers" and "positions" keys, representing the
             atomic numbers of each node, and the 3d cartesian positions of them respectively.
         edge_features (Dict[str, torch.Tensor]): A dictionary containing edge feature tensors.
-        system_features (Optional[TensorDict]): An optional dictionary containing system-level features.
-        node_targets (Optional[Dict[torch.Tensor]]): An optional dict of tensors containing targets
+        system_features (Dict[str, torch.Tensor]): A dictionary containing system-level features.
+        node_targets (Optional[Dict[str, torch.Tensor]]): An optional dict of tensors containing targets
             for individual nodes. This tensor is commonly expected to have shape (num_nodes, *).
-        edge_target (Optional[torch.Tensor]): An optional tensor containing targets for individual edges.
-            This tensor is commonly expected to have (num_edges, *).
-        system_targets (Optional[Dict[torch.Tensor]]): An optional dict of tensors containing targets for the
-            entire system. system_id (Optional[torch.Tensor]): An optional tensor containing the ID of the system.
+        edge_targets (Optional[Dict[str, torch.Tensor]]): An optional dict of tensors containing targets for
+            individual edges. This tensor is commonly expected to have (num_edges, *).
+        system_targets (Optional[Dict[str, torch.Tensor]]): An optional dict of tensors containing targets for the
+            entire system.
+        system_id (Optional[torch.Tensor]): An optional tensor containing a dataset-specific index for a datapoint.
         fix_atoms (Optional[torch.Tensor]): An optional tensor containing information on fixed atoms in the system.
+        tags (Optional[torch.Tensor]): An optional tensor containing ase tags for each node.
+        radius (float): The radius used for neighbor calculation.
+        max_num_neighbors (int): The maximum number of neighbors used for the neighbor calculation.
+        half_supercell (bool): Whether to use half the supercell for graph construction, and then symmetrize.
     """
 
     senders: torch.Tensor
@@ -49,14 +65,15 @@ class AtomGraphs(NamedTuple):
     node_features: Dict[str, torch.Tensor]
     edge_features: Dict[str, torch.Tensor]
     system_features: Dict[str, torch.Tensor]
-    node_targets: Optional[Dict[str, torch.Tensor]] = None
-    edge_targets: Optional[Dict[str, torch.Tensor]] = None
-    system_targets: Optional[Dict[str, torch.Tensor]] = None
-    system_id: Optional[torch.Tensor] = None
-    fix_atoms: Optional[torch.Tensor] = None
-    tags: Optional[torch.Tensor] = None
-    radius: Optional[float] = None
-    max_num_neighbors: Optional[int] = None
+    node_targets: Optional[Dict[str, torch.Tensor]]
+    edge_targets: Optional[Dict[str, torch.Tensor]]
+    system_targets: Optional[Dict[str, torch.Tensor]]
+    system_id: Optional[torch.Tensor]
+    fix_atoms: Optional[torch.Tensor]
+    tags: Optional[torch.Tensor]
+    radius: float
+    max_num_neighbors: torch.Tensor
+    half_supercell: bool = False
 
     @property
     def positions(self):
@@ -77,6 +94,15 @@ class AtomGraphs(NamedTuple):
         self.node_features["atomic_numbers"] = val
 
     @property
+    def atomic_numbers_embedding(self):
+        """Get atom type embedding."""
+        return self.node_features["atomic_numbers_embedding"]
+
+    @atomic_numbers_embedding.setter
+    def atomic_numbers_embedding(self, val: torch.Tensor):
+        self.node_features["atomic_numbers_embedding"] = val
+
+    @property
     def cell(self):
         """Get unit cells."""
         assert self.system_features
@@ -86,6 +112,77 @@ class AtomGraphs(NamedTuple):
     def cell(self, val: torch.Tensor):
         assert self.system_features
         self.system_features["cell"] = val
+
+    def compute_differentiable_edge_vectors(
+        self,
+        use_stress_displacement: bool = True,
+        use_rotation: bool = True,
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """Compute pbc-aware edge vectors such that gradients flow back to positions.
+
+        Args:
+            stress_displacement (bool): If True, a zero 'displacement' tensor is created
+            and matrix-multiplied with positions and cell, such that:
+                    stress = grad(E)_{displacement} / volume
+        """
+        positions = self.node_features["positions"]  # (natoms, 3)
+        positions.requires_grad_(True)
+        unit_shifts = self.edge_features["unit_shifts"].unsqueeze(1)  # (nedges, 1, 3)
+        cell = self.system_features["cell"]  # (ngraphs, 3, 3)
+
+        displacement = None
+        if use_stress_displacement:
+            per_node_graph_indices = self._get_per_node_graph_indices()
+            positions, cell, displacement = create_and_apply_stress_displacement(
+                positions, cell, per_node_graph_indices
+            )
+
+        generator = None
+        if use_rotation:
+            per_node_graph_indices = self._get_per_node_graph_indices()
+            generator = torch.zeros_like(cell, requires_grad=True)
+            rotation = featurization_utilities.rotation_from_generator(
+                generator,
+            )
+            positions = torch.bmm(
+                positions.unsqueeze(1),
+                rotation[per_node_graph_indices],
+            ).squeeze(1)
+            cell = torch.bmm(cell, rotation)
+
+        # This is a compilable equivalent of cells.repeat_interleave(self.n_edge, dim=0)
+        per_edge_graph_indices = self._get_per_edge_graph_indices()
+        cells_repeat = cell[per_edge_graph_indices]  # (nedges, 3, 3)
+
+        shifts = torch.bmm(unit_shifts, cells_repeat).squeeze(1)  # (nedges, 3)
+        vectors = positions[self.receivers] - positions[self.senders] + shifts
+
+        return vectors, displacement, generator
+
+    def _get_per_edge_graph_indices(self):
+        """Get the graph index for each edge in the system."""
+        graph_indices = torch.zeros_like(self.senders)  # (nedges,)
+        cumsums = torch.cumsum(self.n_edge, dim=0)  # (ngraphs,)
+        graph_indices[:] = torch.searchsorted(
+            cumsums,
+            torch.arange(len(self.senders), device=self.senders.device),
+            right=True,
+        )
+        return graph_indices  # (nedges,)
+
+    def _get_per_node_graph_indices(self):
+        """Get the graph index for each node in the system."""
+        positions = self.node_features["positions"]
+        graph_indices = torch.zeros(
+            len(positions), device=positions.device, dtype=torch.int
+        )
+        cumsums = torch.cumsum(self.n_node, dim=0)
+        graph_indices[:] = torch.searchsorted(
+            cumsums,
+            torch.arange(len(positions), device=positions.device),
+            right=True,
+        )
+        return graph_indices  # (natoms,)
 
     def clone(self) -> "AtomGraphs":
         """Clone the AtomGraphs object.
@@ -101,14 +198,28 @@ class AtomGraphs(NamedTuple):
 
         return tree.map_structure(_clone, self)
 
-    def to(self, device: Union[torch.device, str]) -> "AtomGraphs":
-        """Move AtomGraphs child tensors to a device."""
+    def to(
+        self,
+        device: Optional[Union[torch.device, str]] = None,
+        dtype: Optional[torch.dtype] = None,
+    ) -> "AtomGraphs":
+        """Move AtomGraphs child tensors to a device and/or dtype.
+
+        NOTE: only floating point tensors are cast to the specified dtype.
+        """
+        if dtype is not None and dtype not in TORCH_FLOAT_DTYPES:
+            raise ValueError(f"dtype must be a floating point type, got {dtype}")
+
         if isinstance(device, str):
             device = torch.device(device)
 
         def _to(x):
             if hasattr(x, "to"):
-                return x.to(device)
+                # Only cast if x is a floating-point tensor
+                if torch.is_floating_point(x):
+                    return x.to(device=device, dtype=dtype)
+                else:
+                    return x.to(device=device)
             else:
                 return x
 
@@ -218,6 +329,7 @@ class AtomGraphs(NamedTuple):
         tags = _split_tensors(graphs.tags, batch_nodes)
         batch_nodes = [torch.tensor([n]) for n in batch_nodes]
         batch_edges = [torch.tensor([e]) for e in batch_edges]
+        max_num_neighbors = [torch.tensor([m]) for m in graphs.max_num_neighbors]
 
         # calculate the new senders and receivers
         senders = list(_split_tensors(graphs.senders, batch_edges))
@@ -250,7 +362,9 @@ class AtomGraphs(NamedTuple):
                 fix_atoms,
                 tags,
                 [graphs.radius for _ in range(len(batch_nodes))],
-                [graphs.max_num_neighbors for _ in range(len(batch_nodes))],
+                max_num_neighbors,
+                [graphs.half_supercell for _ in range(len(batch_nodes))],
+                strict=True,
             )
         ]
 
@@ -273,8 +387,6 @@ def batch_graphs(graphs: List[AtomGraphs]) -> AtomGraphs:
     )
     radius = graphs[0].radius
     assert set([graph.radius for graph in graphs]) == {radius}
-    max_num_neighbours = graphs[0].max_num_neighbors
-    assert set([graph.max_num_neighbors for graph in graphs]) == {max_num_neighbours}
 
     return AtomGraphs(
         n_node=torch.concatenate([g.n_node for g in graphs]).long(),
@@ -295,61 +407,54 @@ def batch_graphs(graphs: List[AtomGraphs]) -> AtomGraphs:
         fix_atoms=_concat([g.fix_atoms for g in graphs]),
         tags=_concat([g.tags for g in graphs]),
         radius=radius,
-        max_num_neighbors=max_num_neighbours,
+        max_num_neighbors=torch.concatenate(
+            [g.max_num_neighbors for g in graphs]
+        ).long(),
+        half_supercell=graphs[0].half_supercell,
     )
 
 
 def refeaturize_atomgraphs(
     atoms: AtomGraphs,
     positions: torch.Tensor,
-    atomic_number_embeddings: Optional[torch.Tensor] = None,
+    atomic_numbers_embedding: Optional[torch.Tensor] = None,
     cell: Optional[torch.Tensor] = None,
     recompute_neighbors=True,
     updates: Optional[torch.Tensor] = None,
-    fixed_atom_pos: Optional[torch.Tensor] = None,
-    fixed_atom_type_embedding: Optional[torch.Tensor] = None,
     differentiable: bool = False,
 ) -> AtomGraphs:
     """Return a graph updated according to the new positions, and (if given) atomic numbers and unit cells.
 
-    Note: if a unit cell is given, it will *both* be used to do the
-    pbc-remapping and be set on the returned AtomGraphs
+    NOTE:
+        - if 'cell' is specified, positions will be remapped using it.
+        - if atoms.fix_atoms is not None, then atoms at those indices have
+          *both* their positions and atomic embeddings held fixed.
 
     Args:
         atoms (AtomGraphs): The original AtomGraphs object.
         positions (torch.Tensor): The new positions of the atoms.
-        atomic_number_embeddings (Optional[torch.Tensor]): The new atomic number embeddings.
+        atomic_numbers_embedding (Optional[torch.Tensor]): The new atomic number embeddings.
         cell (Optional[torch.Tensor]): The new unit cell.
         recompute_neighbors (bool): Whether to recompute the neighbor list.
         updates (Optional[torch.Tensor]): The updates to the positions.
-        fixed_atom_pos (Optional[torch.Tensor]): The positions of atoms
-            which are fixed when diffusing on a fixed trajectory.
-        fixed_atom_type_embedding (Optional[torch.Tensor]): If using atom type diffusion
-            with a fixed trajectory, the unormalized vectors of the fixed atoms. Shape (n_atoms, 118).
         differentiable (bool): Whether to make the graph inputs require_grad. This includes
             the positions and atomic number embeddings, if passed.
-        exact_pbc_image_neighborhood: bool: If the exact pbc image neighborhood calculation (from torch nl)
-            which considers boundary crossing for more than cell is used.
 
     Returns:
         AtomGraphs: A refeaturized AtomGraphs object.
     """
     original_device = atoms.positions.device
+    original_dtype = atoms.positions.dtype
 
     if cell is None:
         cell = atoms.cell
 
-    if atoms.fix_atoms is not None and fixed_atom_pos is not None:
-        positions[atoms.fix_atoms] = fixed_atom_pos[atoms.fix_atoms]
-
-    if (
-        atoms.fix_atoms is not None
-        and fixed_atom_type_embedding is not None
-        and atomic_number_embeddings is not None
-    ):
-        atomic_number_embeddings[atoms.fix_atoms] = fixed_atom_type_embedding[
-            atoms.fix_atoms
-        ]
+    if atoms.fix_atoms is not None:
+        positions[atoms.fix_atoms] = atoms.positions[atoms.fix_atoms]
+        if atomic_numbers_embedding is not None:
+            atomic_numbers_embedding[atoms.fix_atoms] = atoms.atomic_numbers_embedding[
+                atoms.fix_atoms
+            ]
 
     num_atoms = atoms.n_node
     positions = featurization_utilities.batch_map_to_pbc_cell(
@@ -358,21 +463,24 @@ def refeaturize_atomgraphs(
 
     if differentiable:
         positions.requires_grad = True
-        if atomic_number_embeddings is not None:
-            atomic_number_embeddings.requires_grad = True
+        if atomic_numbers_embedding is not None:
+            atomic_numbers_embedding.requires_grad = True
 
     if recompute_neighbors:
         assert atoms.radius is not None and atoms.max_num_neighbors is not None
+
         (
             edge_index,
             edge_vectors,
+            unit_shifts,
             batch_num_edges,
         ) = featurization_utilities.batch_compute_pbc_radius_graph(
             positions=positions,
-            periodic_boundaries=cell,
+            cells=cell,
             radius=atoms.radius,
-            image_idx=num_atoms,
+            n_node=num_atoms,
             max_number_neighbors=atoms.max_num_neighbors,
+            half_supercell=atoms.half_supercell,
         )
         new_senders = edge_index[0]
         new_receivers = edge_index[1]
@@ -383,16 +491,14 @@ def refeaturize_atomgraphs(
         edge_vectors = recompute_edge_vectors(atoms, updates)
         batch_num_edges = atoms.n_edge
 
-    edge_features = {
-        "vectors": edge_vectors.to(torch.float32),
-    }
+    edge_features = {"vectors": edge_vectors, "unit_shifts": unit_shifts}
 
     new_node_features = {}
     if atoms.node_features is not None:
         new_node_features = deepcopy(atoms.node_features)
     new_node_features["positions"] = positions
-    if atomic_number_embeddings is not None:
-        new_node_features["atomic_numbers_embedding"] = atomic_number_embeddings
+    if atomic_numbers_embedding is not None:
+        new_node_features["atomic_numbers_embedding"] = atomic_numbers_embedding
 
     new_system_features = {}
     if atoms.system_features is not None:
@@ -408,12 +514,15 @@ def refeaturize_atomgraphs(
         edge_features=edge_features,
         system_features=new_system_features,
         node_targets=atoms.node_targets,
+        edge_targets=atoms.edge_targets,
         system_targets=atoms.system_targets,
+        system_id=atoms.system_id,
         fix_atoms=atoms.fix_atoms,
         tags=atoms.tags,
         radius=atoms.radius,
         max_num_neighbors=atoms.max_num_neighbors,
-    ).to(original_device)
+        half_supercell=atoms.half_supercell,
+    ).to(device=original_device, dtype=original_dtype)
 
     return new_atoms
 
@@ -433,6 +542,20 @@ def volume_atomgraphs(atoms: AtomGraphs):
     return (cell[:, 0] * torch.linalg.cross(cell[:, 1], cell[:, 2])).sum(-1)
 
 
+def create_and_apply_stress_displacement(
+    positions: torch.Tensor, cell: torch.Tensor, per_node_graph_indices: torch.Tensor
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Create and apply a displacement s.t. stress = grad(E)_{displacement} / volume."""
+    displacement = torch.zeros_like(cell)
+    displacement.requires_grad_(True)
+    symmetric_displacement = 0.5 * (displacement + displacement.transpose(-1, -2))
+    positions = positions + torch.bmm(
+        positions.unsqueeze(1), symmetric_displacement[per_node_graph_indices]
+    ).squeeze(1)
+    cell = cell + torch.bmm(cell, symmetric_displacement)
+    return positions, cell, displacement
+
+
 def _map_concat(nests):
     concat = lambda *args: _concat(args)
     return tree.map_structure(concat, *nests)
@@ -441,7 +564,7 @@ def _map_concat(nests):
 def _concat(
     tensors: List[Optional[torch.Tensor]],
 ) -> Optional[torch.Tensor]:
-    """Splits tensors based on the intended split sizes."""
+    """Concatenate tensors."""
     if any([x is None for x in tensors]):
         return None
     return torch.concat(tensors, dim=0)  # type: ignore
@@ -465,6 +588,8 @@ def _split_features(
     """Splits features based on the intended split sizes."""
     if features is None:
         return [None] * len(split_sizes)
+    elif features == {}:
+        return [{}] * len(split_sizes)
 
     split_dict = {
         k: torch.split(v, split_sizes) if v is not None else [None] * len(split_sizes)  # type: ignore

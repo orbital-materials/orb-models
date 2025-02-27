@@ -1,105 +1,172 @@
-from typing import Dict, Literal, Optional, Tuple, Union
+"""A GraphRegressor model that combines a pretrained base model with a set of regression heads.
 
-import numpy
+This module also provides the NodeHead and GraphHead classes, which are generic regression heads.
+For regression tasks that require custom prediction heads, we define these in their own modules.
+For instance, our Energy and Forces prediction heads are defined in the forcefield module.
+"""
+
+from typing import Any, List, Literal, Mapping, Optional, Dict, Sequence, Tuple, Union
+
 import torch
-import torch.nn as nn
+from torch import nn
+from torch.nn import functional as F
 
-from orb_models.forcefield import base, segment_ops
-from orb_models.forcefield.gns import _KEY, MoleculeGNS
-from orb_models.forcefield.nn_util import build_mlp
+from orb_models.forcefield import base
 from orb_models.forcefield.property_definitions import PROPERTIES, PropertyDefinition
-from orb_models.forcefield.reference_energies import REFERENCE_ENERGIES
-
-global HAS_WARNED_FOR_TF32_MATMUL
-HAS_WARNED_FOR_TF32_MATMUL = False
-
-
-def warn_for_tf32_matmul():
-    """Warn the user once only if they are not using tensorfloat matmuls."""
-    global HAS_WARNED_FOR_TF32_MATMUL
-    if (
-        not HAS_WARNED_FOR_TF32_MATMUL
-        and torch.cuda.is_available()
-        and not torch.get_float32_matmul_precision() == "high"
-    ):
-        print(
-            "Warning! You are using a model on the GPU without enabling tensorfloat matmuls."
-            "This can be up to 2x slower than enabling this flag."
-            "Enable it with torch.set_float32_matmul_precision('high')"
-        )
-        HAS_WARNED_FOR_TF32_MATMUL = True
-        print(f"Current matmul precision is: {torch.get_float32_matmul_precision()}")
+from orb_models.forcefield.nn_util import ScalarNormalizer, build_mlp
+from orb_models.forcefield import segment_ops
+from orb_models.forcefield.gns import MoleculeGNS
+from orb_models.forcefield.load import _load_forcefield_state_dict
 
 
-class LinearReferenceEnergy(torch.nn.Module):
-    """Linear reference energy (no bias term)."""
+class GraphRegressor(nn.Module):
+    """Graph Regressor for finetuning.
 
-    def __init__(
-        self,
-        weight_init: Optional[numpy.ndarray] = None,
-        trainable: Optional[bool] = None,
-    ):
-        super().__init__()
-
-        if trainable is None:
-            trainable = weight_init is None
-
-        self.linear = torch.nn.Linear(118, 1, bias=False)
-        if weight_init is not None:
-            self.linear.weight.data = torch.tensor(weight_init, dtype=torch.float32)
-        if not trainable:
-            self.linear.weight.requires_grad = False
-
-    def forward(self, atom_types: torch.Tensor, n_node: torch.Tensor) -> torch.Tensor:
-        """Forward pass of the LinearReferenceEnergy.
-
-        Args:
-            atom_types: A tensor of atomic numbers of shape (n_atoms,)
-
-        Returns:
-            A tensor of shape (n_graphs, 1) containing the reference energy.
-        """
-        one_hot_atomic = torch.nn.functional.one_hot(atom_types, num_classes=118).type(
-            torch.float32
-        )
-        reduced = segment_ops.aggregate_nodes(one_hot_atomic, n_node, reduction="sum")
-        return self.linear(reduced)
-
-
-class ScalarNormalizer(torch.nn.Module):
-    """Scalar normalizer that learns mean and std from data.
-
-    NOTE: Multi-dimensional tensors are flattened before updating
-    the running mean/std. This is desired behaviour for force targets.
+    The GraphRegressor combines a pretrained base model with a set of regression heads.
+    The regression heads are typically MLP transformations, along with a sum/avg pooling
+    operation in the case of graph-level targets. The base model can be jointly fine-tuned
+    along with the heads, or kept frozen.
     """
 
     def __init__(
         self,
-        init_mean: Optional[Union[torch.Tensor, float]] = None,
-        init_std: Optional[Union[torch.Tensor, float]] = None,
-        init_num_batches: Optional[int] = 1000,
+        heads: Union[Sequence[torch.nn.Module], Mapping[str, torch.nn.Module]],
+        model: MoleculeGNS,
+        model_requires_grad: bool = True,
+        cutoff_layers: Optional[int] = None,
+        loss_weights: Optional[Dict[str, float]] = None,
     ) -> None:
-        """Initializes the ScalarNormalizer.
+        """Initializes the GraphRegressor.
 
-        To enhance training stability, consider setting an init mean + std.
+        Args:
+            heads: The regression heads used to predict node/graph properties.
+                Null heads are allowed and will be discarded.
+            model: A pretrained model to use for transfer learning/finetuning.
+            model_requires_grad: Whether the underlying model should be finetuned or not.
+            cutoff_layers: The number of message passing layers to keep. If None, all layers are kept.
+            loss_weights: The weight of the energy loss in the total loss.
+                Null weights are allowed and will be discarded.
         """
         super().__init__()
-        self.bn = torch.nn.BatchNorm1d(1, affine=False, momentum=None)  # type: ignore
-        if init_mean is not None:
-            assert init_std is not None
-            self.bn.running_mean = torch.tensor([init_mean])
-            self.bn.running_var = torch.tensor([init_std**2])
-            self.bn.num_batches_tracked = torch.tensor([init_num_batches])
+        loss_weights = loss_weights or {}
+        loss_weights = {k: v for k, v in loss_weights.items() if v is not None}
+        if isinstance(heads, Mapping):
+            heads = {k: v for k, v in heads.items() if v is not None}
+        _validate_regressor_inputs(heads, loss_weights)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Normalize by running mean and std."""
-        if self.training:
-            self.bn(x.view(-1, 1))
-        return (x - self.bn.running_mean) / torch.sqrt(self.bn.running_var)  # type: ignore
+        if isinstance(heads, Sequence):
+            # backwards-compatible list format; we now use dicts which are more overrideable in hydra
+            self.heads = torch.nn.ModuleDict(
+                {head.target.fullname: head for head in heads}  # type: ignore
+            )
+        else:
+            self.heads = torch.nn.ModuleDict(heads)
+        self.cutoff_layers = cutoff_layers
+        self.loss_weights = loss_weights
+        self.model_requires_grad = model_requires_grad
 
-    def inverse(self, x: torch.Tensor) -> torch.Tensor:
-        """Reverse the forward normalization."""
-        return x * torch.sqrt(self.bn.running_var) + self.bn.running_mean  # type: ignore
+        self.model = model
+        if self.cutoff_layers is not None:
+            gns = (
+                self.model if isinstance(self.model, MoleculeGNS) else self.model.model
+            )
+            _set_cutoff_layers(gns, self.cutoff_layers)  # type: ignore
+
+        if not model_requires_grad:
+            for param in self.model.parameters():
+                param.requires_grad = False
+
+    def forward(
+        self, batch: base.AtomGraphs
+    ) -> Dict[str, Union[torch.Tensor, Dict[str, torch.Tensor]]]:
+        """Forward pass of GraphRegressor."""
+        out = self.model(batch)
+        node_features = out["node_features"]
+        for name, head in self.heads.items():
+            res = head(node_features, batch)
+            out[name] = res
+        return out
+
+    def predict(
+        self, batch: base.AtomGraphs, split: bool = False
+    ) -> Dict[str, torch.Tensor]:
+        """Predict node and/or graph level attributes."""
+        out = self.model(batch)
+        node_features = out["node_features"]
+        output = {}
+        for name, head in self.heads.items():
+            pred = head.predict(node_features, batch)
+            if split:
+                output[name] = _split_prediction(pred, batch.n_node)
+            else:
+                output[name] = pred
+        return output
+
+    def loss(self, batch: base.AtomGraphs) -> base.ModelOutput:
+        """Loss function of GraphRegressor."""
+        out = self(batch)
+        loss = torch.tensor(0.0, device=batch.positions.device)
+        metrics: Dict = {}
+
+        for name, head in self.heads.items():
+            if name == "confidence":
+                continue
+            head_out = head.loss(out[name], batch)
+            metrics.update(head_out.log)
+            weight = self.loss_weights.get(name, 1.0)
+            loss += weight * head_out.loss
+
+        # Do confidence separately, because it requires
+        # the force predictions and errors.
+        if "confidence" in self.heads:
+            forces_head = self.heads["forces"]
+            forces_name = forces_head.target.fullname
+            confidence_head = self.heads["confidence"]
+
+            forces_pred = out[forces_name]
+            raw_forces_pred = forces_head.normalizer.inverse(forces_pred)
+            raw_forces_target = batch.node_targets[forces_name]  # type: ignore
+            forces_error = torch.abs(raw_forces_pred - raw_forces_target).mean(dim=-1)
+            confidence_logits = out["confidence"]
+            head_out = confidence_head.loss(confidence_logits, forces_error, batch)
+            metrics.update(head_out.log)
+
+            loss += self.loss_weights.get("confidence", 1.0) * head_out.loss
+
+        metrics["loss"] = loss
+        return base.ModelOutput(loss=loss, log=metrics)
+
+    def load_state_dict(
+        self,
+        state_dict: Mapping[str, Any],
+        strict: bool = True,
+        assign: bool = False,
+        skip_artifact_reference_energy: bool = False,
+    ):
+        """Load state dict for GraphRegressor."""
+        _load_forcefield_state_dict(
+            self,
+            state_dict,
+            strict=strict,
+            assign=assign,
+            skip_artifact_reference_energy=skip_artifact_reference_energy,
+        )
+
+    @property
+    def properties(self):
+        """List of names of predicted properties."""
+        heads = list(self.heads.keys())
+        if "energy" in heads:
+            heads.append("free_energy")
+        return heads
+
+    def compile(self, *args, **kwargs):
+        """Override the default Module.compile method to compile only the GNS model."""
+        self.model.compile(*args, **kwargs)
+
+    def is_compiled(self):
+        """Check if the model is compiled."""
+        return self._compiled_call_impl or self.model._compiled_call_impl
 
 
 class NodeHead(torch.nn.Module):
@@ -116,111 +183,90 @@ class NodeHead(torch.nn.Module):
         num_mlp_layers: int,
         mlp_hidden_dim: int,
         target: Union[str, PropertyDefinition],
+        loss_type: Literal["mae", "mse", "huber_0.01"] = "huber_0.01",
         dropout: Optional[float] = None,
-        remove_mean: bool = True,
-        remove_torque_for_nonpbc_systems: bool = True,
+        checkpoint: Optional[str] = None,
+        online_normalisation: bool = True,
+        activation: str = "ssp",
     ):
         """Initializes the NodeHead MLP.
 
         Args:
-            input_dim (int): Dimensionality of the incoming latent vector from the base model.
+            latent_dim (int): Dimensionality of the incoming latent vector from the base model.
             num_mlp_layers (int): Number of MLP layers.
             mlp_hidden_dim (int): MLP hidden size.
             target: either the name of a PropertyDefinition or a PropertyDefinition itself.
+            loss_type: The type of loss to use. Either "mae", "mse", or "huber_x"
+                where x is the delta parameter for the huber loss.
             dropout: The level of dropout to apply.
-            remove_mean: Whether to remove the mean of the node features.
-            remove_torque_for_nonpbc_systems: Whether to remove net torque from the 
-                force predictions for non-PBC systems.
+            checkpoint: Whether to use PyTorch checkpointing.
+                None (no checkpointing), 'reentrant' or 'non-reentrant'.
+            online_normalisation: Whether to normalise the target online.
+            activation: The activation function to use.
         """
         super().__init__()
-        if isinstance(target, str):
-            target = PROPERTIES[target]
-        self.target_property = target
+        self.target = PROPERTIES[target] if isinstance(target, str) else target
 
-        if target.domain != "real":
-            raise ValueError("NodeHead only supports real targets.")
+        if self.target.domain != "real":
+            raise NotImplementedError("Currently only supports real targets.")
 
-        if target.means is not None and target.stds is not None:
-            self.normalizer = ScalarNormalizer(
-                init_mean=target.means,
-                init_std=target.stds,
-            )
-        else:
-            self.normalizer = ScalarNormalizer()
+        self.normalizer = ScalarNormalizer(
+            init_mean=self.target.means,
+            init_std=self.target.stds,
+            online=online_normalisation,
+        )
 
         self.mlp = build_mlp(
             input_size=latent_dim,
             hidden_layer_sizes=[mlp_hidden_dim] * num_mlp_layers,
-            output_size=self.target_property.dim,
+            output_size=self.target.dim,
+            activation=activation,
             dropout=dropout,
+            checkpoint=checkpoint,
         )
+        self.loss_type = loss_type
 
-        self.remove_mean = remove_mean
-        self.remove_torque_for_nonpbc_systems = remove_torque_for_nonpbc_systems
+    def forward(
+        self, node_features: torch.Tensor, batch: base.AtomGraphs
+    ) -> torch.Tensor:
+        """Forward pass (without inverse transformations)."""
+        pred = self.mlp(node_features)
+        return pred
 
-    def forward(self, batch: base.AtomGraphs) -> base.AtomGraphs:
-        """Predictions with raw logits (no sigmoid/softmax or any inverse transformations)."""
-        feat = batch.node_features[_KEY]
-        pred = self.mlp(feat)
-
-        if self.remove_mean:
-            system_means = segment_ops.aggregate_nodes(
-                pred, batch.n_node, reduction="mean"
-            )
-            node_broadcasted_means = torch.repeat_interleave(
-                system_means, batch.n_node, dim=0
-            )
-            pred = pred - node_broadcasted_means
-
-        if self.remove_torque_for_nonpbc_systems:
-            pred = selectively_remove_net_torque_for_nonpbc_systems(
-                pred, batch.positions, batch.system_features["cell"], batch.n_node
-            )
-
-        batch.node_features["node_pred"] = pred
-        return batch
-
-    def predict(self, batch: base.AtomGraphs) -> torch.Tensor:
-        """Predict node/edge/graph attribute."""
-        out = self(batch)
-        pred = out.node_features["node_pred"]
+    def predict(
+        self, node_features: torch.Tensor, batch: base.AtomGraphs
+    ) -> torch.Tensor:
+        """Predict node-level attribute."""
+        out = self(node_features, batch)
+        pred = out
         return self.normalizer.inverse(pred)
 
-    def loss(self, batch: base.AtomGraphs):
+    def loss(
+        self,
+        pred: torch.Tensor,
+        batch: base.AtomGraphs,
+        alternative_target: Optional[torch.Tensor] = None,
+    ):
         """Apply mlp to compute loss and metrics."""
-        batch_n_node = batch.n_node
-        assert batch.node_targets is not None
-        target = batch.node_targets[self.target_property.name].squeeze(-1)
-        pred = batch.node_features["node_pred"].squeeze(-1)
-        # make sure we remove fixed atoms before normalization
-        pred, target, batch_n_node = _remove_fixed_atoms(
-            pred, target, batch_n_node, batch.fix_atoms, self.training
-        )
-        mae = torch.abs(pred - self.normalizer(target))
-        raw_pred = self.normalizer.inverse(pred)
-        raw_mae = torch.abs(raw_pred - target)
-
-        if self.target_property.dim > 1:
-            mae = mae.mean(dim=-1)
-            mae = segment_ops.aggregate_nodes(
-                mae, batch_n_node, reduction="mean"
-            ).mean()
-            raw_mae = raw_mae.mean(dim=-1)
-            raw_mae = segment_ops.aggregate_nodes(
-                raw_mae, batch_n_node, reduction="mean"
-            ).mean()
+        name = self.target.fullname
+        if alternative_target is not None:
+            raw_target = alternative_target
         else:
-            mae = mae.mean()
-            raw_mae = raw_mae.mean()
-        metrics = {
-            "node_mae": mae.item(),
-            "node_mae_raw": raw_mae.item(),
-            "node_cosine_sim": torch.cosine_similarity(raw_pred, target, dim=-1)
-            .mean()
-            .item(),
-            "fwt_0.03": forces_within_threshold(raw_pred, target, batch_n_node),
-        }
-        return base.ModelOutput(loss=mae, log=metrics)
+            raw_target = batch.node_targets[name].squeeze(-1)  # type: ignore
+        raw_target = raw_target.squeeze(-1)
+
+        target = self.normalizer(raw_target)
+        pred = pred.squeeze(-1)
+        assert pred.shape == target.shape, f"{pred.shape} != {target.shape}"
+
+        loss = mean_error(pred, target, self.loss_type, batch.n_node)
+
+        raw_pred = self.normalizer.inverse(pred)
+        metrics = {}
+        metrics[f"{name}_loss"] = loss
+        metrics[f"{name}_mae_raw"] = torch.abs(raw_pred - raw_target).mean()
+        metrics[f"{name}_mse_raw"] = ((raw_pred - raw_target) ** 2).mean()
+        return base.ModelOutput(loss=loss, log=metrics)
 
 
 class GraphHead(torch.nn.Module):
@@ -238,79 +284,83 @@ class GraphHead(torch.nn.Module):
         mlp_hidden_dim: int,
         target: Union[str, PropertyDefinition],
         node_aggregation: Literal["sum", "mean"] = "mean",
+        real_loss_type: Literal["mae", "mse", "huber_0.01"] = "huber_0.01",
         dropout: Optional[float] = None,
-        compute_stress: Optional[bool] = False,
+        checkpoint: Optional[str] = None,
+        online_normalisation: bool = True,
+        activation: str = "ssp",
     ):
         """Initializes the GraphHead MLP.
 
         Args:
-            input_dim (int): Dimensionality of the incoming latent vector from the base model.
+            latent_dim (int): Dimensionality of the incoming latent vector from the base model.
             num_mlp_layers (int): Number of MLP layers.
             mlp_hidden_dim (int): MLP hidden size.
             target: either the name of a PropertyDefinition or a PropertyDefinition itself
             node_aggregation: The method for aggregating the node features
                 from the pretrained model representations.
+            loss_type: The type of loss to use. Either "mae", "mse", or "huber_x"
+                where x is the delta parameter for the huber loss.
             dropout: The level of dropout to apply.
+            checkpoint: Whether to use PyTorch checkpointing.
+                    None (no checkpointing), 'reentrant' or 'non-reentrant'.
+            online_normalisation: Whether to normalise the target online.
+            activation: The activation function to use.
         """
         super().__init__()
-        if isinstance(target, str):
-            target = PROPERTIES[target]
-        self.target_property = target
+        self.target = PROPERTIES[target] if isinstance(target, str) else target
 
-        if target.means is not None and target.stds is not None:
-            self.normalizer = ScalarNormalizer(
-                init_mean=target.means,
-                init_std=target.stds,
-            )
-        else:
-            self.normalizer = ScalarNormalizer()
-
+        self.normalizer = ScalarNormalizer(
+            init_mean=self.target.means,
+            init_std=self.target.stds,
+            online=online_normalisation,
+        )
         self.node_aggregation = node_aggregation
         self.mlp = build_mlp(
             input_size=latent_dim,
             hidden_layer_sizes=[mlp_hidden_dim] * num_mlp_layers,
-            output_size=self.target_property.dim,
+            output_size=self.target.dim,
+            activation=activation,
             dropout=dropout,
+            checkpoint=checkpoint,
         )
         activation_dict = {
             "real": torch.nn.Identity,
             "binary": torch.nn.Sigmoid,
             "categorical": torch.nn.Softmax,
         }
-        self.output_activation = activation_dict[self.target_property.domain]()
-        self.compute_stress = compute_stress
+        self.output_activation = activation_dict[self.target.domain]()
+        self.real_loss_type = real_loss_type
 
-    def forward(self, batch: base.AtomGraphs) -> base.AtomGraphs:
+    def forward(
+        self, node_features: torch.Tensor, batch: base.AtomGraphs
+    ) -> torch.Tensor:
         """Predictions with raw logits (no sigmoid/softmax or any inverse transformations)."""
-        feat = batch.node_features[_KEY]
-
-        # aggregate to get a tensor of shape (num_graphs, latent_dim)
         input = segment_ops.aggregate_nodes(
-            feat,
+            node_features,
             batch.n_node,
             reduction=self.node_aggregation,
         )
         pred = self.mlp(input)
-        if self.compute_stress:
-            # we need to name the stress prediction differently
-            batch.system_features["stress_pred"] = pred
-        else:
-            batch.system_features["graph_pred"] = pred
-        return batch
+        return pred
 
-    def predict(self, batch: base.AtomGraphs) -> torch.Tensor:
-        """Predict node/edge/graph attribute."""
-        pred = self(batch)
-        if self.compute_stress:
-            logits = pred.system_features["stress_pred"].squeeze(-1)
-        else:
-            logits = pred.system_features["graph_pred"].squeeze(-1)
+    def predict(
+        self, node_features: torch.Tensor, batch: base.AtomGraphs
+    ) -> torch.Tensor:
+        """Predict graph-level attribute."""
+        pred = self(node_features, batch)
+        logits = pred.squeeze(-1)
         probs = self.output_activation(logits)
-        if self.target_property.domain == "real":
+        if self.target.domain == "real":
             probs = self.normalizer.inverse(probs)
         return probs
 
-    def loss(self, batch: base.AtomGraphs):
+    def loss(
+        self,
+        pred: torch.Tensor,
+        batch: base.AtomGraphs,
+        alternative_target: Optional[torch.Tensor] = None,
+    ):
         """Apply mlp to compute loss and metrics.
 
         Depending on whether the target is real/binary/categorical, we
@@ -318,244 +368,216 @@ class GraphHead(torch.nn.Module):
         preds are logits (not normalised) to take advantage of numerically
         stable log-softmax.
         """
-        assert batch.system_targets is not None
-        target = batch.system_targets[self.target_property.name].squeeze(-1)
-        if self.compute_stress:
-            pred = batch.system_features["stress_pred"].squeeze(-1)
+        name = self.target.fullname
+        if alternative_target is not None:
+            target = alternative_target
         else:
-            pred = batch.system_features["graph_pred"].squeeze(-1)
+            target = batch.system_targets[name].squeeze(-1)  # type: ignore
+        pred = pred.squeeze(-1)
 
-        domain = self.target_property.domain
-        # Short circuit for binary and categorical targets
-        if domain == "binary":
-            loss, metrics = bce_loss(pred, target, "graph")
-            return base.ModelOutput(loss=loss, log=metrics)
-        if domain == "categorical":
-            loss, metrics = cross_entropy_loss(pred, target, "graph")
-            return base.ModelOutput(loss=loss, log=metrics)
-
-        normalized_target = self.normalizer(target)
-        errors = normalized_target - pred
-        mae = torch.abs(errors).mean()
-
-        raw_pred = self.normalizer.inverse(pred)
-        raw_mae = torch.abs(raw_pred - target).mean()
-        if self.compute_stress:
-            metrics = {"stress_mae": mae.item(), "stress_mae_raw": raw_mae.item()}
+        if self.target.domain == "categorical":
+            expected_shape = target.shape + (self.target.dim,)
+            assert pred.shape == expected_shape, f"{pred.shape} != {expected_shape}"
+            loss, metrics = cross_entropy_loss(pred, target, name)
+        elif self.target.domain == "binary":
+            assert pred.shape == target.shape, f"{pred.shape} != {target.shape}"
+            loss, metrics = bce_loss(pred, target, name)
         else:
-            metrics = {"graph_mae": mae.item(), "graph_mae_raw": raw_mae.item()}
-        return base.ModelOutput(loss=mae, log=metrics)
+            assert pred.shape == target.shape, f"{pred.shape} != {target.shape}"
+            normalized_target = self.normalizer(target)
+            loss = mean_error(pred, normalized_target, self.real_loss_type)
+            raw_pred = self.normalizer.inverse(pred)
+            metrics = {
+                f"{name}_loss": loss,
+                f"{name}_mae_raw": torch.abs(raw_pred - target).mean(),
+                f"{name}_mse_raw": ((raw_pred - target) ** 2).mean(),
+            }
 
-
-class EnergyHead(GraphHead):
-    """Energy prediction head that can be appended to a base model."""
-
-    def __init__(
-        self,
-        latent_dim: int,
-        num_mlp_layers: int,
-        mlp_hidden_dim: int,
-        target: Union[str, PropertyDefinition] = "energy",
-        predict_atom_avg: bool = True,
-        reference_energy_name: str = "mp-traj-d3",  # or 'vasp-shifted'
-        train_reference: bool = False,
-        dropout: Optional[float] = None,
-        node_aggregation: Optional[str] = None,
-    ):
-        """Initializes the EnergyHead MLP.
-
-        Args:
-            input_dim (int): Dimensionality of the incoming latent vector from the base model.
-            num_mlp_layers (int): Number of MLP layers.
-            mlp_hidden_dim (int): MLP hidden size.
-            target: either the name of a PropertyDefinition or a PropertyDefinition itself.
-            predict_atom_avg: Whether to predict the average atom energy or total.
-            reference_energy_name: The name of the linear reference energy model to use.
-            train_reference: Whether the reference energy params are learnable.
-            dropout: The level of dropout to apply.
-            node_aggregation: (deprecated) The method for aggregating the node features
-        """
-        ref = REFERENCE_ENERGIES[reference_energy_name]
-        target = PROPERTIES[target] if isinstance(target, str) else target
-        if predict_atom_avg:
-            assert node_aggregation or "mean" == "mean"
-            target.means = torch.tensor([ref.residual_mean_per_atom])
-            target.stds = torch.tensor([ref.residual_std_per_atom])
-        else:
-            assert node_aggregation or "sum" == "sum"
-            target.means = torch.tensor([ref.residual_mean])
-            target.stds = torch.tensor([ref.residual_std])
-
-        super().__init__(
-            latent_dim=latent_dim,
-            num_mlp_layers=num_mlp_layers,
-            mlp_hidden_dim=mlp_hidden_dim,
-            target=target,
-            node_aggregation=node_aggregation,  # type: ignore
-            dropout=dropout,
-        )
-        self.reference = LinearReferenceEnergy(
-            weight_init=ref.coefficients, trainable=train_reference
-        )
-        self.atom_avg = predict_atom_avg
-
-    def predict(self, batch: base.AtomGraphs) -> torch.Tensor:
-        """Predict energy."""
-        pred = self(batch).system_features["graph_pred"]
-        pred = self.normalizer.inverse(pred).squeeze(-1)
-        if self.atom_avg:
-            pred = pred * batch.n_node
-        pred = pred + self.reference(batch.atomic_numbers, batch.n_node)
-        return pred
-
-    def loss(self, batch: base.AtomGraphs):
-        """Apply mlp to compute loss and metrics."""
-        assert batch.system_targets is not None
-        target = batch.system_targets[self.target_property.name].squeeze(-1)
-        pred = batch.system_features["graph_pred"].squeeze(-1)
-
-        reference = self.reference(batch.atomic_numbers, batch.n_node)
-        reference_target = target - reference
-        if self.atom_avg:
-            reference_target = reference_target / batch.n_node
-
-        normalized_reference = self.normalizer(reference_target)
-        model_loss = normalized_reference - pred
-
-        raw_pred = self.normalizer.inverse(pred)
-        if self.atom_avg:
-            raw_pred = raw_pred * batch.n_node
-        raw_mae = torch.abs((raw_pred + reference) - target).mean()
-
-        reference_mae = torch.abs(reference_target).mean()
-        model_mae = torch.abs(model_loss).mean()
-        metrics = {
-            "energy_reference_mae": reference_mae.item(),
-            "energy_mae": model_mae.item(),
-            "energy_mae_raw": raw_mae.item(),
-        }
-        return base.ModelOutput(loss=model_mae, log=metrics)
-
-
-class GraphRegressor(nn.Module):
-    """Graph Regressor for finetuning.
-
-    The GraphRegressor combines a pretrained base model
-    with two regression heads for finetuning; one head for
-    a node level task, and one for a graph level task.
-    The base model can be optionally fine-tuned.
-    The regression head is a linear/MLP transformation
-    of the sum/avg of the graph's node activations.
-    """
-
-    def __init__(
-        self,
-        model: MoleculeGNS,
-        node_head: Optional[NodeHead] = None,
-        graph_head: Optional[GraphHead] = None,
-        stress_head: Optional[GraphHead] = None,
-        model_requires_grad: bool = True,
-        cutoff_layers: Optional[int] = None,
-    ) -> None:
-        """Initializes the GraphRegressor.
-
-        Args:
-            node_head : The regression head to use for node prediction.
-            graph_head: The regression head to use for graph prediction.
-            model: An optional pre-constructed, pretrained model to use for transfer learning/finetuning.
-            model_requires_grad: Whether the underlying model should
-                be finetuned or not.
-        """
-        super().__init__()
-
-        if (node_head is None) and (graph_head is None):
-            raise ValueError("Must provide at least one node/graph head.")
-        self.node_head = node_head
-        self.graph_head = graph_head
-        self.stress_head = stress_head
-        self.cutoff_layers = cutoff_layers
-
-        self.model = model
-
-        if self.cutoff_layers is not None:
-            if self.cutoff_layers > self.model.num_message_passing_steps:
-                raise ValueError(
-                    f"cutoff_layers ({self.cutoff_layers}) must be less than or equal to"
-                    f" the number of message passing steps ({self.model.num_message_passing_steps})"
-                )
-            else:
-                self.model.gnn_stacks = self.model.gnn_stacks[: self.cutoff_layers]
-                self.model.num_message_passing_steps = self.cutoff_layers
-
-        self.model_requires_grad = model_requires_grad
-
-        if not model_requires_grad:
-            for param in self.model.parameters():
-                param.requires_grad = False
-
-        warn_for_tf32_matmul()
-
-    def predict(self, batch: base.AtomGraphs) -> Dict[str, torch.Tensor]:
-        """Predict node and/or graph level attributes.
-
-        Args:
-            batch: A batch of graphs to run prediction on.
-
-        Returns:
-            A dictionary containing a node_pred tensor attribute with
-            for node predictions, and a tensor of graph level predictions.
-        """
-        batch = self.model(batch)
-
-        output = {}
-        if self.graph_head is not None:
-            output["graph_pred"] = self.graph_head.predict(batch)
-
-        if self.stress_head is not None:
-            output["stress_pred"] = self.stress_head.predict(batch)
-
-        if self.node_head is not None:
-            output["node_pred"] = self.node_head.predict(batch)
-
-        return output
-
-    def forward(self, batch: base.AtomGraphs) -> base.AtomGraphs:
-        """Forward pass of GraphRegressor."""
-        batch = self.model(batch)
-
-        if self.graph_head is not None:
-            batch = self.graph_head(batch)
-        if self.stress_head is not None:
-            batch = self.stress_head(batch)
-        if self.node_head is not None:
-            batch = self.node_head(batch)
-        return batch
-
-    def loss(self, batch: base.AtomGraphs) -> base.ModelOutput:
-        """Loss function of GraphRegressor."""
-        batch = self(batch)
-        loss = torch.tensor(0.0)
-        metrics: Dict = {}
-        if self.graph_head is not None:
-            graph_out = self.graph_head.loss(batch)
-            metrics.update(graph_out.log)
-            loss = loss.type_as(graph_out.loss)
-            loss += graph_out.loss
-
-        if self.stress_head is not None:
-            stress_out = self.stress_head.loss(batch)
-            metrics.update(stress_out.log)
-            loss = loss.type_as(stress_out.loss)
-            loss += stress_out.loss
-
-        if self.node_head is not None:
-            node_out = self.node_head.loss(batch)
-            metrics.update(node_out.log)
-            loss = loss.type_as(node_out.loss)
-            loss += node_out.loss
-
-        metrics["loss"] = loss.item()
         return base.ModelOutput(loss=loss, log=metrics)
+
+
+def _validate_regressor_inputs(
+    heads: Union[Sequence[torch.nn.Module], Mapping[str, torch.nn.Module]],
+    loss_weights: Dict[str, float],
+    ensure_grad_loss_weights: bool = False,
+):
+    """Validate the input heads and loss weights."""
+    if isinstance(heads, Sequence):
+        head_names = [head.target.fullname for head in heads]  # type: ignore
+    else:
+        head_names = list(heads.keys())
+        targets = [getattr(head, "target", None) for head in heads.values()]
+        if all(target is not None for target in targets):
+            target_names = [target.fullname for target in targets]  # type: ignore
+            if head_names != target_names:
+                raise ValueError(
+                    f"Head names and target names must match; got {head_names} and {target_names}"
+                )
+    if len(head_names) == 0:
+        raise ValueError("Model must have at least one output head.")
+    if len(head_names) != len(set(head_names)):
+        raise ValueError(f"Head names must be unique; got {head_names}")
+    unknown_keys = set(loss_weights.keys()) - set(head_names)  # type: ignore
+    if ensure_grad_loss_weights:
+        if (
+            "grad_forces" not in loss_weights.keys()
+            or "grad_stress" not in loss_weights.keys()
+        ):
+            raise ValueError("grad_forces and grad_stress must be in loss_weights .")
+        unknown_keys = unknown_keys - set(["grad_forces", "grad_stress"])
+    unknown_keys = unknown_keys - set(["rotational_grad"])  # not associated with a head
+    if unknown_keys:
+        raise ValueError(f"Loss weights for unknown targets: {unknown_keys}")
+
+
+def _set_cutoff_layers(gns: MoleculeGNS, cutoff_layers: int):
+    """Set the number of message passing layers to keep."""
+    if cutoff_layers > gns.num_message_passing_steps:
+        raise ValueError(
+            f"cutoff_layers ({cutoff_layers}) must be less than or equal to"
+            f" the number of message passing steps ({gns.num_message_passing_steps})"
+        )
+    else:
+        gns.gnn_stacks = gns.gnn_stacks[:cutoff_layers]
+        gns.num_message_passing_steps = cutoff_layers  # type: ignore
+
+
+def _split_prediction(pred: torch.Tensor, n_node: torch.Tensor):
+    """Split batched prediction back into per-system predictions."""
+    if len(pred) == len(n_node):
+        return torch.split(pred, 1, dim=0)
+    elif len(pred) == n_node.sum():
+        return torch.split(pred, n_node.cpu().tolist(), dim=0)
+    else:
+        raise ValueError(f"Unexpected length of prediction tensor: {len(pred)}")
+
+
+def mean_error(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    error_type: Literal["mae", "mse", "huber_0.01"],
+    batch_n_node: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    """Compute MAE or MSE for node or graph targets.
+
+    Args:
+        target: The target tensor.
+        pred: The prediction tensor.
+        batch_n_node: The number of nodes per graph. If provided, then a
+            nested aggregation is performed for node errors i.e. first we
+            average across nodes within each graph, then average across graphs.
+        error_type: The type of error to compute. Either "mae" or "mse" or "huber_x"
+            where x is the delta parameter for the huber loss.
+
+    Returns:
+        A scalar error for the whole batch.
+    """
+    if error_type.startswith("huber"):
+        huber_delta = float(error_type.split("_")[1])
+        error_type = "huber"  # type: ignore
+        assert huber_delta > 0.0, "HUBER_DELTA must be greater than 0.0"
+
+    error_function = {
+        "mae": lambda x, y: torch.abs(x - y),
+        "mse": lambda x, y: (x - y) ** 2,
+        "huber": lambda x, y: F.huber_loss(x, y, reduction="none", delta=huber_delta),
+    }[error_type]
+
+    errors = error_function(pred, target)
+    errors = errors.mean(dim=-1) if errors.dim() > 1 else errors
+
+    if batch_n_node is not None:
+        error = segment_ops.aggregate_nodes(
+            errors, batch_n_node, reduction="mean"
+        ).mean()
+    else:
+        error = errors.mean()
+
+    return error
+
+
+def bucketed_mean_error(
+    target: torch.Tensor,
+    pred: torch.Tensor,
+    bucket_by: Literal["target", "error"],
+    thresholds: List[float],
+    batch_n_node: Optional[torch.Tensor] = None,
+    error_type: Literal["mae", "mse"] = "mae",
+) -> Dict[str, torch.Tensor]:
+    """Compute MAE or MSE per-bucket, where each bucket is a range defined by thresholds.
+
+    The target can be a node-level or graph target. For node-level
+    targets, providing batch_n_node entails a nested-aggregation
+    of the error (first by node, then by graph).
+
+    Errors can be bucketed by their value, or by the value of the ground-truth target.
+    If bucketing by target, and the target is multi-dimensional, then the L2 norm
+    of the target is used to define the buckets.
+
+    Buckets are defined by a set of real-valued thresholds. For example,
+    bucket_by='error' and thresholds=[0.1, 10.0] creates 3 buckets:
+        - errors < 0.1
+        - 0.1 <= errors < 10.0
+        - errors >= 10.0
+
+    Args:
+        target: The target tensor.
+        pred: The prediction tensor.
+        bucket_by: The method for assigning buckets.
+        thresholds: The bucket edges. -inf and +inf are automatically added.
+        batch_n_node: The number of nodes per graph. If None, no nested aggregation is performed.
+        error_type: The type of error to compute. Either "mae" or "mse".
+
+    Returns:
+        A dictionary of metrics with entries of the form f"{error_type}_{bucket_name}", where
+        bucket name is a string representing the bucket edge values.
+    """
+    error_function = {
+        "mae": lambda x, y: torch.abs(x - y),
+        "mse": lambda x, y: (x - y) ** 2,
+    }[error_type]
+
+    errors = error_function(target, pred)
+
+    # If multi-dimensional, collapse down to a single error per graph/node
+    errors = errors.mean(dim=-1) if errors.dim() > 1 else errors
+
+    # Decide what to bucket by
+    if bucket_by == "target":
+        values_to_bucket_by = target.norm(dim=-1) if target.dim() > 1 else target
+    elif bucket_by == "error":
+        values_to_bucket_by = errors
+    else:
+        raise ValueError(f"Unknown bucket_by: {bucket_by}")
+
+    # Assign each element in the batch to a bucket index
+    bucket_edges = torch.tensor(
+        [-float("inf")] + thresholds + [float("inf")], device=errors.device
+    )
+    bucket_indices = torch.bucketize(values_to_bucket_by, bucket_edges, right=True) - 1
+
+    # Iterate over each bucket and compute its average error
+    metrics = {}
+    bucket_names = [
+        f"bucket_{p:.2f}-{q:.2f}" for p, q in zip(bucket_edges[:-1], bucket_edges[1:])
+    ]
+    for i, name in enumerate(bucket_names):
+        mask = bucket_indices == i
+        current_errors = errors[mask]
+
+        if batch_n_node is not None:
+            current_batch_n_node = segment_ops.aggregate_nodes(
+                mask.int(), batch_n_node, reduction="sum"
+            )
+            error = segment_ops.aggregate_nodes(
+                current_errors, current_batch_n_node, reduction="mean"
+            ).mean()
+        else:
+            error = current_errors.mean()
+
+        metrics[name] = error
+
+    return metrics
 
 
 def binary_accuracy(
@@ -571,7 +593,7 @@ def binary_accuracy(
     Returns:
         mean accuracy.
     """
-    return ((pred > threshold) == target).to(torch.float).mean().item()
+    return ((pred > threshold) == target).to(pred.dtype).mean().item()
 
 
 def categorical_accuracy(pred: torch.Tensor, target: torch.Tensor) -> float:
@@ -585,132 +607,14 @@ def categorical_accuracy(pred: torch.Tensor, target: torch.Tensor) -> float:
         mean accuracy.
     """
     pred_labels = torch.argmax(pred, dim=-1)
-    return (pred_labels == target.long()).to(torch.float).mean().item()
-
-
-def error_within_threshold(
-    pred: torch.Tensor, target: torch.Tensor, threshold: float = 0.02
-) -> float:
-    """Calculate MAE between 2 tensors within a threshold.
-
-    Args:
-        pred: the prediction tensor.
-        target: the tensor of target values.
-        threshold: margin threshold. Default 0.02 (derrived from OCP metrics).
-
-    Returns:
-        Mean predictions within threshold.
-    """
-    error = torch.abs(pred - target)
-    within_threshold = error < threshold
-    return within_threshold.to(torch.float).mean().item()
-
-
-def forces_within_threshold(
-    pred: torch.Tensor,
-    target: torch.Tensor,
-    batch_num_nodes: torch.Tensor,
-    threshold: float = 0.03,
-) -> float:
-    """Calculate MAE between batched graph tensors within a threshold.
-
-    The predictions for a graph are counted as being within the threshold
-    only if all nodes in the graph have predictions within the threshold.
-
-    Args:
-        pred: the prediction tensor.
-        target: the tensor of target values.
-        batch_num_nodes: A tensor containing the number of nodes per
-            graph.
-        threshold: margin threshold. Default 0.03 (derrived from OCP metrics).
-
-    Returns:
-        Mean predictions within threshold.
-    """
-    # Shape (batch_num_nodes, 3)
-    error = torch.abs(pred - target)
-    # Shape (batch_num_nodes)
-    largest_dim_fwt = error.max(-1).values < threshold
-
-    count_within_threshold = segment_ops.aggregate_nodes(
-        largest_dim_fwt.float(), batch_num_nodes, reduction="sum"
-    )
-    # count equals batch_num_nodes if all nodes within threshold
-    return (count_within_threshold == batch_num_nodes).to(torch.float).mean().item()
-
-
-def energy_and_forces_within_threshold(
-    pred_energy: torch.Tensor,
-    pred_forces: torch.Tensor,
-    target_energy: torch.Tensor,
-    target_forces: torch.Tensor,
-    batch_num_nodes: torch.Tensor,
-    fixed_atoms: Optional[torch.Tensor] = None,
-    threshold: Tuple[float, float] = (0.02, 0.03),
-) -> float:
-    """Calculate MAE between batched graph energies and forces within a threshold.
-
-    The predictions for a graph are counted as being within the threshold
-    only if all nodes in the graph have predictions within the threshold AND
-    the energies are also within a threshold. A combo of the two above functions.
-
-    Args:
-        pred_*: the prediction tensors.
-        target_*: the tensor of target values.
-        batch_num_nodes: A tensor containing the number of nodes per
-            graph.
-        fixed_atoms: A tensor of bools indicating which atoms are fixed.
-        threshold: margin threshold. Default (0.02, 0.03) (derrived from OCP metrics).
-    Returns:
-        Mean predictions within threshold.
-    """
-    energy_err = torch.abs(pred_energy - target_energy)
-    ewt = energy_err < threshold[0]
-
-    forces_err = torch.abs(pred_forces - target_forces)
-    largest_dim_fwt = forces_err.max(-1).values < threshold[1]
-
-    if fixed_atoms is not None:
-        fixed_per_graph = segment_ops.aggregate_nodes(
-            fixed_atoms.int(), batch_num_nodes, reduction="sum"
-        )
-        # remove the fixed atoms from the counts
-        batch_num_nodes = batch_num_nodes - fixed_per_graph
-        # remove the fixed atoms from the forces
-        largest_dim_fwt = largest_dim_fwt[~fixed_atoms]
-
-    force_count_within_threshold = segment_ops.aggregate_nodes(
-        largest_dim_fwt.int(), batch_num_nodes, reduction="sum"
-    )
-    fwt = force_count_within_threshold == batch_num_nodes
-
-    # count equals batch_num_nodes if all nodes within threshold
-    return (fwt & ewt).to(torch.float).mean().item()
-
-
-def _remove_fixed_atoms(
-    pred_node: torch.Tensor,
-    node_target: torch.Tensor,
-    batch_n_node: torch.Tensor,
-    fix_atoms: Optional[torch.Tensor],
-    training: bool,
-):
-    """We use inf targets on purpose to designate nodes for removal."""
-    assert len(pred_node) == len(node_target)
-    if fix_atoms is not None and not training:
-        pred_node = pred_node[~fix_atoms]
-        node_target = node_target[~fix_atoms]
-        batch_n_node = segment_ops.aggregate_nodes(
-            (~fix_atoms).int(), batch_n_node, reduction="sum"
-        )
-    return pred_node, node_target, batch_n_node
+    return (pred_labels == target.long()).to(pred.dtype).mean().item()
 
 
 def bce_loss(
     pred: torch.Tensor, target: torch.Tensor, metric_prefix: str = ""
 ) -> Tuple:
     """Binary cross-entropy loss with accuracy metric."""
-    loss = torch.nn.BCEWithLogitsLoss()(pred, target.float())
+    loss = torch.nn.BCEWithLogitsLoss()(pred, target.to(pred.dtype))
     accuracy = binary_accuracy(pred, target)
     return (
         loss,
@@ -734,114 +638,3 @@ def cross_entropy_loss(
             f"{metric_prefix}_loss": loss.item(),
         },
     )
-
-def selectively_remove_net_torque_for_nonpbc_systems(
-    pred: torch.Tensor,
-    positions: torch.Tensor,
-    cell: torch.Tensor,
-    n_node: torch.Tensor,
-):
-    """Remove net torque from non-PBC-system forces, but preserve PBC-system forces.
-
-    Args:
-        pred: The predicted forces of shape (n_atoms_in_batch, 3).
-        positions: The positions of shape (n_atoms_in_batch, 3).
-        cell: The cell of shape (n_batch, 3, 3).
-        n_node: The number of nodes per graph, of shape (n_batch,).
-    """
-    nopbc_graph = torch.all(cell == 0.0, dim=(1, 2))
-    if torch.any(nopbc_graph):
-        if torch.all(nopbc_graph):
-            pred = remove_net_torque(positions, pred, n_node)
-        else:
-            # Handle a mixed batch of pbc and non-pbc systems
-            batch_indices = torch.repeat_interleave(
-                torch.arange(cell.size(0), device=n_node.device), n_node
-            )
-            nopbc_atom = nopbc_graph[batch_indices]
-            adjusted_pred_non_pbc = remove_net_torque(
-                positions[nopbc_atom], pred[nopbc_atom], n_node[nopbc_graph]
-            )
-            pred = pred.clone()
-            pred[nopbc_atom] = adjusted_pred_non_pbc
-
-    return pred
-
-
-def remove_net_torque(
-    positions: torch.Tensor,
-    forces: torch.Tensor,
-    n_nodes: torch.Tensor,
-) -> torch.Tensor:
-    """Adjust the predicted forces to eliminate net torque for each graph in the batch.
-
-    We frame the problem of net-torque-elimination as a constrained optimisation problem;
-    what is the minimal additive adjustment (in L2 norm) that eliminates net torque?
-
-    This analytically solvable with Lagrange multipliers and the solution involves cheap
-    linear algebra operations (cross products and the inversion of 3x3 matrices).
-
-    Args:
-        positions : torch.Tensor of shape (N, 3)
-            Positions of atoms (concatenated for all graphs in the batch).
-        forces : torch.Tensor of shape (N, 3)
-            Predicted forces on atoms.
-        n_nodes : torch.Tensor of shape (B,)
-            Number of nodes in each graph, where B is the number of graphs in the batch.
-
-    Returns:
-        adjusted_forces : torch.Tensor of shape (N, 3)
-            Adjusted forces with zero net torque and net force for each graph.
-    """
-    B = n_nodes.shape[0]
-    tau_total, r = compute_net_torque(positions, forces, n_nodes)
-
-    # Compute scalar s per graph: sum_i ||r_i||^2
-    r_squared = torch.sum(r**2, dim=1)  # Shape: (N,)
-    s = segment_ops.aggregate_nodes(r_squared, n_nodes, "sum")  # Shape: (B,)
-
-    # Compute matrix S per graph: sum_i outer(r_i, r_i)
-    r_unsqueezed = r.unsqueeze(2)  # Shape: (N, 3, 1)
-    r_T_unsqueezed = r.unsqueeze(1)  # Shape: (N, 1, 3)
-    outer_products = r_unsqueezed @ r_T_unsqueezed  # Shape: (N, 3, 3)
-    S = segment_ops.aggregate_nodes(outer_products, n_nodes, "sum")  # Shape: (B, 3, 3)
-
-    # Compute M = S - sI
-    I = (  # noqa: E741
-        torch.eye(3, device=positions.device).unsqueeze(0).expand(B, -1, -1)
-    )  # Shape: (B, 3, 3)
-    M = S - (s.view(-1, 1, 1)) * I  # Shape: (B, 3, 3)
-
-    # Right-hand side vector b per graph
-    b = -tau_total  # Shape: (B, 3)
-
-    # Solve M * mu = b for mu per graph
-    try:
-        mu = torch.linalg.solve(M, b.unsqueeze(2)).squeeze(2)  # Shape: (B, 3)
-    except RuntimeError:
-        # Handle singular matrix M by using the pseudo-inverse
-        M_pinv = torch.linalg.pinv(M)  # Shape: (B, 3, 3)
-        mu = torch.bmm(M_pinv, b.unsqueeze(2)).squeeze(2)  # Shape: (B, 3)
-
-    # Compute adjustments to forces
-    mu_batch = torch.repeat_interleave(mu, n_nodes, dim=0)  # Shape: (N, 3)
-    forces_delta = torch.linalg.cross(r, mu_batch)  # Shape: (N, 3)
-
-    # Adjusted forces
-    adjusted_forces = forces + forces_delta  # Shape: (N, 3)
-
-    return adjusted_forces
-
-
-def compute_net_torque(
-    positions: torch.Tensor,
-    forces: torch.Tensor,
-    n_nodes: torch.Tensor,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Compute the net torque on a system of particles."""
-    com = segment_ops.aggregate_nodes(positions, n_nodes, "mean")
-    com_repeat = torch.repeat_interleave(com, n_nodes, dim=0)  # Shape: (N, 3)
-    com_relative_positions = positions - com_repeat  # Shape: (N, 3)
-    torques = torch.linalg.cross(com_relative_positions, forces)  # Shape: (N, 3)
-    net_torque = segment_ops.aggregate_nodes(torques, n_nodes, "sum")
-    return net_torque, com_relative_positions
