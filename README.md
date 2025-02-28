@@ -18,9 +18,7 @@
 
 ```bash
 pip install orb-models
-pip install "pynanoflann@git+https://github.com/dwastberg/pynanoflann#egg=af434039ae14bedcbb838a7808924d6689274168",
 ```
-Pynanoflann is not available on PyPI, so you must install it from the git repository.
 
 Orb models are expected to work on MacOS and Linux. Windows support is not guaranteed.
 
@@ -74,9 +72,9 @@ result = orbff.predict(graph)
 # Convert to ASE atoms (unbatches the results and transfers to cpu if necessary)
 atoms = atomic_system.atom_graphs_to_ase_atoms(
     graph,
-    energy=result["graph_pred"],
-    forces=result["node_pred"],
-    stress=result["stress_pred"]
+    energy=result["energy"],
+    forces=result["forces"],
+    stress=result["stress"]
 )
 ```
 
@@ -94,7 +92,7 @@ orbff = pretrained.orb_v2(device=device) # or choose another model using ORB_PRE
 calc = ORBCalculator(orbff, device=device)
 atoms = bulk('Cu', 'fcc', a=3.58, cubic=True)
 
-atoms.set_calculator(calc)
+atoms.calc = calc
 atoms.get_potential_energy()
 ```
 

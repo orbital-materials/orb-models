@@ -27,13 +27,13 @@ class CosineCutoff(torch.nn.Module):
                 + 1.0
             )
             # remove contributions below the cutoff radius
-            cutoffs = cutoffs * (distances < self.cutoff_upper).float()
-            cutoffs = cutoffs * (distances > self.cutoff_lower).float()
+            cutoffs = cutoffs * (distances < self.cutoff_upper).to(distances.dtype)
+            cutoffs = cutoffs * (distances > self.cutoff_lower).to(distances.dtype)
             return cutoffs
         else:
             cutoffs = 0.5 * (torch.cos(distances * math.pi / self.cutoff_upper) + 1.0)
             # remove contributions beyond the cutoff radius
-            cutoffs = cutoffs * (distances < self.cutoff_upper).float()
+            cutoffs = cutoffs * (distances < self.cutoff_upper).to(distances.dtype)
             return cutoffs
 
 
@@ -95,5 +95,5 @@ class ExpNormalSmearing(torch.nn.Module):
         assert isinstance(self.betas, torch.Tensor)
         return self.cutoff_fn(dist) * torch.exp(
             -self.betas
-            * (torch.exp(self.alpha * (-dist + self.cutoff_lower)) - self.means) ** 2
+            * (torch.exp(self.alpha * (-dist + self.cutoff_lower)) - self.means) ** 2  # type: ignore
         )

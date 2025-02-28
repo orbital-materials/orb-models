@@ -1,13 +1,11 @@
 import torch
-import numpy as np
 from ase.io import read, write
 from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 from ase.md.langevin import Langevin
 from ase import units
-from orb_models.forcefield import atomic_system, pretrained
-from ase.calculators.calculator import Calculator, all_properties
-from ase.build import molecule, make_supercell
 from ase.md import MDLogger
+
+from orb_models.forcefield import pretrained
 from orb_models.forcefield.calculator import ORBCalculator
 
 
@@ -34,7 +32,7 @@ def run_md_simulation(
     log_interval: int = 1,
 ):
     """Run molecular dynamics simulation with specified parameters.
-    
+
     Args:
         input_file: Path to input XYZ file
         cell_size: Size of cubic simulation cell
@@ -47,17 +45,14 @@ def run_md_simulation(
     """
     # Set up device
     device = setup_device()
-    
+
     # Read in the system from file and set the cell size and pbc
     atoms = read(input_file)
     atoms.set_cell([cell_size] * 3)
     atoms.set_pbc([True] * 3)
 
     # Set the calculator
-    atoms.calc = ORBCalculator(
-        model=pretrained.orb_d3_v2(),
-        device=device
-    )
+    atoms.calc = ORBCalculator(model=pretrained.orb_d3_v2(), device=device)
 
     # Set the initial velocities
     MaxwellBoltzmannDistribution(atoms, temperature_K=temperature_K)
@@ -67,8 +62,7 @@ def run_md_simulation(
 
     # Define output functions and attach to dynamics
     dyn.attach(
-        lambda: write('NaClWaterMD.xyz', atoms, append=True), 
-        interval=traj_interval
+        lambda: write("NaClWaterMD.xyz", atoms, append=True), interval=traj_interval
     )
     dyn.attach(MDLogger(dyn, atoms, "md_nvt.log"), interval=log_interval)
 

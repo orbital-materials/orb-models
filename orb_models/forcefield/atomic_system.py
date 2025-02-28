@@ -1,13 +1,16 @@
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Iterable, List, Optional, Dict
+from copy import deepcopy
 
 import ase
 import torch
 from ase import constraints
+from ase.geometry.cell import cell_to_cellpar
 from ase.calculators.singlepoint import SinglePointCalculator
 
-from orb_models.forcefield import featurization_utilities
+from orb_models.forcefield import featurization_utilities as feat_util
 from orb_models.forcefield.base import AtomGraphs
+from orb_models.forcefield.featurization_utilities import EdgeCreationMethod
 
 
 @dataclass
@@ -17,12 +20,78 @@ class SystemConfig:
     Args:
         radius: radius for edge construction
         max_num_neighbors: maximum number of neighbours each node can send messages to.
-        use_timestep_0: (unused - purely for compatibility with internal models)
+        diffuse_atom_types: whether to add atom type noise
+        conditioning_feats: Optional Dict of conditioning features.
+            Keys must one of 'node', 'edge' or 'graph'.
+            Values must be lists of names in global PROPERTIES dict.
     """
 
     radius: float
     max_num_neighbors: int
-    use_timestep_0: bool = True
+    diffuse_atom_types: bool = False
+    conditioning_feats: Optional[Dict[str, List[str]]] = None
+
+    def is_compatible_with(self, other: "SystemConfig"):
+        """Check if this SystemConfig is compatible with another and print incompatibilities.
+
+        By 'compatible', we mean the following:
+        No bug will occur if a model was trained with the 'other' SystemConfig
+        and we use the 'self' SystemConfig for finetuning/inference.
+
+        Args:
+            other: SystemConfig to compare to.
+
+        Raises:
+            ValueError: If any of the compatibility conditions are violated.
+
+        Returns:
+            True if compatible.
+        """
+        errors = []
+
+        if self.radius != other.radius:
+            errors.append(f"Radius: {self.radius} != {other.radius}")
+        if self.diffuse_atom_types != other.diffuse_atom_types:
+            errors.append(
+                f"Diffuse atom types: {self.diffuse_atom_types} != {other.diffuse_atom_types}"
+            )
+        node_error = self._invalid_feat(
+            self.conditioning_feats, other.conditioning_feats, "node"
+        )
+        if node_error:
+            errors.append(node_error)
+        edge_error = self._invalid_feat(
+            self.conditioning_feats, other.conditioning_feats, "edge"
+        )
+        if edge_error:
+            errors.append(edge_error)
+        graph_error = self._invalid_feat(
+            self.conditioning_feats, other.conditioning_feats, "graph"
+        )
+        if graph_error:
+            errors.append(graph_error)
+        if errors:
+            error_message = "SystemConfig Incompatibilities found:\n" + "\n".join(
+                errors
+            )
+            raise ValueError(error_message)
+
+        return True
+
+    def _invalid_feat(self, feats1, feats2, type="node"):
+        """Return error message if first set of feats is not a superset of the second."""
+        if feats2 is None:
+            return ""
+        elif feats1 is None:
+            return f"Conditioning feats is None, expected: {feats2}"
+        set1 = set(feats1.get(type, []))
+        set2 = set(feats2.get(type, []))
+        is_valid = set1.issuperset(set2)
+        return (
+            f"Missing {type} conditioning feats. Expected {set1} to be a superset of {set2}."
+            if not is_valid
+            else ""
+        )
 
 
 def atom_graphs_to_ase_atoms(
@@ -33,12 +102,8 @@ def atom_graphs_to_ase_atoms(
 ) -> List[ase.Atoms]:
     """Converts a list of graphs to a list of ase.Atoms."""
     graphs = graphs.to("cpu")
-    if "atomic_numbers_embedding" in graphs.node_features:
-        atomic_numbers = torch.argmax(
-            graphs.node_features["atomic_numbers_embedding"], dim=-1
-        )
-    else:
-        atomic_numbers = graphs.node_features["atomic_numbers"]
+
+    atomic_numbers = torch.argmax(graphs.atomic_numbers_embedding, dim=-1)
     atomic_numbers_split = torch.split(atomic_numbers, graphs.n_node.tolist())
     positions_split = torch.split(graphs.positions, graphs.n_node.tolist())
     assert graphs.tags is not None and graphs.system_features is not None
@@ -92,118 +157,126 @@ def ase_atoms_to_atom_graphs(
     atoms: ase.Atoms,
     *,
     wrap: bool = True,
-    brute_force_knn: Optional[bool] = None,
-    device: Optional[torch.device] = None,
+    edge_method: Optional[EdgeCreationMethod] = "knn_scipy",
     system_config: Optional[SystemConfig] = None,
+    max_num_neighbors: Optional[int] = None,
     system_id: Optional[int] = None,
+    half_supercell: bool = False,
+    device: Optional[torch.device] = None,
+    output_dtype: Optional[torch.dtype] = None,
+    graph_construction_dtype: Optional[torch.dtype] = None,
 ) -> AtomGraphs:
-    """Generate AtomGraphs from an ase.Atoms object.
+    """Convert an ase.Atoms object into AtomGraphs format, ready for use in a model.
 
     Args:
         atoms: ase.Atoms object
         wrap: whether to wrap atomic positions into the central unit cell (if there is one).
-            NOTE: there can be numerical differences from ase's .wrap() method when an atom is near a cell boundary.
-        brute_force_knn: whether to use a 'brute force' knn approach with torch.cdist for kdtree construction.
-            Defaults to None, in which case brute_force is used if we a GPU is avaiable (2-6x faster),
-            but not on CPU (1.5x faster - 4x slower). For very large systems, brute_force may OOM on GPU,
-            so it is recommended to set to False in that case.
-        device: device to put the tensors on. By default, uses the GPU if available.
-        system_config: SystemConfig object, specifying the max radius and max num_neighbors 
-            used in the k-nearest neighbors graph construction.
-        system_id: Optional index, for tracking the identity of a datapoint.
-
+        edge_method: The method to use for edge creation:
+            - knn_brute_force: Use brute force to find nearest neighbors.
+            - knn_scipy (default): Use scipy to find nearest neighbors.
+        system_config: The system configuration to use for graph construction.
+        max_num_neighbors: Maximum number of neighbors each node can send messages to.
+            If None, will use system_config.max_num_neighbors.
+        system_id: Optional index that is relative to a particular dataset.
+        half_supercell (bool): Whether to use half the supercell for graph construction, and then symmetrize.
+            This flag does not affect the resulting graph; it is purely an optimization that can double
+            throughput and half memory for very large cells (e.g. 10k+ atoms). For smaller systems, it can harm
+            performance due to additional computation to enforce max_num_neighbors.
+        device: The device to put the tensors on.
+        output_dtype: The dtype to use for all floating point tensors stored on the AtomGraphs object.
+        graph_construction_dtype: The dtype to use for floating point tensors in the graph construction.
     Returns:
         AtomGraphs object
     """
-    if device is None:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if system_config is None:
-        system_config = SystemConfig(radius=10.0, max_num_neighbors=20)
+        system_config = SystemConfig(radius=6.0, max_num_neighbors=20)
+    if isinstance(atoms.pbc, Iterable) and any(atoms.pbc) and not all(atoms.pbc):
+        raise NotImplementedError(
+            "We do not support periodicity along a subset of axes. Please ensure atoms.pbc is "
+            "True/False for all axes and you have padded your systems with sufficient vacuum if necessary."
+        )
+    output_dtype = torch.get_default_dtype() if output_dtype is None else output_dtype
+    graph_construction_dtype = (
+        torch.get_default_dtype()
+        if graph_construction_dtype is None
+        else graph_construction_dtype
+    )
+    if output_dtype == torch.float64:
+        # when using fp64 precision, we must ensure all features + targets
+        # stored in the atoms.info dict are already fp64
+        _check_floating_point_tensors_are_fp64(atoms.info)
 
+    max_num_neighbors = max_num_neighbors or system_config.max_num_neighbors
     atomic_numbers = torch.from_numpy(atoms.numbers).to(torch.long)
-    atom_type_embedding = torch.nn.functional.one_hot(
-        atomic_numbers, num_classes=118
-    ).type(torch.float32)
-
-    positions = torch.from_numpy(atoms.positions).to(torch.float32)
-    cell = torch.from_numpy(atoms.cell.array).to(torch.float32)
+    atomic_numbers_embedding = atoms.info.get("node_features", {}).get(
+        "atomic_numbers_embedding",
+        feat_util.get_atom_embedding(atoms, system_config.diffuse_atom_types),
+    )
+    positions = torch.from_numpy(atoms.positions)
+    cell = torch.from_numpy(atoms.cell.array)
+    lattice = torch.from_numpy(cell_to_cellpar(cell))
     if wrap and torch.any(cell != 0):
-        positions = featurization_utilities.map_to_pbc_cell(positions, cell)
+        positions = feat_util.map_to_pbc_cell(positions, cell)
+
+    edge_index, edge_vectors, unit_shifts = feat_util.compute_pbc_radius_graph(
+        positions=positions,
+        cell=cell,
+        radius=system_config.radius,
+        max_number_neighbors=max_num_neighbors,
+        edge_method=edge_method,
+        half_supercell=half_supercell,
+        float_dtype=graph_construction_dtype,
+        device=device,
+    )
+    senders, receivers = edge_index[0], edge_index[1]
 
     node_feats = {
-        "atomic_numbers": atomic_numbers.to(torch.int64),
-        "atomic_numbers_embedding": atom_type_embedding.to(torch.float32),
+        **atoms.info.get("node_features", {}),
         # NOTE: positions are stored as features on the AtomGraphs,
         # but not actually used as input features to the model.
         "positions": positions,
+        "atomic_numbers": atomic_numbers.to(torch.long),
+        "atomic_numbers_embedding": atomic_numbers_embedding,
+        "atom_identity": torch.arange(len(atoms)).to(torch.long),
     }
-    system_feats = {"cell": cell.unsqueeze(0)}
-    edge_feats, senders, receivers = _get_edge_feats(
-        positions,
-        cell,
-        system_config.radius,
-        system_config.max_num_neighbors,
-        brute_force=brute_force_knn,
-        device=device,
-    )
 
-    num_atoms = len(node_feats["positions"])  # type: ignore
-    atom_graph = AtomGraphs(
+    edge_feats = {
+        **atoms.info.get("edge_features", {}),
+        "vectors": edge_vectors,
+        "unit_shifts": unit_shifts,
+    }
+    graph_feats = {
+        **atoms.info.get("graph_features", {}),
+        "cell": cell,
+        "lattice": lattice,
+    }
+
+    # Add a batch dimension to non-scalar graph features/targets
+    graph_feats = {
+        k: v.unsqueeze(0) if v.numel() > 1 else v for k, v in graph_feats.items()
+    }
+    graph_targets = {
+        k: v.unsqueeze(0) if v.numel() > 1 else v
+        for k, v in atoms.info.get("graph_targets", {}).items()
+    }
+
+    return AtomGraphs(
         senders=senders,
         receivers=receivers,
-        n_node=torch.tensor([num_atoms]),
+        n_node=torch.tensor([len(positions)]),
         n_edge=torch.tensor([len(senders)]),
         node_features=node_feats,
         edge_features=edge_feats,
-        system_features=system_feats,
-        system_id=torch.LongTensor([system_id]) if system_id is not None else system_id,
+        system_features=graph_feats,
+        node_targets=deepcopy(atoms.info.get("node_targets", {})),
+        edge_targets=deepcopy(atoms.info.get("edge_targets", {})),
+        system_targets=deepcopy(graph_targets),
         fix_atoms=ase_fix_atoms_to_tensor(atoms),
         tags=_get_ase_tags(atoms),
         radius=system_config.radius,
-        max_num_neighbors=system_config.max_num_neighbors,
-    )
-    return atom_graph.to(device)
-
-
-def _get_edge_feats(
-    positions: torch.Tensor,
-    cell: torch.Tensor,
-    radius: float,
-    max_num_neighbours: int,
-    brute_force: Optional[bool],
-    device: torch.device,
-):
-    """Get edge features.
-
-    Args:
-        positions: (n_nodes, 3) positions tensor
-        cell: 3x3 tensor unit cell for a system
-        radius: radius for edge construction
-        max_num_neighbours: maximum number of neighbours each node can send messages to.
-        n_kdtree_workers: number of workers to use for kdtree construction.
-        brute_force: whether to use brute force for kdtree construction.
-        device: device to put the tensors on.
-    """
-    # Construct a graph from a 3x3 supercell (as opposed to an infinite supercell).
-    # This could be innaccurate for thin unit cells, but we have yet to encounter a
-    # major issue and this approach is faster.
-    (
-        edge_index,
-        edge_vectors,
-    ) = featurization_utilities.compute_pbc_radius_graph(
-        positions=positions,
-        periodic_boundaries=cell,
-        radius=radius,
-        max_number_neighbors=max_num_neighbours,
-        brute_force=brute_force,
-        device=device,
-    )
-    edge_feats = {
-        "vectors": edge_vectors.to(torch.float32),
-        "r": edge_vectors.norm(dim=-1),
-    }
-    senders, receivers = edge_index[0], edge_index[1]
-    return edge_feats, senders, receivers
+        max_num_neighbors=torch.tensor([max_num_neighbors]),
+        system_id=torch.LongTensor([system_id]) if system_id is not None else system_id,
+    ).to(device=device, dtype=output_dtype)
 
 
 def _get_ase_tags(atoms: ase.Atoms) -> torch.Tensor:
@@ -225,3 +298,13 @@ def ase_fix_atoms_to_tensor(atoms: ase.Atoms) -> Optional[torch.Tensor]:
             fixed_atoms = torch.zeros((len(atoms)), dtype=torch.bool)
             fixed_atoms[constraint.index] = True
     return fixed_atoms
+
+
+def _check_floating_point_tensors_are_fp64(obj):
+    """Recursively check that all floating point tensors are fp64."""
+    if isinstance(obj, torch.Tensor) and torch.is_floating_point(obj):
+        if obj.dtype != torch.float64:
+            raise ValueError("All torch tensors stored in atoms.info must be fp64")
+    elif isinstance(obj, dict):
+        for k, v in obj.items():
+            _check_floating_point_tensors_are_fp64(v)
