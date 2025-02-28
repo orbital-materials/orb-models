@@ -148,24 +148,24 @@ You can also run the model using Docker:
 1. Build the Docker image locally:
 
    ```bash
-   docker build -t orb .
+   docker build -t orb_models .
    ```
 
    Or pull the pre-built image from Docker Hub:
 
    ```bash
-   docker pull cford38/orb:latest
+   docker pull cford38/orb_models:latest
    ```
 
 2. Run the Docker container:
 
    ```bash
-   docker run --gpus all --rm --name orb -it orb /bin/bash
-   # docker run --gpus all --rm --name orb -it cford38/orb:latest /bin/bash
+   docker run --gpus all --rm --name orb_models -it orb_models /bin/bash
+   # docker run --gpus all --rm --name orb_models -it cford38/orb_models:latest /bin/bash
    ```
 
 > [!NOTE]
-> This image does not include all of the model weights, which will be downloaded the first time you run BioEmu inside in the container.
+> This image does not include all of the model weights, which will be downloaded the first time you run the Python library inside in the container.
 
 
 
