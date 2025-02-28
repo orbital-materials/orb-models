@@ -10,8 +10,11 @@ RUN apt-get update && \
         ca-certificates \
         wget \
         git \
-        sudo
+        sudo \
+        gcc \
+        g++
 
 ## Install Python requirements
 RUN pip install orb-models && \
-    pip install "pynanoflann@git+https://github.com/dwastberg/pynanoflann#egg=af434039ae14bedcbb838a7808924d6689274168"
+    # pip install "pynanoflann@git+https://github.com/dwastberg/pynanoflann#egg=af434039ae14bedcbb838a7808924d6689274168"
+    pip install git+https://github.com/u1234x1234/pynanoflann.git@0.0.8
