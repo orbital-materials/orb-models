@@ -16,9 +16,6 @@ class ORBCalculator(Calculator):
 
     def __init__(
         self,
-
-    def __init__(
-        self,
         model: Union[GraphRegressor, ConservativeForcefieldRegressor],
         *,
         conservative: Optional[bool] = None,
@@ -27,89 +24,38 @@ class ORBCalculator(Calculator):
         max_num_neighbors: Optional[int] = None,
         half_supercell: Optional[bool] = None,
         device: Optional[Union[torch.device, str]] = None,
+        return_bonding_graph: bool = False,
+        vdw_multiplier: float = 0.5,  # Multiplier for the sum of VDW radii used as cutoff for bonding
         directory: str = ".",
-        return_bonding_graph: bool = False,  # Retained from local changes
     ):
         """Initializes the calculator.
 
         Args:
             model: The finetuned model to use for predictions.
-            conservative (bool, optional): Enables conservative forcefield mode.
-            edge_method (Optional[EdgeCreationMethod]): Method for edge creation (default: "knn_scipy").
+            conservative (bool, optional):
+                - Defaults to True if the model is a ConservativeForcefieldRegressor, otherwise False.
+                - If True, conservative forces and stresses are computed as the gradient of the energy.
+                  An error is raised if the model is not a ConservativeForcefieldRegressor.
+                - If False, direct force and stress predictions are used, not gradient-based ones.
+            edge_method (EdgeCreationMethod, optional): The method to use for graph edge construction.
+                If None then knn_brute_force is used if tensors are on GPU (2-6x faster),
+                otherwise defaults to knn_scipy. For very large systems, knn_brute_force may OOM on GPU.
             system_config (SystemConfig): The config defining how an atomic system is featurized.
-            max_num_neighbors (Optional[int]): Maximum number of neighbors per atom.
-            half_supercell (Optional[bool]): If True, considers only half of the periodic supercell.
-            device (Optional[Union[torch.device, str]]): The device to use for the model.
-            directory (str): The working directory for calculations.
-            return_bonding_graph (bool): If True, includes a bonding graph in results.
-        """
-        model: Union[GraphRegressor, ConservativeForcefieldRegressor],
-        *,
-        conservative: Optional[bool] = None,
-        edge_method: Optional[EdgeCreationMethod] = "knn_scipy",
-        system_config: SystemConfig = SystemConfig(radius=6.0, max_num_neighbors=20),
-        max_num_neighbors: Optional[int] = None,
-        half_supercell: Optional[bool] = None,
-        device: Optional[Union[torch.device, str]] = None,
-        directory: str = ".",
-
-    def __init__(
-        self,
-        model: Union[GraphRegressor, ConservativeForcefieldRegressor],
-        *,
-        conservative: Optional[bool] = None,
-        edge_method: Optional[EdgeCreationMethod] = "knn_scipy",
-        system_config: SystemConfig = SystemConfig(radius=6.0, max_num_neighbors=20),
-        max_num_neighbors: Optional[int] = None,
-        half_supercell: Optional[bool] = None,
-        device: Optional[Union[torch.device, str]] = None,
-        directory: str = ".",
-        return_bonding_graph: bool = False,  # Retained from local changes
-    ):
-        """Initializes the calculator.
-
-        Args:
-            model: The finetuned model to use for predictions.
-            conservative (bool, optional): Enables conservative forcefield mode.
-            edge_method (Optional[EdgeCreationMethod]): Method for edge creation (default: "knn_scipy").
-            system_config (SystemConfig): The config defining how an atomic system is featurized.
-            max_num_neighbors (Optional[int]): Maximum number of neighbors per atom.
-            half_supercell (Optional[bool]): If True, considers only half of the periodic supercell.
-            device (Optional[Union[torch.device, str]]): The device to use for the model.
-            directory (str): The working directory for calculations.
-            return_bonding_graph (bool): If True, includes a bonding graph in results.
-        """
-            device (Optional[torch.device]): The device to use for the model.
+            max_num_neighbors (int): The maximum number of neighbors for each atom.
+                Larger values should generally increase performace, but the gains may be marginal,
+                whilst the increse in latency could be significant (depending on num atoms).
+                    - Defaults to system_config.max_num_neighbors.
+                    - 120 is sufficient to capture all edges under 6A across all systems in mp-traj validation set.
+            half_supercell (bool): Whether to use half the supercell for graph construction, and then symmetrize.
+                Defaults to None, in which case half_supercells are used when num atoms > 5k.
+                This flag does not affect the resulting graph; it is purely an optimization that can double
+                throughput and half memory for very large cells (e.g. 5k+ atoms). For smaller systems, it can harm
+                performance due to additional computation to enforce max_num_neighbors.
+            device (Optional[torch.device], optional): The device to use for the model.
             return_bonding_graph (bool): If True, includes a bonding graph in results.
             vdw_multiplier (float): Multiplier for the sum of VDW radii to determine bond cutoff (default: 0.5).
-            **kwargs: Additional keyword arguments for the parent Calculator class.
-
-    def __init__(
-        self,
-        model: Union[GraphRegressor, ConservativeForcefieldRegressor],
-        *,
-        conservative: Optional[bool] = None,
-        edge_method: Optional[EdgeCreationMethod] = "knn_scipy",
-        system_config: SystemConfig = SystemConfig(radius=6.0, max_num_neighbors=20),
-        max_num_neighbors: Optional[int] = None,
-        half_supercell: Optional[bool] = None,
-        device: Optional[Union[torch.device, str]] = None,
-        directory: str = ".",
-        return_bonding_graph: bool = False,  # Retained from local changes
-    ):
-        """Initializes the calculator.
-
-        Args:
-            model: The finetuned model to use for predictions.
-            conservative (bool, optional): Enables conservative forcefield mode.
-            edge_method (Optional[EdgeCreationMethod]): Method for edge creation (default: "knn_scipy").
-            system_config (SystemConfig): The config defining how an atomic system is featurized.
-            max_num_neighbors (Optional[int]): Maximum number of neighbors per atom.
-            half_supercell (Optional[bool]): If True, considers only half of the periodic supercell.
-            device (Optional[Union[torch.device, str]]): The device to use for the model.
-            directory (str): The working directory for calculations.
-            return_bonding_graph (bool): If True, includes a bonding graph in results.
-        """
+            directory (Optional[str], optional): Working directory in which to read and write files and
+                perform calculations.
         """
         Calculator.__init__(self, directory=directory)
         self.results = {}  # type: ignore
@@ -117,37 +63,12 @@ class ORBCalculator(Calculator):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.model = self.model.to(self.device)  # type: ignore
         self.system_config = system_config
-
-    def __init__(
-        self,
-        model: Union[GraphRegressor, ConservativeForcefieldRegressor],
-        *,
-        conservative: Optional[bool] = None,
-        edge_method: Optional[EdgeCreationMethod] = "knn_scipy",
-        system_config: SystemConfig = SystemConfig(radius=6.0, max_num_neighbors=20),
-        max_num_neighbors: Optional[int] = None,
-        half_supercell: Optional[bool] = None,
-        device: Optional[Union[torch.device, str]] = None,
-        directory: str = ".",
-        return_bonding_graph: bool = False,  # Retained from local changes
-    ):
-        """Initializes the calculator.
-
-        Args:
-            model: The finetuned model to use for predictions.
-            conservative (bool, optional): Enables conservative forcefield mode.
-            edge_method (Optional[EdgeCreationMethod]): Method for edge creation (default: "knn_scipy").
-            system_config (SystemConfig): The config defining how an atomic system is featurized.
-            max_num_neighbors (Optional[int]): Maximum number of neighbors per atom.
-            half_supercell (Optional[bool]): If True, considers only half of the periodic supercell.
-            device (Optional[Union[torch.device, str]]): The device to use for the model.
-            directory (str): The working directory for calculations.
-            return_bonding_graph (bool): If True, includes a bonding graph in results.
-        """
         self.max_num_neighbors = max_num_neighbors
         self.edge_method = edge_method
         self.half_supercell = half_supercell
         self.conservative = conservative
+        self.return_bonding_graph = return_bonding_graph
+        self.vdw_multiplier = vdw_multiplier
 
         model_is_conservative = hasattr(self.model, "grad_forces_name")
         if self.conservative is None:
@@ -160,41 +81,44 @@ class ORBCalculator(Calculator):
 
         self.implemented_properties = model.properties  # type: ignore
 
-    def __init__(
-        self,
-        model: Union[GraphRegressor, ConservativeForcefieldRegressor],
-        *,
-        conservative: Optional[bool] = None,
-        edge_method: Optional[EdgeCreationMethod] = "knn_scipy",
-        system_config: SystemConfig = SystemConfig(radius=6.0, max_num_neighbors=20),
-        max_num_neighbors: Optional[int] = None,
-        half_supercell: Optional[bool] = None,
-        device: Optional[Union[torch.device, str]] = None,
-        directory: str = ".",
-        return_bonding_graph: bool = False,  # Retained from local changes
-    ):
-        """Initializes the calculator.
+    def calculate(self, atoms=None, properties=None, system_changes=all_changes):
+        """Calculate properties.
 
         Args:
-            model: The finetuned model to use for predictions.
-            conservative (bool, optional): Enables conservative forcefield mode.
-            edge_method (Optional[EdgeCreationMethod]): Method for edge creation (default: "knn_scipy").
-            system_config (SystemConfig): The config defining how an atomic system is featurized.
-            max_num_neighbors (Optional[int]): Maximum number of neighbors per atom.
-            half_supercell (Optional[bool]): If True, considers only half of the periodic supercell.
-            device (Optional[Union[torch.device, str]]): The device to use for the model.
-            directory (str): The working directory for calculations.
-            return_bonding_graph (bool): If True, includes a bonding graph in results.
-        """
-        if "forces" in self.implemented_properties:
-            self.results["forces"] = out["node_pred"].detach().cpu().numpy()
+            atoms (ase.Atoms): ASE Atoms object.
+            properties (list of str): Properties to be computed, used by ASE internally.
+            system_changes (list of str): System changes since last calculation, used by ASE internally.
 
-        if "stress" in self.implemented_properties:
-            raw_stress = out["stress_pred"].detach().cpu().numpy()
-            # reshape from (1, 6) to (6,) if necessary
-            self.results["stress"] = (
-                raw_stress[0] if len(raw_stress.shape) > 1 else raw_stress
-            )
+        Returns:
+            None. Results are stored in self.results.
+        """
+        Calculator.calculate(self, atoms)
+
+        half_supercell = (
+            len(atoms.positions) >= 5_000
+            if self.half_supercell is None
+            else self.half_supercell
+        )
+        batch = ase_atoms_to_atom_graphs(
+            atoms,
+            system_config=self.system_config,
+            max_num_neighbors=self.max_num_neighbors,
+            edge_method=self.edge_method,
+            half_supercell=half_supercell,
+            device=self.device,
+        )
+        batch = batch.to(self.device)  # type: ignore
+        out = self.model.predict(batch)  # type: ignore
+        self.results = {}
+        for property in self.implemented_properties:
+            _property = "energy" if property == "free_energy" else property
+            self.results[property] = to_numpy(out[_property].squeeze())
+
+        if self.conservative:
+            self.results["direct_forces"] = self.results["forces"]
+            self.results["direct_stress"] = self.results["stress"]
+            self.results["forces"] = self.results[self.model.grad_forces_name]
+            self.results["stress"] = self.results[self.model.grad_stress_name]
 
         if self.return_bonding_graph:
             # Keep tensors on device
@@ -220,7 +144,7 @@ class ORBCalculator(Calculator):
             is_h_h = (atomic_numbers[senders] == 1) & (atomic_numbers[receivers] == 1)
             vdw_cutoff[is_h_h] = 0.0
 
-            # **New: Save actual calculated values in the results dictionary**
+            # Save actual calculated values in the results dictionary
             self.results["pair_bond_lengths"] = bond_lengths.cpu().numpy()
             self.results["pair_vdw_cutoffs"] = vdw_cutoff.cpu().numpy()
             self.results["pair_senders"] = senders.cpu().numpy()
@@ -237,30 +161,3 @@ class ORBCalculator(Calculator):
             
             # Only convert to numpy at the very end
             self.results["bonding_graph"] = bonding_graph.cpu().numpy()
-
-    def __init__(
-        self,
-        model: Union[GraphRegressor, ConservativeForcefieldRegressor],
-        *,
-        conservative: Optional[bool] = None,
-        edge_method: Optional[EdgeCreationMethod] = "knn_scipy",
-        system_config: SystemConfig = SystemConfig(radius=6.0, max_num_neighbors=20),
-        max_num_neighbors: Optional[int] = None,
-        half_supercell: Optional[bool] = None,
-        device: Optional[Union[torch.device, str]] = None,
-        directory: str = ".",
-        return_bonding_graph: bool = False,  # Retained from local changes
-    ):
-        """Initializes the calculator.
-
-        Args:
-            model: The finetuned model to use for predictions.
-            conservative (bool, optional): Enables conservative forcefield mode.
-            edge_method (Optional[EdgeCreationMethod]): Method for edge creation (default: "knn_scipy").
-            system_config (SystemConfig): The config defining how an atomic system is featurized.
-            max_num_neighbors (Optional[int]): Maximum number of neighbors per atom.
-            half_supercell (Optional[bool]): If True, considers only half of the periodic supercell.
-            device (Optional[Union[torch.device, str]]): The device to use for the model.
-            directory (str): The working directory for calculations.
-            return_bonding_graph (bool): If True, includes a bonding graph in results.
-        """
