@@ -41,7 +41,7 @@ class BondingLogger:
     
     def log_reaction(self, reaction_str: str):
         """Log a detected reaction."""
-        current_time = self.dyn.get_number_of_steps() * (self.dyn.dt/units.fs)
+        current_time = self.dyn.get_number_of_steps() * self.dyn.dt / units.fs
         with open(self.filename, 'a') as f:
             f.write(f"Reaction at {current_time:.1f} fs: {reaction_str}\n")
     
@@ -154,11 +154,12 @@ class ReactionTrajectoryManager:
     def on_reaction_detected(self, step: int, reaction_str: str):
         """Called when a reaction is detected."""
         capture_buffer = list(self.pre_reaction_buffer)
-        reaction_time = self.frame_counter * self.frame_interval * (self.timestep/units.fs)
-
+        # Calculate time based on actual MD step with proper fs conversion
+        reaction_time = step * self.timestep / units.fs
+        
         event = {
             "reaction_frame": self.frame_counter,
-            "reaction_time": reaction_time,
+            "reaction_time": reaction_time,  # This is the time of the actual reaction
             "reaction_str": reaction_str,
             "capture_buffer": capture_buffer,
             "required_total": self.reaction_capture_size
@@ -167,7 +168,7 @@ class ReactionTrajectoryManager:
         
         # Log the reaction
         self.bonding_logger.log_reaction(reaction_str)
-        print(f"Reaction detected at frame {event['reaction_frame']} (time {reaction_time:.1f} fs): {reaction_str}")
+        print(f"Reaction detected at MD step {step} (time {reaction_time:.1f} fs): {reaction_str}")
         print(f"Queued reaction event. Waiting until capture buffer reaches {self.reaction_capture_size} frames.")
     
     def _write_reaction_trajectory(self, event):
@@ -216,9 +217,11 @@ def update_bonds(atoms, ema_alpha: float, ema_bonding_graph: np.ndarray,
 
     ema_bonding_graph = ema_alpha * current_graph + (1 - ema_alpha) * ema_bonding_graph
 
+    # Get upper triangle indices just once
     i_upper, j_upper = np.triu_indices(len(atoms), k=1)
     diff = np.abs(ema_bonding_graph[i_upper, j_upper] - baseline_bonding_graph[i_upper, j_upper])
-
+    
+    # Only do the expensive processing if there's actually a reaction
     if np.any(diff >= reaction_threshold):
         reaction_mask = diff >= reaction_threshold
         i_react = i_upper[reaction_mask]
