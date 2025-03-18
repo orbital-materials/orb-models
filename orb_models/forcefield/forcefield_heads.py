@@ -320,6 +320,8 @@ class ForceHead(torch.nn.Module):
         bucket_metrics = {f"{name}_mae_raw_{k}": v for k, v in bucket_metrics.items()}
         metrics.update(bucket_metrics)
         return metrics
+
+
 def confidence_row_fn(row, dataset_name: str):
     """Stub function for confidence property definition."""
     raise NotImplementedError(
