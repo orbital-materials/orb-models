@@ -11,6 +11,7 @@ from orb_models.forcefield.graph_regressor import (
 )
 from orb_models.forcefield.forcefield_utils import compute_gradient_forces_and_stress
 from orb_models.forcefield.load import _load_forcefield_state_dict
+from orb_models.forcefield.pair_repulsion import ZBLBasis
 
 
 class ConservativeForcefieldRegressor(nn.Module):
@@ -31,6 +32,7 @@ class ConservativeForcefieldRegressor(nn.Module):
         distill_direct_heads: Whether to distill the direct heads into the conservative heads.
         ensure_grad_loss_weights: Whether to ensure that the grad_forces and grad_stress keys are
             present in the loss_weights. Should only be used during training.
+        pair_repulsion: Whether to use pair repulsion.
         **kwargs: Additional kwargs, used for backwards compatibility of deprecated arguments.
     """
 
@@ -43,6 +45,7 @@ class ConservativeForcefieldRegressor(nn.Module):
         loss_weights: Optional[Dict[str, float]] = None,
         distill_direct_heads: bool = False,
         ensure_grad_loss_weights: bool = True,
+        pair_repulsion: bool = False,
         **kwargs,
     ):
         super().__init__()
@@ -52,6 +55,10 @@ class ConservativeForcefieldRegressor(nn.Module):
                     f"Unknown kwargs: {kwarg}, expected only backward compatible kwargs "
                     f"from {self._deprecated_kwargs}"
                 )
+
+        self.pair_repulsion = pair_repulsion
+        if self.pair_repulsion:
+            self.pair_repulsion_fn = ZBLBasis(p=6, compute_gradients=False)
 
         # Validate required heads are present
         required_heads = {"energy", "forces", "stress"}
@@ -114,6 +121,16 @@ class ConservativeForcefieldRegressor(nn.Module):
         out[self.energy_name] = self.heads[self.energy_name](node_features, batch)
         out[self.forces_name] = self.heads[self.forces_name](node_features, batch)
         out[self.stress_name] = self.heads[self.stress_name](node_features, batch)
+
+        if self.pair_repulsion:
+            pair_energy = self.pair_repulsion_fn(batch)["energy"]
+            if self.heads[self.energy_name].atom_avg:
+                pair_energy = pair_energy / batch.n_node
+            normalized = self.heads[self.energy_name].normalizer(
+                pair_energy,
+                online=False,
+            )
+            out[self.energy_name] += normalized.unsqueeze(1)
 
         if "confidence" in self.heads:
             target_name = self.heads["confidence"].target.fullname

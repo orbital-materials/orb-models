@@ -17,6 +17,7 @@ from orb_models.forcefield.nn_util import ScalarNormalizer, build_mlp
 from orb_models.forcefield import segment_ops
 from orb_models.forcefield.gns import MoleculeGNS
 from orb_models.forcefield.load import _load_forcefield_state_dict
+from orb_models.forcefield.pair_repulsion import ZBLBasis
 
 
 class GraphRegressor(nn.Module):
@@ -35,6 +36,7 @@ class GraphRegressor(nn.Module):
         model_requires_grad: bool = True,
         cutoff_layers: Optional[int] = None,
         loss_weights: Optional[Dict[str, float]] = None,
+        pair_repulsion: bool = False,
     ) -> None:
         """Initializes the GraphRegressor.
 
@@ -65,6 +67,14 @@ class GraphRegressor(nn.Module):
         self.loss_weights = loss_weights
         self.model_requires_grad = model_requires_grad
 
+        self.pair_repulsion = pair_repulsion
+        if self.pair_repulsion:
+            self.pair_repulsion_fn = ZBLBasis(
+                p=6,
+                node_aggregation="sum",
+                compute_gradients=True,
+            )
+
         self.model = model
         if self.cutoff_layers is not None:
             gns = (
@@ -85,6 +95,19 @@ class GraphRegressor(nn.Module):
         for name, head in self.heads.items():
             res = head(node_features, batch)
             out[name] = res
+
+        if self.pair_repulsion:
+            out_pair_raw = self.pair_repulsion_fn(batch)
+            for name, head in self.heads.items():
+                raw = out_pair_raw.get(name, None)
+                if raw is None:
+                    continue
+                if name == "energy" and head.atom_avg:
+                    raw = (raw / batch.n_node).unsqueeze(1)
+                out[name] = out[name] + head.normalizer(
+                    raw,
+                    online=False,
+                )
         return out
 
     def predict(
@@ -100,6 +123,15 @@ class GraphRegressor(nn.Module):
                 output[name] = _split_prediction(pred, batch.n_node)
             else:
                 output[name] = pred
+
+        if self.pair_repulsion:
+            out_pair_raw = self.pair_repulsion_fn(batch)
+            for name, head in self.heads.items():
+                raw = out_pair_raw.get(name, None)
+                if raw is None:
+                    continue
+                output[name] = output[name] + raw
+
         return output
 
     def loss(self, batch: base.AtomGraphs) -> base.ModelOutput:
