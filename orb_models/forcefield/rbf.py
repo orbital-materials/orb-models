@@ -103,8 +103,13 @@ class ExpNormalSmearing(torch.nn.Module):
 
 class BesselBasis(torch.nn.Module):
     """Bessel basis functions.
+
     NOTE: whilst similar to SphericalBesselBasis, this class
     has different bessel_weights and prefactor.
+
+    Args:
+        r_max: Maximum distance for the basis functions.
+        trainable: Whether the basis functions are trainable.
     """
 
     def __init__(self, r_max: float, num_bases=8, trainable=False):
