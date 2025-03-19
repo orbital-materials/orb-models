@@ -149,11 +149,6 @@ class ConservativeForcefieldRegressor(nn.Module):
             )
             out[self.energy_name] += normalized.unsqueeze(1)
 
-        if "confidence" in self.heads:
-            target_name = self.heads["confidence"].target.fullname
-            out[target_name] = self.heads["confidence"](node_features, batch)
-
-        # Compute conservative predictions if needed
         raw_energy = self.heads[self.energy_name].denormalise_prediction(
             pred=out[self.energy_name], batch=batch
         )
