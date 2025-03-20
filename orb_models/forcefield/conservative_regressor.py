@@ -84,9 +84,6 @@ class ConservativeForcefieldRegressor(nn.Module):
             heads, loss_weights, ensure_grad_loss_weights=ensure_grad_loss_weights
         )
 
-        self.heads = torch.nn.ModuleDict(heads)
-        self.model = model
-
         self.loss_weights = loss_weights
         self.distill_direct_heads = distill_direct_heads
         self.forces_loss_type = forces_loss_type
