@@ -18,7 +18,7 @@ class ORBCalculator(Calculator):
         model: Union[GraphRegressor, ConservativeForcefieldRegressor],
         *,
         conservative: Optional[bool] = None,
-        edge_method: Optional[EdgeCreationMethod] = "knn_scipy",
+        edge_method: Optional[EdgeCreationMethod] = None,
         system_config: SystemConfig = SystemConfig(radius=6.0, max_num_neighbors=20),
         max_num_neighbors: Optional[int] = None,
         half_supercell: Optional[bool] = None,
@@ -41,8 +41,7 @@ class ORBCalculator(Calculator):
                     - Defaults to system_config.max_num_neighbors.
                     - 120 is sufficient to capture all edges under 6A across all systems in mp-traj validation set.
             edge_method (EdgeCreationMethod, optional): The method to use for graph edge construction.
-                If None then knn_brute_force is used if tensors are on GPU (2-6x faster),
-                otherwise defaults to knn_scipy. For very large systems, knn_brute_force may OOM on GPU.
+                If None, the edge method is chosen dynamically based on the device and system size.
             half_supercell (bool): Whether to use half the supercell for graph construction, and then symmetrize.
                 Defaults to None, in which case half_supercells are used when num_atoms > 5k.
                 This flag does not affect the resulting graph; it is purely an optimization that can double
