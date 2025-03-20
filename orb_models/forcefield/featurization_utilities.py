@@ -1,10 +1,16 @@
 """Featurization utilities for molecular models."""
 
+import typing
 from typing import Optional, Tuple, Union, Literal, List
 
 import ase
 import numpy as np
 import torch
+
+try:
+    import cuml
+except ImportError:
+    cuml = None
 
 from scipy.spatial import KDTree as SciKDTree
 
@@ -27,6 +33,25 @@ def get_device(
     if requested_device is None:
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
     return torch.device(requested_device)
+
+
+def get_default_edge_method(
+    device: torch.device, num_atoms: int, is_periodic: bool
+) -> EdgeCreationMethod:
+    """Get the default edge method for a given device and number of atoms."""
+    if device.type != "cpu":
+        if (
+            cuml is None
+            or (is_periodic and num_atoms < 5_000)
+            or (not is_periodic and num_atoms < 30_000)
+        ):
+            edge_method = "knn_brute_force"
+        else:
+            edge_method = "knn_cuml_rbc"
+    else:
+        edge_method = "knn_scipy"
+    assert edge_method in typing.get_args(EdgeCreationMethod)
+    return edge_method  # type: ignore
 
 
 def get_atom_embedding(atoms: ase.Atoms, k_hot: bool = False) -> torch.Tensor:
@@ -433,6 +458,7 @@ def compute_pbc_radius_graph(
     *,
     positions: torch.Tensor,
     cell: torch.Tensor,
+    pbc: torch.Tensor,
     radius: Union[float, torch.Tensor],
     max_number_neighbors: int,
     edge_method: Optional[EdgeCreationMethod] = None,
@@ -446,13 +472,21 @@ def compute_pbc_radius_graph(
     Args:
         positions (torch.Tensor): 3D positions of particles. Shape [num_particles, 3].
         cell (torch.Tensor): A 3x3 matrix where the lattice vectors are rows or columns.
+        pbc (torch.Tensor): A boolean tensor of shape [3] indicating which directions are periodic.
         radius (Union[float, torch.tensor]): The radius within which to connect atoms.
-        max_number_neighbors (int, optional): The maximum number of neighbors for each particle. Defaults to 20.
+        max_number_neighbors (int): The maximum number of neighbors for each particle.
         edge_method (EdgeCreationMethod, optional): The method to use for graph edge construction.
-            Defaults to None, in which case knn_brute_force is used if we are on GPU (2-6x faster),
-            otherwise knn_scipy. More details here: https://github.com/orbital-materials/orb/pull/766
-        n_workers (int, optional): The number of workers to use for KDTree construction. Defaults to 1.
-        device (Optional[Union[torch.device, str, int]], optional): The device to use for computation.
+            Defaults to None, in which case edge method is chosen as follows:
+            * knn_brute_force: If device is not CPU, and cuML is not installed or num_atoms is < 5000 (PBC)
+                or < 30000 (non-PBC).
+            * knn_cuml_rbc: If device is not CPU, and cuML is installed, and num_atoms is >= 5000 (PBC) or
+                >= 30000 (non-PBC).
+            * knn_scipy: If device is CPU.
+            On GPU, for num_atoms ≲ 5000 (PBC) or ≲ 30000 (non-PBC), knn_brute_force is faster than knn_cuml_*,
+            but uses more memory. For num_atoms ≳ 5000 (PBC) or ≳ 30000 (non-PBC), knn_cuml_* is faster and uses
+            less memory, but requires cuML to be installed. knn_scipy is typically fastest on the CPU.
+        n_workers (int, optional): The number of workers for KDTree construction in knn_scipy. Defaults to 1.
+        device (Union[torch.device, str, int], optional): The device to use for computation.
             Defaults to None, in which case GPU is used if available.
         half_supercell (bool): Whether to use half the supercell for graph construction, and then symmetrize.
             This flag does not affect the resulting graph; it is purely an optimization that can double
@@ -474,16 +508,16 @@ def compute_pbc_radius_graph(
 
     natoms = positions.shape[0]
     half_supercell = half_supercell and bool(torch.any(cell != 0.0))
+    is_periodic = bool(torch.any(cell != 0.0).item() and torch.any(pbc).item())
 
     device = get_device(requested_device=device)
-    if edge_method is None:
-        edge_method = "knn_brute_force" if device.type != "cpu" else "knn_scipy"
-    if edge_method == "knn_brute_force":
-        # if knn brute force, then try to place tensors on the gpu
+    edge_method = edge_method or get_default_edge_method(device, natoms, is_periodic)
+    if edge_method == "knn_brute_force" or edge_method.startswith("knn_cuml_"):
+        # if knn_brute_force or knn_cuml_*, then try to place tensors on the gpu if device is not provided
         positions = positions.to(device)
         cell = cell.to(device)
 
-    if torch.any(cell != 0.0):
+    if is_periodic:
         if half_supercell:
             supercell_positions, integer_offsets = construct_half_3x3x3_supercell(
                 positions=positions, cell=cell
@@ -575,6 +609,8 @@ def compute_supercell_neighbors(
         edge_method (EdgeCreationMethod): The method to use for graph edge construction:
             - knn_brute_force: Use brute force knn implementation: compute all pairwise distances between
             positions and supercell_positions, and subsequently filter edges based on radius and max_num_neighbors.
+            - knn_cuml_rbc: Use cuML's random-ball algorithm implementation.
+            - knn_cuml_brute: Use cuML's brute force implementation.
             - knn_scipy: Use scipy's KDTree implementation.
         n_workers (int, optional): The number of workers to use for KDTree construction. Defaults to 1.
     """
@@ -584,6 +620,33 @@ def compute_supercell_neighbors(
         distances, supercell_receivers = torch.topk(
             distances, k=k, largest=False, sorted=True
         )
+        # remove self-edges and edges beyond radius
+        within_radius = distances[:, 1:] < (radius + 1e-6)
+        num_neighbors_per_sender = within_radius.sum(-1)
+        supercell_receivers = supercell_receivers[:, 1:][within_radius]
+    elif edge_method.startswith("knn_cuml_"):
+        if cuml is None:
+            raise ImportError(
+                "cuML is not installed. Please install cuML: https://docs.rapids.ai/install/."
+            )
+        assert (
+            supercell_positions.device.type == "cuda"
+            and central_cell_positions.device.type == "cuda"
+        ), "cuML KNN is only supported on CUDA devices"
+        algorithm = edge_method.split("_")[-1]
+        k = min(max_num_neighbors + 1, len(supercell_positions))
+        knn = cuml.neighbors.NearestNeighbors(
+            n_neighbors=k,
+            algorithm=algorithm,
+            metric="euclidean",
+        )
+        knn.fit(supercell_positions)
+        distances, supercell_receivers = knn.kneighbors(
+            central_cell_positions, return_distance=True
+        )
+        # Convert from CuPy arrays to PyTorch tensors
+        distances = torch.as_tensor(distances)
+        supercell_receivers = torch.as_tensor(supercell_receivers)
         # remove self-edges and edges beyond radius
         within_radius = distances[:, 1:] < (radius + 1e-6)
         num_neighbors_per_sender = within_radius.sum(-1)
@@ -600,6 +663,9 @@ def compute_supercell_neighbors(
             workers=n_workers,
             p=2,
         )
+        if len(supercell_receivers.shape) == 1:
+            supercell_receivers = supercell_receivers[None, :]
+
         # Remove the self-edge that will be closest
         supercell_receivers = np.array(supercell_receivers)[:, 1:]  # type: ignore
 
@@ -688,6 +754,7 @@ def batch_compute_pbc_radius_graph(
     *,
     positions: torch.Tensor,
     cells: torch.Tensor,
+    pbc: torch.Tensor,
     radius: Union[float, torch.Tensor],
     n_node: torch.Tensor,
     max_number_neighbors: torch.Tensor,
@@ -704,13 +771,21 @@ def batch_compute_pbc_radius_graph(
     Args:
         positions (torch.Tensor): 3D positions of a batch of particles. Shape [num_particles, 3].
         cells (torch.Tensor): A batch of 3x3 matrices where the lattice vectors are rows.
+        pbc (torch.Tensor): A batch of boolean tensors of shape [3] indicating which directions are periodic.
         radius (Union[float, torch.tensor]): The radius within which to connect atoms.
         n_node (torch.Tensor): A vector where each element indicates the number of particles in each element of
             the batch. Of size len(batch).
         max_number_neighbors (torch.Tensor): The maximum number of neighbors for each particle.
         edge_method (EdgeCreationMethod, optional): The method to use for graph edge construction.
-            Defaults to None, in which case knn_brute_force is used if we are on GPU (2-6x faster),
-            otherwise knn_scipy. More details here: https://github.com/orbital-materials/orb/pull/766
+            Defaults to None, in which case edge method is chosen as follows:
+            * knn_brute_force: If device is not CPU, and cuML is not installed or num_atoms is < 5000 (PBC)
+                or < 30000 (non-PBC).
+            * knn_cuml_rbc: If device is not CPU, and cuML is installed, and num_atoms is >= 5000 (PBC) or
+                >= 30000 (non-PBC).
+            * knn_scipy: If device is CPU.
+            On GPU, for num_atoms ≲ 5000 (PBC) or ≲ 30000 (non-PBC), knn_brute_force is faster than knn_cuml_*,
+            but uses more memory. For num_atoms ≳ 5000 (PBC) or ≳ 30000 (non-PBC), knn_cuml_* is faster and uses
+            less memory, but requires cuML to be installed. knn_scipy is typically fastest on the CPU.
         half_supercell (bool): Whether to use half the supercell for graph construction, and then symmetrize.
             This flag does not affect the resulting graph; it is purely an optimization that can double
             throughput and half memory for very large cells (e.g. 10k+ atoms). For smaller systems, it can harm
@@ -731,16 +806,17 @@ def batch_compute_pbc_radius_graph(
     num_edges = []
     all_unit_shifts = []
 
-    device = positions.device
-    for p, pbc, mn in zip(
+    for p, cell, pbc, mn in zip(
         torch.tensor_split(positions, torch.cumsum(n_node, 0)[:-1].cpu()),
         cells,
+        pbc,
         max_number_neighbors,
         strict=True,
     ):
         edges, vectors, unit_shifts = compute_pbc_radius_graph(
             positions=p,
-            cell=pbc,
+            cell=cell,
+            pbc=pbc,
             radius=radius,
             max_number_neighbors=int(mn),
             edge_method=edge_method,

@@ -4,6 +4,8 @@ import argparse
 
 import ase
 import torch
+import numpy as np
+
 from core.dataset import atomic_system as core_atomic_system
 from core.models import load
 
@@ -21,7 +23,12 @@ def main(model: str, core_model: str):
     """
     original_orbff, _, sys_config = load.load_model(core_model)
 
-    atoms = ase.Atoms("H2O", positions=[[0, 0, 0], [0, 0, 1.1], [0, 1.1, 0]])
+    atoms = ase.Atoms(
+        "H2O",
+        positions=[[0, 0, 0], [0, 0, 1.1], [0, 1.1, 0]],
+        cell=np.eye(3) * 2,
+        pbc=True,
+    )
 
     graph_orig = core_atomic_system.ase_atoms_to_atom_graphs(atoms, sys_config)
     graph = atomic_system.ase_atoms_to_atom_graphs(atoms)

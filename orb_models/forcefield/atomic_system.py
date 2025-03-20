@@ -171,9 +171,16 @@ def ase_atoms_to_atom_graphs(
     Args:
         atoms: ase.Atoms object
         wrap: whether to wrap atomic positions into the central unit cell (if there is one).
-        edge_method: The method to use for edge creation:
-            - knn_brute_force: Use brute force to find nearest neighbors.
-            - knn_scipy (default): Use scipy to find nearest neighbors.
+        edge_method (EdgeCreationMethod, optional): The method to use for graph edge construction.
+            If None, the edge method is chosen as follows:
+            * knn_brute_force: If device is not CPU, and cuML is not installed or num_atoms is < 5000 (PBC)
+                or < 30000 (non-PBC).
+            * knn_cuml_rbc: If device is not CPU, and cuML is installed, and num_atoms is >= 5000 (PBC) or
+                >= 30000 (non-PBC).
+            * knn_scipy (default): If device is CPU.
+            On GPU, for num_atoms ≲ 5000 (PBC) or ≲ 30000 (non-PBC), knn_brute_force is faster than knn_cuml_*,
+            but uses more memory. For num_atoms ≳ 5000 (PBC) or ≳ 30000 (non-PBC), knn_cuml_* is faster and uses
+            less memory, but requires cuML to be installed. knn_scipy is typically fastest on the CPU.
         system_config: The system configuration to use for graph construction.
         max_num_neighbors: Maximum number of neighbors each node can send messages to.
             If None, will use system_config.max_num_neighbors.
@@ -214,13 +221,15 @@ def ase_atoms_to_atom_graphs(
     )
     positions = torch.from_numpy(atoms.positions)
     cell = torch.from_numpy(atoms.cell.array)
+    pbc = torch.from_numpy(atoms.pbc)
     lattice = torch.from_numpy(cell_to_cellpar(cell))
-    if wrap and torch.any(cell != 0):
+    if wrap and (torch.any(cell != 0) and torch.any(pbc)):
         positions = feat_util.map_to_pbc_cell(positions, cell)
 
     edge_index, edge_vectors, unit_shifts = feat_util.compute_pbc_radius_graph(
         positions=positions,
         cell=cell,
+        pbc=pbc,
         radius=system_config.radius,
         max_number_neighbors=max_num_neighbors,
         edge_method=edge_method,
@@ -248,6 +257,7 @@ def ase_atoms_to_atom_graphs(
     graph_feats = {
         **atoms.info.get("graph_features", {}),
         "cell": cell,
+        "pbc": pbc,
         "lattice": lattice,
     }
 
