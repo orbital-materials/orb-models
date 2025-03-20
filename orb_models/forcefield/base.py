@@ -113,6 +113,12 @@ class AtomGraphs(NamedTuple):
         assert self.system_features
         self.system_features["cell"] = val
 
+    @property
+    def pbc(self):
+        """Get pbc."""
+        assert self.system_features
+        return self.system_features.get("pbc")
+
     def compute_differentiable_edge_vectors(
         self,
         use_stress_displacement: bool = True,
@@ -477,6 +483,7 @@ def refeaturize_atomgraphs(
         ) = featurization_utilities.batch_compute_pbc_radius_graph(
             positions=positions,
             cells=cell,
+            pbc=atoms.pbc,
             radius=atoms.radius,
             n_node=num_atoms,
             max_number_neighbors=atoms.max_num_neighbors,

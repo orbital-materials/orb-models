@@ -49,7 +49,10 @@ def graph():
         n_edge=torch.tensor([edges]),
         node_features=dict(atomic_numbers=atomic_numbers, positions=positions),
         edge_features=dict(feat=edge_features),
-        system_features={"cell": torch.eye(3).view(1, 3, 3)},
+        system_features={
+            "cell": torch.eye(3).view(1, 3, 3),
+            "pbc": torch.tensor([[True, True, True]]),
+        },
         node_targets=dict(node_target=noise_or_forces),
         edge_targets={},
         system_targets=dict(sys_target=torch.tensor([[23.3]])),
