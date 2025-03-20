@@ -22,6 +22,12 @@ pip install orb-models
 
 Orb models are expected to work on MacOS and Linux. Windows support is not guaranteed.
 
+For large system (≳5k atoms PBC, or ≳30k atoms non-PBC) simulations we recommend installing [cuML](https://docs.rapids.ai/install/) (requires CUDA), which can significantly reduce graph creation time (2-10x) and improve GPU memory efficiency (2-100x):
+```bash
+pip install --extra-index-url=https://pypi.nvidia.com "cuml-cu11==25.2.*"  # For cuda versions >=11.4, <11.8
+pip install --extra-index-url=https://pypi.nvidia.com "cuml-cu12==25.2.*"  # For cuda versions >=12.0, <13.0
+```
+
 ### Updates
 
 **Oct 2024**: We have released a new version of the models, `orb-v2`. This version has 2 major changes:

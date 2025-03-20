@@ -1,8 +1,10 @@
-from collections import defaultdict
 import itertools
 import pytest
+from collections import defaultdict
+
 import ase.io
 import numpy as np
+import torch
 
 from orb_models.forcefield.atomic_system import ase_atoms_to_atom_graphs, SystemConfig
 
@@ -59,12 +61,40 @@ def _get_edge_sets(atom_graphs, with_vectors=False, precision=4):
             ),
         ),
         pytest.param(
+            "knn_cuml_brute",
+            marks=[
+                pytest.mark.xfail(
+                    reason="knn_cuml_brute is currently not translation invariant"
+                ),
+                pytest.mark.skipif(
+                    not torch.cuda.is_available(),
+                    reason="CUDA is not available for CuML KNN.",
+                ),
+            ],
+        ),
+        pytest.param(
+            "knn_cuml_rbc",
+            marks=[
+                pytest.mark.xfail(
+                    reason="knn_cuml_rbc is currently not translation invariant"
+                ),
+                pytest.mark.skipif(
+                    not torch.cuda.is_available(),
+                    reason="CUDA is not available for CuML KNN.",
+                ),
+            ],
+        ),
+        pytest.param(
             "knn_scipy",
             marks=pytest.mark.xfail(reason="Scipy is not translation invariant"),
         ),
     ],
 )
 def test_featurization_is_translation_invariant_with_real_system(edge_method):
+
+    original_precision = torch.get_float32_matmul_precision()
+    torch.set_float32_matmul_precision("highest")
+
     atoms = _get_real_system()
     system_config = SystemConfig(
         radius=6.0,
@@ -90,6 +120,8 @@ def test_featurization_is_translation_invariant_with_real_system(edge_method):
         )
         assert edges == shifted_edges
 
+    torch.set_float32_matmul_precision(original_precision)
+
 
 @pytest.mark.parametrize(
     "edge_method",
@@ -101,6 +133,30 @@ def test_featurization_is_translation_invariant_with_real_system(edge_method):
             ),
         ),
         pytest.param(
+            "knn_cuml_brute",
+            marks=[
+                pytest.mark.xfail(
+                    reason="knn_cuml_brute is currently not translation invariant with geometric systems"
+                ),
+                pytest.mark.skipif(
+                    not torch.cuda.is_available(),
+                    reason="CUDA is not available for CuML KNN.",
+                ),
+            ],
+        ),
+        pytest.param(
+            "knn_cuml_rbc",
+            marks=[
+                pytest.mark.xfail(
+                    reason="knn_cuml_rbc is currently not translation invariant with geometric systems"
+                ),
+                pytest.mark.skipif(
+                    not torch.cuda.is_available(),
+                    reason="CUDA is not available for CuML KNN.",
+                ),
+            ],
+        ),
+        pytest.param(
             "knn_scipy",
             marks=pytest.mark.xfail(
                 reason="Scipy is not translation invariant with geometric systems"
@@ -109,6 +165,9 @@ def test_featurization_is_translation_invariant_with_real_system(edge_method):
     ],
 )
 def test_featurization_is_translation_invariant_with_geometric_system(edge_method):
+    original_precision = torch.get_float32_matmul_precision()
+    torch.set_float32_matmul_precision("highest")
+
     atoms = ase.Atoms(
         "C" * 5,
         positions=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0], [0, 0, 1]]),
@@ -139,12 +198,30 @@ def test_featurization_is_translation_invariant_with_geometric_system(edge_metho
         )
         assert edges == shifted_edges
 
+    torch.set_float32_matmul_precision(original_precision)
+
 
 @pytest.mark.parametrize(
     "edge_method,max_num_neighbors",
     [
         ("knn_brute_force", 120),
         ("knn_scipy", 120),
+        pytest.param(
+            "knn_cuml_brute",
+            120,
+            marks=pytest.mark.skipif(
+                not torch.cuda.is_available(),
+                reason="CUDA is not available for CuML KNN.",
+            ),
+        ),
+        pytest.param(
+            "knn_cuml_rbc",
+            120,
+            marks=pytest.mark.skipif(
+                not torch.cuda.is_available(),
+                reason="CUDA is not available for CuML KNN.",
+            ),
+        ),
         pytest.param(
             "knn_brute_force",
             20,
@@ -161,9 +238,38 @@ def test_featurization_is_translation_invariant_with_geometric_system(edge_metho
                 "selection of equidistant neighbors"
             ),
         ),
+        pytest.param(
+            "knn_cuml_brute",
+            20,
+            marks=[
+                pytest.mark.xfail(
+                    reason="knn_cuml_brute is currently not perfectly rotation invariant"
+                ),
+                pytest.mark.skipif(
+                    not torch.cuda.is_available(),
+                    reason="CUDA is not available for CuML KNN.",
+                ),
+            ],
+        ),
+        pytest.param(
+            "knn_cuml_rbc",
+            20,
+            marks=[
+                pytest.mark.xfail(
+                    reason="knn_cuml_rbc is currently not perfectly rotation invariant"
+                ),
+                pytest.mark.skipif(
+                    not torch.cuda.is_available(),
+                    reason="CUDA is not available for CuML KNN.",
+                ),
+            ],
+        ),
     ],
 )
 def test_featurization_is_rotation_invariant(edge_method, max_num_neighbors):
+    original_precision = torch.get_float32_matmul_precision()
+    torch.set_float32_matmul_precision("highest")
+
     atoms = _get_real_system()
     system_config = SystemConfig(radius=6.0, max_num_neighbors=max_num_neighbors)
     atom_graphs = ase_atoms_to_atom_graphs(
@@ -200,3 +306,5 @@ def test_featurization_is_rotation_invariant(edge_method, max_num_neighbors):
                 rotated_atom_graphs, with_vectors=True, precision=3
             )
             assert edges == rotated_edges_with_vectors
+
+    torch.set_float32_matmul_precision(original_precision)
