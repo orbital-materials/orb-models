@@ -167,7 +167,6 @@ def get_optim(
     lr: float, total_steps: int, model: torch.nn.Module
 ) -> Tuple[torch.optim.Optimizer, Optional[torch.optim.lr_scheduler._LRScheduler]]:
     """Configure optimizers, LR schedulers and EMA."""
-
     # Initialize parameter groups
     params = []
 

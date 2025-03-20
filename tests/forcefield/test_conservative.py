@@ -37,7 +37,7 @@ def test_regressor_loss(conservative_regressor, batch):
 def test_regressor_head_config_raises_error(
     gns_model, energy_head, force_head, stress_head
 ):
-    with pytest.raises(ValueError, match="Missing required heads"):
+    with pytest.raises(ValueError, match="Loss weights for unknown targets"):
         ConservativeForcefieldRegressor(
             heads={"energy": energy_head, "forces": force_head},
             model=gns_model,

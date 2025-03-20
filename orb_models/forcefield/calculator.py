@@ -74,6 +74,14 @@ class ORBCalculator(Calculator):
 
         self.implemented_properties = model.properties  # type: ignore
 
+        # TODO: Untangle the spaghetti of how we handle the naming for the heads.
+        # This is required because ASE will check the implemented_properties for
+        # the existence of the property before calling the calculator, so it's not
+        # sufficient to just return the property names from the model and handle
+        # the conservative case in `calculate`.
+        if self.conservative:
+            self.implemented_properties.extend(["forces", "stress"])
+
     def calculate(self, atoms=None, properties=None, system_changes=all_changes):
         """Calculate properties.
 
@@ -103,7 +111,15 @@ class ORBCalculator(Calculator):
         batch = batch.to(self.device)  # type: ignore
         out = self.model.predict(batch)  # type: ignore
         self.results = {}
+        model_has_direct_heads = (
+            "forces" in self.model.heads and "stress" in self.model.heads  # type: ignore
+        )
         for property in self.implemented_properties:
+            # The model has no direct heads for forces/stress, so we skip these properties.
+            if not model_has_direct_heads and property == "forces":
+                continue
+            if not model_has_direct_heads and property == "stress":
+                continue
             _property = "energy" if property == "free_energy" else property
             self.results[property] = to_numpy(out[_property].squeeze())
 

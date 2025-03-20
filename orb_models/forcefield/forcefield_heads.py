@@ -356,6 +356,7 @@ class ConfidenceHead(torch.nn.Module):
         dropout: Optional[float] = None,
         activation: str = "ssp",
         detach_node_features: bool = True,
+        hard_clamp: bool = True,
     ):
         """Initializes the ConfidenceHead MLP.
 
@@ -371,13 +372,16 @@ class ConfidenceHead(torch.nn.Module):
             detach_node_features: If True, detaches node features from computational graph.
                 This means that the confidence loss has no impact on training the underlying
                 forcefield model.
+            hard_clamp: If True, ignore any errors above max_error such that they do not contribute
+                to the loss, rather than just clamping them to the max_bin.
         """
         super().__init__()
         self.target = _confidence
         self.num_bins = num_bins
         self.max_error = max_error
         self.detach_node_features = detach_node_features
-        # Define bin edges (from 0 to max_error)
+        self.hard_clamp = hard_clamp
+        self.ignore_index = -100
         if binning_scale == "linear":
             bins = torch.linspace(0.0, max_error, int(num_bins + 1))
         elif binning_scale == "exponential":
@@ -409,9 +413,13 @@ class ConfidenceHead(torch.nn.Module):
         Returns:
             Bin indices of shape (n_atoms,)
         """
-        force_error = torch.clamp(force_error, 0, self.max_error)
-        bins = torch.bucketize(force_error, self.bin_edges) - 1  # type: ignore
-        return torch.clamp(bins, 0, self.num_bins - 1)
+        clamped_error = torch.clamp(force_error, 0, self.max_error)
+        bins = torch.bucketize(clamped_error, self.bin_edges) - 1  # type: ignore
+        clamped = torch.clamp(bins, 0, self.num_bins - 1)
+
+        if self.hard_clamp:
+            clamped[force_error > self.max_error] = self.ignore_index
+        return clamped
 
     def forward(
         self, node_features: torch.Tensor, batch: base.AtomGraphs
@@ -451,7 +459,9 @@ class ConfidenceHead(torch.nn.Module):
         true_bins = self.get_error_bins(force_error)
 
         # Cross entropy loss
-        loss = torch.nn.functional.cross_entropy(confidence_logits, true_bins)
+        loss = torch.nn.functional.cross_entropy(
+            confidence_logits, true_bins, ignore_index=self.ignore_index
+        )
 
         # Calculate accuracy
         pred_bins = torch.argmax(confidence_logits, dim=-1)
