@@ -1,7 +1,5 @@
 """Tests featurization utilities."""
 
-import typing
-
 import ase
 import ase.io
 import ase.neighborlist
@@ -11,7 +9,6 @@ import torch
 from scipy.spatial.transform import Rotation
 
 from orb_models.forcefield.atomic_system import SystemConfig, ase_atoms_to_atom_graphs
-from orb_models.forcefield.featurization_utilities import EdgeCreationMethod
 from orb_models.forcefield import featurization_utilities
 from tests.atomgraphs.conftest import assert_edges_match_nequips, get_CO2, get_zeolites
 
