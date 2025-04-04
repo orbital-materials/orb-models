@@ -8,7 +8,7 @@ from orb_models.forcefield.gns import MoleculeGNS
 from orb_models.forcefield.load import load_forcefield_state_dict
 
 
-class DirectForcefieldRegressor(base.RegressorModelMixin):
+class DirectForcefieldRegressor(torch.nn.Module):
     """Direct Forcefield regressor."""
 
     _deprecated_kwargs = ["cutoff_layers"]

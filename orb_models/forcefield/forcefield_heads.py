@@ -2,6 +2,7 @@ import numpy
 import torch
 from typing import Literal, Optional, Union
 
+from orb_models.forcefield.loss import forces_loss_function
 from orb_models.forcefield.property_definitions import PROPERTIES, PropertyDefinition
 from orb_models.forcefield.forcefield_utils import (
     conditional_huber_force_loss,
@@ -139,7 +140,7 @@ class EnergyHead(torch.nn.Module):
     ) -> torch.Tensor:
         """Predict energy."""
         pred = self(node_features, batch)
-        return self.denormalise_prediction(pred, batch)
+        return self.denormalize(pred, batch)
 
     def loss(
         self,
@@ -153,21 +154,20 @@ class EnergyHead(torch.nn.Module):
         if alternative_target is not None:
             raw_target = alternative_target.reshape(-1)
         else:
-            raw_target = batch.system_targets[name].reshape(-1)  # type: ignore
+            raw_target = batch.system_targets[name].reshape(-1)
 
         reference = self.reference(batch.atomic_numbers, batch.n_node).reshape(-1)
+        target = self.normalize(raw_target, batch, reference)
         assert (
-            pred.shape == raw_target.shape == reference.shape
-        ), f"{pred.shape} != {raw_target.shape} != {reference.shape}"
+            pred.shape == raw_target.shape == target.shape
+        ), f"{pred.shape} != {raw_target.shape} != {target.shape}"
+
+        loss = mean_error(pred, target, self.loss_type)
 
         reference_error = raw_target - reference
         if self.atom_avg:
             reference_error = reference_error / batch.n_node
-
-        target = self.normalizer(reference_error)
-        loss = mean_error(pred, target, self.loss_type)
-
-        raw_pred = self.denormalise_prediction(pred, batch)
+        raw_pred = self.denormalize(pred, batch)
         metrics = {
             f"{name}_loss": loss,
             f"{name}_mae_raw": torch.abs(raw_pred - raw_target).mean(),
@@ -176,12 +176,27 @@ class EnergyHead(torch.nn.Module):
         }
         return base.ModelOutput(loss=loss, log=metrics)
 
-    def denormalise_prediction(self, pred: torch.Tensor, batch: base.AtomGraphs):
-        """Denormalise the energy prediction."""
-        pred = self.normalizer.inverse(pred).squeeze(-1)
+    def denormalize(self, x: torch.Tensor, batch: base.AtomGraphs):
+        """Denormalize the energy prediction."""
+        x = self.normalizer.inverse(x).squeeze(-1)
         if self.atom_avg:
-            pred = pred * batch.n_node
-        return pred + self.reference(batch.atomic_numbers, batch.n_node)
+            x = x * batch.n_node
+        return x + self.reference(batch.atomic_numbers, batch.n_node)
+
+    def normalize(
+        self,
+        x: torch.Tensor,
+        batch: base.AtomGraphs,
+        reference: Optional[torch.Tensor] = None,
+        online: Optional[bool] = None,
+    ):
+        """Normalize the energy prediction."""
+        if reference is None:
+            reference = self.reference(batch.atomic_numbers, batch.n_node)
+        x = x - reference
+        if self.atom_avg:
+            x = x / batch.n_node
+        return self.normalizer(x, online=online)
 
 
 class ForceHead(torch.nn.Module):
@@ -203,6 +218,7 @@ class ForceHead(torch.nn.Module):
         output_size: int = 3,
         online_normalisation: bool = True,
         activation: str = "ssp",
+        detach_node_features: bool = False,
     ):
         """Initializes the ForceHead MLP.
 
@@ -222,6 +238,9 @@ class ForceHead(torch.nn.Module):
             output_size: The size of the output layer.
             online_normalisation: Whether to update the normalisation statistics online.
             activation: The activation function to use.
+            detach_node_features: If True, detaches node features from computational graph.
+                This means that the force loss has no impact on training the underlying
+                forcefield model.
         """
         super().__init__()
         target_name = f"forces-{level_of_theory}" if level_of_theory else "forces"
@@ -240,11 +259,14 @@ class ForceHead(torch.nn.Module):
         self.remove_mean = remove_mean
         self.remove_torque_for_nonpbc_systems = remove_torque_for_nonpbc_systems
         self.loss_type = loss_type
+        self.detach_node_features = detach_node_features
 
     def forward(
         self, node_features: torch.Tensor, batch: base.AtomGraphs
     ) -> torch.Tensor:
         """Forward pass (without inverse normalisation)."""
+        if self.detach_node_features:
+            node_features = node_features.detach()
         pred = self.mlp(node_features)
         pred = maybe_remove_net_force_and_torque(
             batch, pred, self.remove_mean, self.remove_torque_for_nonpbc_systems
@@ -266,60 +288,29 @@ class ForceHead(torch.nn.Module):
     ):
         """Compute loss and metrics."""
         name = self.target.fullname
-
-        pred = pred.squeeze(-1)
-        if alternative_target is not None:
-            raw_target = alternative_target
-        else:
-            raw_target = batch.node_targets[name].squeeze(-1)  # type: ignore
-
-        # remove before applying normalizer
-        pred, raw_target, batch_n_node = remove_fixed_atoms(
-            pred, raw_target, batch.n_node, batch.fix_atoms, self.training
+        gold_target = batch.node_targets[name]
+        raw_target = gold_target if alternative_target is None else alternative_target
+        return forces_loss_function(
+            pred=pred,
+            raw_target=raw_target,
+            raw_gold_target=gold_target,
+            name=name,
+            normalizer=self.normalizer,
+            n_node=batch.n_node,
+            fix_atoms=batch.fix_atoms,
+            loss_type=self.loss_type,
+            training=self.training,
         )
-        target = self.normalizer(raw_target)
-        assert pred.shape == target.shape, f"{pred.shape} != {target.shape}"
 
-        if self.loss_type.startswith("condhuber"):
-            huber_delta = float(self.loss_type.split("_")[1])
-            loss = conditional_huber_force_loss(pred, target, huber_delta)
-        else:
-            loss = mean_error(pred, target, self.loss_type, batch_n_node)  # type: ignore
+    def denormalize(self, x: torch.Tensor, batch: base.AtomGraphs):
+        """Denormalize the force prediction."""
+        return self.normalizer.inverse(x)
 
-        raw_pred = self.normalizer.inverse(pred)
-        metrics = self._metrics(raw_pred, raw_target, batch_n_node)
-        metrics[f"{name}_loss"] = loss
-
-        return base.ModelOutput(loss=loss, log=metrics)
-
-    def _metrics(
-        self,
-        raw_pred: torch.Tensor,
-        raw_target: torch.Tensor,
-        batch_n_node: torch.Tensor,
+    def normalize(
+        self, x: torch.Tensor, batch: base.AtomGraphs, online: Optional[bool] = None
     ):
-        name = self.target.fullname
-        metrics = {
-            f"{name}_mae_raw": mean_error(raw_pred, raw_target, "mae", batch_n_node),
-            f"{name}_mse_raw": mean_error(raw_pred, raw_target, "mse", batch_n_node),
-            f"{name}_cosine_sim": torch.cosine_similarity(
-                raw_pred, raw_target, dim=-1
-            ).mean(),
-            f"{name}_wt_0.03": forces_within_threshold(
-                raw_pred, raw_target, batch_n_node
-            ),
-        }
-        bucket_metrics = bucketed_mean_error(
-            raw_target,
-            raw_pred,
-            bucket_by="target",
-            thresholds=[0.1, 1.0],
-            batch_n_node=batch_n_node,
-            error_type="mae",
-        )
-        bucket_metrics = {f"{name}_mae_raw_{k}": v for k, v in bucket_metrics.items()}
-        metrics.update(bucket_metrics)
-        return metrics
+        """Normalize the force prediction."""
+        return self.normalizer(x, online=online)
 
 
 class StressHead(torch.nn.Module):
