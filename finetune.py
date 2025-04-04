@@ -166,9 +166,9 @@ def build_train_loader(
     dataset_path: str,
     num_workers: int,
     batch_size: int,
+    system_config: atomic_system.SystemConfig,
     augmentation: Optional[bool] = True,
     target_config: Optional[Dict] = None,
-    system_config: Optional[atomic_system.SystemConfig] = None,
     **kwargs,
 ) -> DataLoader:
     """Builds the train dataloader from a config file.
@@ -189,8 +189,7 @@ def build_train_loader(
     aug = []
     if augmentation:
         aug = [augmentations.rotate_randomly]
-    if system_config is None:
-        system_config = atomic_system.SystemConfig(radius=6.0, max_num_neighbors=20)
+
     target_config = property_definitions.instantiate_property_config(target_config)
     dataset = AseSqliteDataset(
         dataset_name,
@@ -236,9 +235,13 @@ def run(args):
     precision = "float32-high"
 
     # Instantiate model
-    model = pretrained.orb_v2(device=device, precision=precision)
+
+    # TODO (BEN): make base model configurable!
+    model, system_config = pretrained.orb_v2(device=device, precision=precision)
+
     for param in model.parameters():
         param.requires_grad = True
+
     model_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logging.info(f"Model has {model_params} trainable parameters.")
 
@@ -267,6 +270,7 @@ def run(args):
     )
     train_loader = build_train_loader(
         **loader_args,
+        system_config=system_config,
         augmentation=True,
     )
     logging.info("Starting training!")

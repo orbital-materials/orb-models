@@ -7,29 +7,26 @@ import torch.nn as nn
 from orb_models.forcefield.gns import MoleculeGNS
 
 
-def _load_forcefield_state_dict(
+def load_forcefield_state_dict(
     model: nn.Module,
     state_dict: Mapping[str, Any],
     strict: bool = True,
     assign: bool = False,
     skip_artifact_reference_energy: bool = False,
 ):
-    """Load a state dict into the GraphRegressor or ConservativeForcefieldRegressor.
+    """Load a state dict into the DirectForcefieldRegressor or ConservativeForcefieldRegressor.
 
     This method overrides the generic nn.Module load_state_dict method in order
     to handle the following cases:
-        - The state_dict comes from a GNS/DiffusionModel.
         - The state_dict comes from a legacy (orb-v2) GraphRegressor.
-        - The state_dict comes from a GraphRegressor with a different set of heads.
-            In this case, we only load weights for the common heads.
+        - The state_dict comes from a DirectForcefieldRegressor or ConservativeForcefieldRegressor
+            with a different set of heads. In this case, we only load weights for the common heads.
         - The state_dict contains a reference energy key, which we skip loading
             if skip_artifact_reference_energy is True.
-    NOTE:
-    - We assume that the presence of the prefix "heads." in any key of the
-        state_dict implies that the state_dict comes from a GraphRegressor.
-    - We allow diffusion models to be loaded into a GraphRegressor with a GNS base.
-        This is because some diffusion models lack time embeddings and are thus null
-        wrappers around a GNS model and this wrapper can simply be discarded.
+
+    NOTE: We assume that the presence of the prefix "heads." in any key of the
+    state_dict implies that the state_dict comes from a DirectForcefieldRegressor 
+    or ConservativeForcefieldRegressor.
     """
     state_dict = dict(state_dict)  # Shallow copy
 
@@ -48,7 +45,7 @@ def _load_forcefield_state_dict(
         # emulate a headless regressor
         replace_prefix(state_dict, "", "model.")
 
-    # Edit state dict of Denoiser/DiffusionModel so it can be loaded into this GraphRegressor
+    # Edit state dict of Denoiser/DiffusionModel so it can be loaded
     loading_regressor_with_denoising_base = any(
         key.startswith("model.model.") for key in state_dict.keys()
     )

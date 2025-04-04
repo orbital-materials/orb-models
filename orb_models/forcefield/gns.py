@@ -344,7 +344,7 @@ class MoleculeGNS(nn.Module):
         kwargs = {k: v for k, v in kwargs.items() if k not in self._deprecated_args}
         if kwargs:
             raise ValueError(
-                f"The following kwargs are not arguments to GraphRegressor: {kwargs.keys()}"
+                f"The following kwargs are not arguments to MoleculeGNS: {kwargs.keys()}"
             )
 
         self.node_feature_names = node_feature_names or []

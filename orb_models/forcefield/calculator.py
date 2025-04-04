@@ -4,7 +4,7 @@ import torch
 from ase.calculators.calculator import Calculator, all_changes
 
 from orb_models.forcefield.atomic_system import SystemConfig, ase_atoms_to_atom_graphs
-from orb_models.forcefield.graph_regressor import GraphRegressor
+from orb_models.forcefield.direct_regressor import DirectForcefieldRegressor
 from orb_models.forcefield.conservative_regressor import ConservativeForcefieldRegressor
 from orb_models.forcefield.featurization_utilities import EdgeCreationMethod
 from orb_models.utils import to_numpy
@@ -15,11 +15,11 @@ class ORBCalculator(Calculator):
 
     def __init__(
         self,
-        model: Union[GraphRegressor, ConservativeForcefieldRegressor],
+        model: Union[DirectForcefieldRegressor, ConservativeForcefieldRegressor],
+        system_config: SystemConfig,
         *,
         conservative: Optional[bool] = None,
         edge_method: Optional[EdgeCreationMethod] = None,
-        system_config: SystemConfig = SystemConfig(radius=6.0, max_num_neighbors=20),
         max_num_neighbors: Optional[int] = None,
         half_supercell: Optional[bool] = None,
         device: Optional[Union[torch.device, str]] = None,
@@ -72,12 +72,6 @@ class ORBCalculator(Calculator):
             )
 
         self.implemented_properties = model.properties  # type: ignore
-
-        # TODO: Untangle the spaghetti of how we handle the naming for the heads.
-        # This is required because ASE will check the implemented_properties for
-        # the existence of the property before calling the calculator, so it's not
-        # sufficient to just return the property names from the model and handle
-        # the conservative case in `calculate`.
         if self.conservative:
             self.implemented_properties.extend(["forces", "stress"])
 

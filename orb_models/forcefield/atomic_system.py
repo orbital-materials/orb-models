@@ -157,7 +157,7 @@ def ase_atoms_to_atom_graphs(
     atoms: ase.Atoms,
     *,
     wrap: bool = True,
-    edge_method: Optional[EdgeCreationMethod] = "knn_scipy",
+    edge_method: Optional[EdgeCreationMethod] = None,
     system_config: Optional[SystemConfig] = None,
     max_num_neighbors: Optional[int] = None,
     system_id: Optional[int] = None,

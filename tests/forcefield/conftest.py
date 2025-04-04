@@ -3,15 +3,14 @@ import pytest
 import torch
 import numpy as np
 
-from orb_models.forcefield.forcefield_heads import EnergyHead, ForceHead
+from orb_models.forcefield.direct_regressor import DirectForcefieldRegressor
+from orb_models.forcefield.forcefield_heads import EnergyHead, ForceHead, StressHead
 from orb_models.forcefield import base
 from orb_models.forcefield import atomic_system
 from orb_models.forcefield.gns import _KEY
 from orb_models.forcefield.rbf import ExpNormalSmearing
 from orb_models.forcefield import gns, segment_ops
-from orb_models.forcefield.graph_regressor import GraphHead, GraphRegressor
 from orb_models.forcefield.conservative_regressor import ConservativeForcefieldRegressor
-from orb_models.forcefield.property_definitions import PropertyDefinition
 
 
 def one_hot(x):
@@ -139,14 +138,10 @@ def force_head():
 @pytest.fixture
 def stress_head():
 
-    target = PropertyDefinition(
-        "stress", dim=6, domain="real", row_to_property_fn=lambda x: x
-    )
-    return GraphHead(
+    return StressHead(
         latent_dim=9,
         num_mlp_layers=1,
         mlp_hidden_dim=16,
-        target=target,
         node_aggregation="sum",
         dropout=None,
         checkpoint=None,
@@ -189,7 +184,7 @@ def conservative_regressor(gns_model, energy_head, force_head, stress_head):
 
 @pytest.fixture
 def graph_regressor(gns_model, energy_head, force_head, stress_head):
-    return GraphRegressor(
+    return DirectForcefieldRegressor(
         heads={"energy": energy_head, "forces": force_head, "stress": stress_head},
         model=gns_model,
         loss_weights={

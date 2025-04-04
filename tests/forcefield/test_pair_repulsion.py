@@ -6,15 +6,14 @@ from ase import Atoms
 from ase.data import covalent_radii
 
 from orb_models.forcefield.pair_repulsion import ZBLBasis
-from orb_models.forcefield.forcefield_heads import EnergyHead, ForceHead
+from orb_models.forcefield.forcefield_heads import EnergyHead, ForceHead, StressHead
 from orb_models.forcefield.forcefield_utils import (
     compute_gradient_forces_and_stress,
 )
 from orb_models.forcefield.conservative_regressor import ConservativeForcefieldRegressor
-from orb_models.forcefield.graph_regressor import GraphHead, GraphRegressor
+from orb_models.forcefield.direct_regressor import DirectForcefieldRegressor
 from orb_models.forcefield.atomic_system import ase_atoms_to_atom_graphs, SystemConfig
 from orb_models.forcefield import base
-from orb_models.forcefield.property_definitions import PropertyDefinition
 
 
 def test_pair_conservative(gns_model):
@@ -37,10 +36,7 @@ def test_pair_conservative(gns_model):
         num_mlp_layers=1,
         mlp_hidden_dim=16,
     )
-    stress_head = GraphHead(
-        target=PropertyDefinition(
-            "stress", dim=6, domain="real", row_to_property_fn=lambda x: x
-        ),
+    stress_head = StressHead(
         latent_dim=9,
         num_mlp_layers=1,
         mlp_hidden_dim=16,
@@ -157,13 +153,10 @@ def test_pair_direct(gns_model):
         output_size=3,
         online_normalisation=True,
     )
-    stress_head = GraphHead(
+    stress_head = StressHead(
         latent_dim=9,
         num_mlp_layers=1,
         mlp_hidden_dim=16,
-        target=PropertyDefinition(
-            "stress", dim=6, domain="real", row_to_property_fn=lambda x: x
-        ),
         node_aggregation="sum",
         dropout=None,
         checkpoint=None,
@@ -174,7 +167,7 @@ def test_pair_direct(gns_model):
             parameter.data.fill_(0.0)
             parameter.data.fill_(0.0)
 
-    regressor = GraphRegressor(
+    regressor = DirectForcefieldRegressor(
         heads={
             "energy": energy_head,
             "forces": forces_head,

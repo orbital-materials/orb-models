@@ -1,16 +1,15 @@
 from typing import Any, Mapping, Optional, Dict, Literal
-
 import torch
 from torch import nn
 
 from orb_models.forcefield import base
 from orb_models.forcefield.gns import MoleculeGNS
-from orb_models.forcefield.graph_regressor import (
-    _split_prediction,
-    _validate_regressor_inputs,
+from orb_models.forcefield.forcefield_utils import (
+    split_prediction,
+    validate_regressor_inputs,
 )
 from orb_models.forcefield.forcefield_utils import compute_gradient_forces_and_stress
-from orb_models.forcefield.load import _load_forcefield_state_dict
+from orb_models.forcefield.load import load_forcefield_state_dict
 from orb_models.forcefield.pair_repulsion import ZBLBasis
 from orb_models.forcefield.nn_util import ScalarNormalizer
 from orb_models.forcefield.property_definitions import PROPERTIES
@@ -80,7 +79,7 @@ class ConservativeForcefieldRegressor(nn.Module):
 
         loss_weights = loss_weights or {}
         loss_weights = {k: v for k, v in loss_weights.items() if v is not None}
-        _validate_regressor_inputs(
+        validate_regressor_inputs(
             heads, loss_weights, ensure_grad_loss_weights=ensure_grad_loss_weights
         )
 
@@ -192,7 +191,7 @@ class ConservativeForcefieldRegressor(nn.Module):
 
         if split:
             for name, pred in out.items():
-                out[name] = _split_prediction(pred, batch.n_node)
+                out[name] = split_prediction(pred, batch.n_node)
 
         return out  # type: ignore
 
@@ -313,8 +312,8 @@ class ConservativeForcefieldRegressor(nn.Module):
         assign: bool = False,
         skip_artifact_reference_energy: bool = False,
     ):
-        """Load state dict for GraphRegressor."""
-        _load_forcefield_state_dict(
+        """Load state dict for ConservativeForcefieldRegressor."""
+        load_forcefield_state_dict(
             self,
             state_dict,
             strict=strict,
