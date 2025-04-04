@@ -31,7 +31,7 @@ def main(model: str, core_model: str):
     )
 
     graph_orig = core_atomic_system.ase_atoms_to_atom_graphs(atoms, sys_config)
-    graph = atomic_system.ase_atoms_to_atom_graphs(atoms)
+    graph = atomic_system.ase_atoms_to_atom_graphs(atoms, sys_config)
 
     pred_orig = original_orbff.predict(graph_orig)
 

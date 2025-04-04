@@ -152,13 +152,12 @@ def atom_graphs_to_ase_atoms(
 
     return atoms_list
 
-
 def ase_atoms_to_atom_graphs(
     atoms: ase.Atoms,
+    system_config: SystemConfig,
     *,
     wrap: bool = True,
     edge_method: Optional[EdgeCreationMethod] = None,
-    system_config: Optional[SystemConfig] = None,
     max_num_neighbors: Optional[int] = None,
     system_id: Optional[int] = None,
     half_supercell: bool = False,
@@ -195,8 +194,6 @@ def ase_atoms_to_atom_graphs(
     Returns:
         AtomGraphs object
     """
-    if system_config is None:
-        system_config = SystemConfig(radius=6.0, max_num_neighbors=20)
     if isinstance(atoms.pbc, Iterable) and any(atoms.pbc) and not all(atoms.pbc):
         raise NotImplementedError(
             "We do not support periodicity along a subset of axes. Please ensure atoms.pbc is "

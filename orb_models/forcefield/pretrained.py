@@ -398,7 +398,6 @@ def orb_v3_direct_inf_mpa(
     return model, SystemConfig(radius=6.0, max_num_neighbors=120)
 
 
-
 def orb_v2(
     weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-v2-20241011.ckpt",  # noqa: E501
     device: Union[torch.device, str, None] = None,
@@ -410,8 +409,6 @@ def orb_v2(
     model = load_model_for_inference(
         model, weights_path, device, precision=precision, compile=compile
     )
-    # TODO (BEN): update all functions to return SystemConfig
-    # TODO (BEN): search repo for max_num_neighbors and avoid any hardcoding
 
     return model, SystemConfig(radius=6.0, max_num_neighbors=20)
 

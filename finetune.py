@@ -231,13 +231,13 @@ def run(args):
     device = utils.init_device(device_id=args.device_id)
     utils.seed_everything(args.random_seed)
 
-    # Make sure to use this flag for matmuls on A100 and H100 GPUs.
+    # Setting this is 2x faster on A100 and H100 
+    # GPUs and does not appear to hurt training
     precision = "float32-high"
 
     # Instantiate model
-
-    # TODO (BEN): make base model configurable!
-    model, system_config = pretrained.orb_v2(device=device, precision=precision)
+    base_model = args.base_model
+    model, system_config = getattr(pretrained, base_model)(device=device, precision=precision)
 
     for param in model.parameters():
         param.requires_grad = True
@@ -384,6 +384,19 @@ def main():
         default=3e-04,
         type=float,
         help="Learning rate. 3e-4 is purely a sensible default; you may want to tune this for your problem.",
+    )
+    parser.add_argument(
+        "--base_model",
+        default="orb_v3_conservative_inf_omat",
+        type=str,
+        help="Base model to finetune.",
+        choices=[
+            "orb_v3_conservative_inf_omat",
+            "orb_v3_conservative_20_omat",
+            "orb_v3_direct_inf_omat",
+            "orb_v3_direct_20_omat",
+            "orb_v2",
+        ],
     )
     args = parser.parse_args()
     run(args)
