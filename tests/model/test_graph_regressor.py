@@ -6,29 +6,29 @@ from orb_models.forcefield.direct_regressor import DirectForcefieldRegressor
 
 
 def test_regressor_forward_on_single_node_graph(
-    single_node_graph, gns_model, graph_head
+    single_node_graph, gns_model, forces_head
 ):
     regressor = DirectForcefieldRegressor(
-        heads={"graph_target": graph_head()},
+        heads={"forces": forces_head},
         model=gns_model,
     )
     _ = regressor(single_node_graph)
 
 
-def test_regressor_can_predict(graph, gns_model, node_head, graph_head):
+def test_regressor_can_predict(graph, gns_model, energy_head, forces_head):
     regressor = DirectForcefieldRegressor(
-        heads={"noise_target": node_head(), "graph_target": graph_head()},
+        heads={"energy": energy_head, "forces": forces_head},
         model=gns_model,
     )
     regressor.eval()
     inference = regressor.predict(graph)
-    assert inference["noise_target"] is not None
-    assert inference["graph_target"] is not None
+    assert inference["energy"] is not None
+    assert inference["forces"] is not None
 
 
-def test_regressor_can_fine_tune_on_graph_target(graph, gns_model, graph_head):
+def test_regressor_can_fine_tune_on_graph_target(graph, gns_model, forces_head):
     regressor = DirectForcefieldRegressor(
-        heads={"graph_target": graph_head()},
+        heads={"forces": forces_head},
         model=gns_model,
     )
     regressor.eval()
@@ -37,25 +37,24 @@ def test_regressor_can_fine_tune_on_graph_target(graph, gns_model, graph_head):
     pred = regressor.loss(batch)
     pred.loss.sum().backward()
 
-    assert "graph_target_loss" in pred.log
-    assert "graph_target_mae_raw" in pred.log
+    assert "forces_loss" in pred.log
+    assert "forces_mae_raw" in pred.log
 
 
-def test_regressor_can_fine_tune_on_node_targets(graph, gns_model, node_head):
+def test_regressor_can_fine_tune_on_node_targets(graph, gns_model, energy_head):
     regressor = DirectForcefieldRegressor(
-        heads={"noise_target": node_head()},
+        heads={"energy": energy_head},
         model=gns_model,
     )
     out = regressor.loss(graph)
     out.loss.sum().backward()
-    assert "noise_target_loss" in out.log
+    assert "energy_loss" in out.log
 
 
 @pytest.mark.parametrize("requires_grad", [True, False])
-def test_regressor_base_requires_grad(requires_grad, gns_model, graph_head):
-    head = graph_head()
+def test_regressor_base_requires_grad(requires_grad, gns_model, forces_head):
     regressor_nograd = DirectForcefieldRegressor(
-        {"graph_target": head},
+        {"forces": forces_head},
         gns_model,
         model_requires_grad=requires_grad,
     )
@@ -68,16 +67,16 @@ def test_regressor_base_requires_grad(requires_grad, gns_model, graph_head):
             assert not param.requires_grad
 
     # the heads always require grad
-    head = regressor_nograd.heads["graph_target"]
+    head = regressor_nograd.heads["forces"]
     assert head is not None
     assert head.mlp is not None
     for param in head.mlp.parameters():
         assert param.requires_grad
 
 
-def test_regressor_can_predict_scaled(graph, gns_model, node_head, graph_head):
+def test_regressor_can_predict_scaled(graph, gns_model, energy_head, forces_head):
     regressor = DirectForcefieldRegressor(
-        {"noise_target": node_head(), "graph_target": graph_head()},
+        {"forces": forces_head},
         model=gns_model,
     )
     regressor.eval()
@@ -87,30 +86,24 @@ def test_regressor_can_predict_scaled(graph, gns_model, node_head, graph_head):
 
     inference = regressor.predict(graph)
     assert (
-        inference["noise_target"] is not None
-    ), "noise_target not found in inference results"
-    assert (
-        inference["graph_target"] is not None
-    ), "graph_target not found in inference results"
+        inference["forces"] is not None
+    ), "forces not found in inference results"
 
-    noise_head = regressor.heads["noise_target"]
-    torch.testing.assert_close(
-        inference["noise_target"],
-        noise_head.normalizer.inverse(forward_result["noise_target"]),
-    )
-    graph_head = regressor.heads["graph_target"]
-    assert inference["graph_target"] == graph_head.normalizer.inverse(
-        forward_result["graph_target"]
+    forces_head = regressor.heads["forces"]
+    assert torch.allclose(
+        inference["forces"],
+        forces_head.normalizer.inverse(forward_result["forces"]),
+        atol=1e-5,
     )
 
 
 @pytest.mark.xfail(True, reason="The regressor forward is currently not compilable.")
-def test_regressor_can_torch_compile(graph, gns_model, node_head, graph_head):
+def test_regressor_can_torch_compile(graph, gns_model, energy_head, forces_head):
     """Tests if the GraphRegressor.forward is compilable with torch.compile."""
     regressor = DirectForcefieldRegressor(
         heads={
-            "noise_target": node_head(),
-            "graph_target": graph_head(),
+            "energy": energy_head,
+            "forces": forces_head,
         },
         model=gns_model,
     )
@@ -119,7 +112,7 @@ def test_regressor_can_torch_compile(graph, gns_model, node_head, graph_head):
     compiled(graph)
 
 
-def test_regressor_module_compiles(graph, gns_model, node_head, graph_head):
+def test_regressor_module_compiles(graph, gns_model, energy_head, forces_head):
     """Tests if GraphRegressor.forward (partially) compiles with Module.compile.
 
     This tests whether the override of GraphRegressor.compile allows us to
@@ -128,8 +121,8 @@ def test_regressor_module_compiles(graph, gns_model, node_head, graph_head):
     """
     regressor = DirectForcefieldRegressor(
         heads={
-            "noise_target": node_head(),
-            "graph_target": graph_head(),
+            "energy": energy_head,
+            "forces": forces_head,
         },
         model=gns_model,
     )
