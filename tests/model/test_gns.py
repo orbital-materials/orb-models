@@ -99,12 +99,17 @@ def test_interaction_network(featurized_graph):
 
 
 def test_model_parameters_have_grad(graph, gns_model):
-    pred = gns_model.eval().loss(graph)
-    pred.loss.sum().backward()
+    pred = gns_model.eval()(graph)["pred"]
+    loss = pred.sum()
+    loss.backward()
     params = gns_model.state_dict(keep_vars=True)
     for key, param in params.items():
         # Can't assert non zero because of relu
-        assert not torch.all(~param.grad.bool())
+        if param.grad is not None:
+            assert not torch.all(~param.grad.bool()), f"{key} has no grad"
+        else:
+            print(f"{key} has no grad")
+            raise ValueError(f"{key} has no grad")
 
 
 def test_gns_can_torch_compile(gns_model, graph):

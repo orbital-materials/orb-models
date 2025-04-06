@@ -133,7 +133,7 @@ class EnergyHead(torch.nn.Module):
             node_features, batch.n_node, reduction=self.node_aggregation
         )
         pred = self.mlp(input)
-        return pred
+        return pred.squeeze(-1)
 
     def predict(
         self, node_features: torch.Tensor, batch: base.AtomGraphs
