@@ -16,8 +16,8 @@ class ORBCalculator(Calculator):
     def __init__(
         self,
         model: Union[DirectForcefieldRegressor, ConservativeForcefieldRegressor],
-        system_config: SystemConfig,
         *,
+        system_config: Optional[SystemConfig] = None,
         conservative: Optional[bool] = None,
         edge_method: Optional[EdgeCreationMethod] = None,
         max_num_neighbors: Optional[int] = None,
@@ -30,6 +30,7 @@ class ORBCalculator(Calculator):
         Args:
             model: The finetuned model to use for predictions.
             system_config (SystemConfig): The config defining how an atomic system is featurized.
+                If None, the system config from the model is used.
             conservative (bool, optional):
                 - Defaults to True if the model is a ConservativeForcefieldRegressor, otherwise False.
                 - If True, conservative forces and stresses are computed as the gradient of the energy.
@@ -56,7 +57,7 @@ class ORBCalculator(Calculator):
         self.model = model
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.model = self.model.to(self.device)  # type: ignore
-        self.system_config = system_config
+        self.system_config = system_config or model.system_config
         self.max_num_neighbors = max_num_neighbors
         self.edge_method = edge_method
         self.half_supercell = half_supercell

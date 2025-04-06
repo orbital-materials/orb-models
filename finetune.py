@@ -237,7 +237,7 @@ def run(args):
 
     # Instantiate model
     base_model = args.base_model
-    model, system_config = getattr(pretrained, base_model)(device=device, precision=precision)
+    model = getattr(pretrained, base_model)(device=device, precision=precision)
 
     for param in model.parameters():
         param.requires_grad = True
@@ -270,7 +270,7 @@ def run(args):
     )
     train_loader = build_train_loader(
         **loader_args,
-        system_config=system_config,
+        system_config=model.system_config,
         augmentation=True,
     )
     logging.info("Starting training!")

@@ -75,6 +75,7 @@ def load_model_for_inference(
 def orb_v2_architecture(
     num_message_passing_steps: int = 15,
     device: Optional[Union[torch.device, str]] = None,
+    system_config: Optional[SystemConfig] = None,
 ) -> DirectForcefieldRegressor:
     """Orb-v2 architecture."""
     model = DirectForcefieldRegressor(
@@ -120,6 +121,7 @@ def orb_v2_architecture(
             mlp_norm="layer_norm",
         ),
         pair_repulsion=False,
+        system_config=system_config,
     )
     device = get_device(device)
     if device is not None and device != torch.device("cpu"):
@@ -139,6 +141,7 @@ def orb_v3_conservative_architecture(
     num_message_passing_steps: int = 5,
     activation: str = "silu",
     device: Optional[torch.device] = None,
+    system_config: Optional[SystemConfig] = None,
 ) -> ConservativeForcefieldRegressor:
     """The orb-v3 conservative architecture."""
     model = ConservativeForcefieldRegressor(
@@ -184,6 +187,7 @@ def orb_v3_conservative_architecture(
         ),
         ensure_grad_loss_weights=False,
         pair_repulsion=True,
+        system_config=system_config,
     )
     if device is not None and device != torch.device("cpu"):
         model.cuda(device)
@@ -202,6 +206,7 @@ def orb_v3_direct_architecture(
     num_message_passing_steps: int = 5,
     activation: str = "silu",
     device: Optional[torch.device] = None,
+    system_config: Optional[SystemConfig] = None,
 ) -> DirectForcefieldRegressor:
     """The orb-v3 architecture, defaulting to a direct model."""
     model = DirectForcefieldRegressor(
@@ -261,6 +266,7 @@ def orb_v3_direct_architecture(
             mlp_norm="rms_norm",
         ),
         pair_repulsion=True,
+        system_config=system_config,
     )
     if device is not None and device != torch.device("cpu"):
         model.cuda(device)
@@ -274,128 +280,137 @@ def orb_v3_conservative_20_omat(
     device: Union[torch.device, str, None] = None,
     precision: str = "float32-high",
     compile: Optional[bool] = None,
-) -> Tuple[ConservativeForcefieldRegressor, SystemConfig]:
+) -> ConservativeForcefieldRegressor:
     """Load ORB v3 Conservative 20 max neighbors OMAT."""
-    model = orb_v3_conservative_architecture(device=device)
+
+    system_config = SystemConfig(radius=6.0, max_num_neighbors=20)
+    model = orb_v3_conservative_architecture(device=device, system_config=system_config)
     model = load_model_for_inference(
         model, weights_path, device, precision=precision, compile=compile
     )
 
-    return model, SystemConfig(radius=6.0, max_num_neighbors=20)
+    return model
 
 def orb_v3_conservative_inf_omat(
     weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-v3/orb-v3-conservative-inf-omat-20250404.ckpt",  # noqa: E501
     device: Union[torch.device, str, None] = None,
     precision: str = "float32-high",
     compile: Optional[bool] = None,
-) -> Tuple[ConservativeForcefieldRegressor, SystemConfig]:
+) -> ConservativeForcefieldRegressor:
     """Load ORB v3 Conservative with effectively unlimited neighbors, trained on OMAT.
 
     'Effectively unlimited' means that the model will use all neighbors within 6A
     the cutoff radius. Empirically, for the training distribution, 120 is sufficient.
     """
-    model = orb_v3_conservative_architecture(device=device)
+    system_config = SystemConfig(radius=6.0, max_num_neighbors=120)
+    model = orb_v3_conservative_architecture(device=device, system_config=system_config)
     model = load_model_for_inference(
         model, weights_path, device, precision=precision, compile=compile
     )
 
-    return model, SystemConfig(radius=6.0, max_num_neighbors=120)
+    return model
 
 def orb_v3_direct_20_omat(
     weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-v3/orb-v3-direct-20-omat-20250404.ckpt",  # noqa: E501
     device: Union[torch.device, str, None] = None,
     precision: str = "float32-high",
     compile: Optional[bool] = None,
-) -> Tuple[DirectForcefieldRegressor, SystemConfig]:
+) -> DirectForcefieldRegressor:
     """Load ORB v3 Direct 20 max neighbors OMAT."""
-    model = orb_v3_direct_architecture(device=device)
+    system_config = SystemConfig(radius=6.0, max_num_neighbors=20)
+    model = orb_v3_direct_architecture(device=device, system_config=system_config)
     model = load_model_for_inference(
         model, weights_path, device, precision=precision, compile=compile
     )
 
-    return model, SystemConfig(radius=6.0, max_num_neighbors=20)
+    return model
 
 def orb_v3_direct_inf_omat(
     weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-v3/orb-v3-direct-inf-omat-20250404.ckpt",  # noqa: E501
     device: Union[torch.device, str, None] = None,
     precision: str = "float32-high",
     compile: Optional[bool] = None,
-) -> Tuple[DirectForcefieldRegressor, SystemConfig]:
+) -> DirectForcefieldRegressor:
     """Load ORB v3 Direct with effectively unlimited neighbors, trained on OMAT.
 
     'Effectively unlimited' means that the model will use all neighbors within 6A
     the cutoff radius. Empirically, for the training distribution, 120 is sufficient.
     """
-    model = orb_v3_direct_architecture(device=device)
+    system_config = SystemConfig(radius=6.0, max_num_neighbors=120)
+    model = orb_v3_direct_architecture(device=device, system_config=system_config)
     model = load_model_for_inference(
         model, weights_path, device, precision=precision, compile=compile
     )
 
-    return model, SystemConfig(radius=6.0, max_num_neighbors=120)
+    return model
 
 def orb_v3_conservative_20_mpa(
     weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-v3/orb-v3-conservative-20-mpa-20250404.ckpt",  # noqa: E501
     device: Union[torch.device, str, None] = None,
     precision: str = "float32-high",
     compile: Optional[bool] = None,
-) -> Tuple[ConservativeForcefieldRegressor, SystemConfig]:
+) -> ConservativeForcefieldRegressor:
     """Load ORB v3 Conservative 20 max neighbors MPTraj + Alexandria."""
-    model = orb_v3_conservative_architecture(device=device)
+    system_config = SystemConfig(radius=6.0, max_num_neighbors=20)
+    model = orb_v3_conservative_architecture(device=device, system_config=system_config)
     model = load_model_for_inference(
         model, weights_path, device, precision=precision, compile=compile
     )
 
-    return model, SystemConfig(radius=6.0, max_num_neighbors=20)
+    return model
 
 def orb_v3_conservative_inf_mpa(
     weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-v3/orb-v3-conservative-inf-mpa-20250404.ckpt",  # noqa: E501
     device: Union[torch.device, str, None] = None,
     precision: str = "float32-high",
     compile: Optional[bool] = None,
-) -> Tuple[ConservativeForcefieldRegressor, SystemConfig]:
+) -> ConservativeForcefieldRegressor:
     """Load ORB v3 Conservative with effectively unlimited neighbors, trained on MPTraj + Alexandria.
 
     'Effectively unlimited' means that the model will use all neighbors within 6A
     the cutoff radius. Empirically, for the training distribution, 120 is sufficient.
     """
-    model = orb_v3_conservative_architecture(device=device)
+    system_config = SystemConfig(radius=6.0, max_num_neighbors=120)
+    model = orb_v3_conservative_architecture(device=device, system_config=system_config)
     model = load_model_for_inference(
         model, weights_path, device, precision=precision, compile=compile
     )
 
-    return model, SystemConfig(radius=6.0, max_num_neighbors=120)
+    return model
 
 def orb_v3_direct_20_mpa(
     weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-v3/orb-v3-direct-20-mpa-20250404.ckpt",  # noqa: E501
     device: Union[torch.device, str, None] = None,
     precision: str = "float32-high",
     compile: Optional[bool] = None,
-) -> Tuple[DirectForcefieldRegressor, SystemConfig]:
+) -> DirectForcefieldRegressor:
     """Load ORB v3 Direct 20 max neighbors MPTraj + Alexandria."""
-    model = orb_v3_direct_architecture(device=device)
+    system_config = SystemConfig(radius=6.0, max_num_neighbors=20)
+    model = orb_v3_direct_architecture(device=device, system_config=system_config)
     model = load_model_for_inference(
         model, weights_path, device, precision=precision, compile=compile
     )
 
-    return model, SystemConfig(radius=6.0, max_num_neighbors=20)
+    return model
 
 def orb_v3_direct_inf_mpa(
     weights_path: str = "",  # noqa: E501
     device: Union[torch.device, str, None] = None,
     precision: str = "float32-high",
     compile: Optional[bool] = None,
-) -> Tuple[DirectForcefieldRegressor, SystemConfig]:
+) -> DirectForcefieldRegressor:
     """Load ORB v3 Direct with effectively unlimited neighbors, trained on MPTraj + Alexandria.
 
     'Effectively unlimited' means that the model will use all neighbors within 6A
     the cutoff radius. Empirically, for the training distribution, 120 is sufficient.
     """
-    model = orb_v3_direct_architecture(device=device)
+    system_config = SystemConfig(radius=6.0, max_num_neighbors=120)
+    model = orb_v3_direct_architecture(device=device, system_config=system_config)
     model = load_model_for_inference(
         model, weights_path, device, precision=precision, compile=compile
     )
 
-    return model, SystemConfig(radius=6.0, max_num_neighbors=120)
+    return model
 
 
 def orb_v2(
@@ -403,14 +418,15 @@ def orb_v2(
     device: Union[torch.device, str, None] = None,
     precision: str = "float32-high",
     compile: Optional[bool] = None,
-) -> Tuple[DirectForcefieldRegressor, SystemConfig]:
+) -> DirectForcefieldRegressor:
     """Load ORB v2 Direct with 20 max neighbors, trained on MPTraj + Alexandria."""
-    model = orb_v2_architecture(device=device)
+    system_config = SystemConfig(radius=6.0, max_num_neighbors=20)
+    model = orb_v2_architecture(device=device, system_config=system_config)
     model = load_model_for_inference(
         model, weights_path, device, precision=precision, compile=compile
     )
 
-    return model, SystemConfig(radius=6.0, max_num_neighbors=20)
+    return model
 
 
 def orb_mptraj_only_v2(
@@ -418,10 +434,15 @@ def orb_mptraj_only_v2(
     device: Union[torch.device, str, None] = None,
     precision: str = "float32-high",
     compile: Optional[bool] = None,
-) -> Tuple[DirectForcefieldRegressor, SystemConfig]:
+) -> DirectForcefieldRegressor:
     """Load ORB MPTraj Only v2 Direct with 20 max neighbors, trained on MPTraj."""
+    system_config = SystemConfig(radius=6.0, max_num_neighbors=20)
+    model = orb_v2_architecture(device=device, system_config=system_config)
+    model = load_model_for_inference(
+        model, weights_path, device, precision=precision, compile=compile
+    )
 
-    return orb_v2(weights_path, device, precision=precision, compile=compile)
+    return model
 
 
 def orb_d3_v2(
@@ -429,14 +450,15 @@ def orb_d3_v2(
     device: Union[torch.device, str, None] = None,
     precision: str = "float32-high",
     compile: Optional[bool] = None,
-) -> Tuple[DirectForcefieldRegressor, SystemConfig]:
+) -> DirectForcefieldRegressor:
     """Load ORB D3 v2 Direct with 20 max neighbors, trained on MPTraj + Alexandria."""
-    model = orb_v2_architecture(device=device)
+    system_config = SystemConfig(radius=6.0, max_num_neighbors=20)
+    model = orb_v2_architecture(device=device, system_config=system_config)
     model = load_model_for_inference(
         model, weights_path, device, precision=precision, compile=compile
     )
 
-    return model, SystemConfig(radius=6.0, max_num_neighbors=20)
+    return model
 
 
 def orb_d3_sm_v2(
@@ -444,14 +466,15 @@ def orb_d3_sm_v2(
     device: Union[torch.device, str, None] = None,
     precision: str = "float32-high",
     compile: Optional[bool] = None,
-) -> Tuple[DirectForcefieldRegressor, SystemConfig]:
+) -> DirectForcefieldRegressor:
     """Load ORB D3 small v2 with 20 max neighbors, trained on MPTraj + Alexandria."""
-    model = orb_v2_architecture(num_message_passing_steps=10, device=device)
+    system_config = SystemConfig(radius=6.0, max_num_neighbors=20)
+    model = orb_v2_architecture(num_message_passing_steps=10, device=device, system_config=system_config)
     model = load_model_for_inference(
         model, weights_path, device, precision=precision, compile=compile
     )
 
-    return model, SystemConfig(radius=6.0, max_num_neighbors=20)
+    return model
 
 
 def orb_d3_xs_v2(
@@ -459,14 +482,15 @@ def orb_d3_xs_v2(
     device: Union[torch.device, str, None] = None,
     precision: str = "float32-high",
     compile: Optional[bool] = None,
-) -> Tuple[DirectForcefieldRegressor, SystemConfig]:
+) -> DirectForcefieldRegressor:
     """Load ORB D3 xs v2 with 20 max neighbors, trained on MPTraj + Alexandria."""
-    model = orb_v2_architecture(num_message_passing_steps=5, device=device)
+    system_config = SystemConfig(radius=6.0, max_num_neighbors=20)
+    model = orb_v2_architecture(num_message_passing_steps=5, device=device, system_config=system_config)
     model = load_model_for_inference(
         model, weights_path, device, precision=precision, compile=compile
     )
 
-    return model, SystemConfig(radius=6.0, max_num_neighbors=20)
+    return model
 
 
 def _deprecated_model(model_name: str):

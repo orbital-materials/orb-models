@@ -6,7 +6,7 @@ from orb_models.forcefield import base
 from orb_models.forcefield.forcefield_utils import split_prediction, validate_regressor_inputs
 from orb_models.forcefield.gns import MoleculeGNS
 from orb_models.forcefield.load import load_forcefield_state_dict
-
+from orb_models.forcefield.atomic_system import SystemConfig
 
 class DirectForcefieldRegressor(torch.nn.Module):
     """Direct Forcefield regressor."""
@@ -21,6 +21,7 @@ class DirectForcefieldRegressor(torch.nn.Module):
         pair_repulsion: bool = False,
         model_requires_grad: bool = True,
         heads_require_grad: Optional[Dict[str, bool]] = None,
+        system_config: Optional[SystemConfig] = None,
         **kwargs,
     ) -> None:
         """Initializes the DirectForcefieldRegressor.
@@ -35,6 +36,7 @@ class DirectForcefieldRegressor(torch.nn.Module):
             model_requires_grad: Whether the underlying model should be finetuned or not.
             heads_require_grad: Optional dictionary mapping head names to booleans indicating
                 whether the parameters of that head should require gradients.
+            system_config: The inferencesystem configuration to use for the model.
         """
         super().__init__()
         for kwarg in kwargs:
@@ -72,6 +74,14 @@ class DirectForcefieldRegressor(torch.nn.Module):
                  assert head_name in self.heads
                  for param in self.heads[head_name].parameters():
                      param.requires_grad = requires_grad
+
+
+        self._system_config = system_config
+
+    @property
+    def system_config(self) -> SystemConfig:
+        return self._system_config
+
 
     def forward(
         self, batch: base.AtomGraphs

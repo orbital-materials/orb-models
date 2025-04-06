@@ -18,9 +18,9 @@ def set_seed(seed):
 @pytest.mark.parametrize("model_fn", [pretrained.orb_v2])
 def test_energy_forces_stress_prediction(model_fn):
     """Tests model compatibility on energy, forces and stress."""
-    orb, system_config = model_fn(device="cpu")
+    orb = model_fn(device="cpu")
     atoms = bulk("Cu", "fcc", a=3.58, cubic=True)
-    graph = atomic_system.ase_atoms_to_atom_graphs(atoms, system_config=system_config)
+    graph = atomic_system.ase_atoms_to_atom_graphs(atoms, system_config=orb.system_config)
     result = orb.predict(graph)
     energy = result["energy"][0]
     forces = result["forces"][0]
@@ -39,8 +39,8 @@ def test_energy_forces_stress_prediction(model_fn):
 def test_optimization(model_fn):
     """Test that we haven't changed the optimization behaviour of orb-v2."""
     set_seed(42)
-    orb, system_config = model_fn(device="cpu")
-    calc = ORBCalculator(orb, system_config, device=torch.device("cpu"))
+    orb = model_fn(device="cpu")
+    calc = ORBCalculator(orb, device=torch.device("cpu"))
     atoms = bulk("Cu", "fcc", a=3.58, cubic=True)
     atoms.calc = calc
     atoms.rattle(0.5, seed=42)

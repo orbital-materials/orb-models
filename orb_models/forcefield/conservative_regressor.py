@@ -14,7 +14,7 @@ from orb_models.forcefield.pair_repulsion import ZBLBasis
 from orb_models.forcefield.nn_util import ScalarNormalizer
 from orb_models.forcefield.property_definitions import PROPERTIES
 from orb_models.forcefield.loss import forces_loss_function, stress_loss_function
-
+from orb_models.forcefield.atomic_system import SystemConfig
 
 
 class ConservativeForcefieldRegressor(nn.Module):
@@ -52,6 +52,7 @@ class ConservativeForcefieldRegressor(nn.Module):
             "mae", "mse", "huber_0.01", "condhuber_0.01"
         ] = "condhuber_0.01",
         pair_repulsion: bool = False,
+        system_config: Optional[SystemConfig] = None,
         **kwargs,
     ):
         super().__init__()
@@ -99,6 +100,12 @@ class ConservativeForcefieldRegressor(nn.Module):
         self.extra_properties = []
         for name in heads.keys() - {"energy"}:
             self.extra_properties.append(heads[name].target.fullname)  # type: ignore
+
+        self._system_config = system_config
+
+    @property
+    def system_config(self) -> SystemConfig:
+        return self._system_config
 
     @property
     def properties(self):

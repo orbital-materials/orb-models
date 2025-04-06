@@ -66,12 +66,12 @@ from orb_models.forcefield import atomic_system, pretrained
 from orb_models.forcefield.base import batch_graphs
 
 device = "cpu"  # or device="cuda"
-orbff, system_config = pretrained.orb_v3_conservative_inf_omat(
+orbff = pretrained.orb_v3_conservative_inf_omat(
   device=device
   precision="float32-high",   # or "float32-highest" / "float64
 )
 atoms = bulk('Cu', 'fcc', a=3.58, cubic=True)
-graph = atomic_system.ase_atoms_to_atom_graphs(atoms, system_config, device=device)
+graph = atomic_system.ase_atoms_to_atom_graphs(atoms, orbff.system_config, device=device)
 
 # Optionally, batch graphs for faster inference
 # graph = batch_graphs([graph, graph, ...])
@@ -98,11 +98,11 @@ from orb_models.forcefield.calculator import ORBCalculator
 
 device="cpu" # or device="cuda"
 # or choose another model using ORB_PRETRAINED_MODELS[model_name]()
-orbff, system_config = pretrained.orb_v3_conservative_inf_omat(
+orbff = pretrained.orb_v3_conservative_inf_omat(
   device=device
   precision="float32-high",   # or "float32-highest" / "float64
 )
-calc = ORBCalculator(orbff, system_config, device=device)
+calc = ORBCalculator(orbff, device=device)
 atoms = bulk('Cu', 'fcc', a=3.58, cubic=True)
 
 atoms.calc = calc
@@ -118,7 +118,7 @@ from ase.optimize import BFGS
 atoms.rattle(0.5)
 print("Rattled Energy:", atoms.get_potential_energy())
 
-calc = ORBCalculator(orbff, system_config, device="cpu") # or device="cuda"
+calc = ORBCalculator(orbff, device="cpu") # or device="cuda"
 dyn = BFGS(atoms)
 dyn.run(fmax=0.01)
 print("Optimized Energy:", atoms.get_potential_energy())
@@ -154,7 +154,7 @@ You can use the new model and load the checkpoint by:
 ```python
 from orb_models.forcefield import pretrained
 
-model, system_config = getattr(pretrained, <base_model>)(
+model = getattr(pretrained, <base_model>)(
   weights_path=<path_to_ckpt>, 
   device="cpu",               # or device="cuda"
   precision="float32-high",   # or precision="float32-highest"
