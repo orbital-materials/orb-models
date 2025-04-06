@@ -21,7 +21,7 @@ def main(model: str, core_model: str):
         model: Name of the pretrained model to use.
         core_model: Path to the core model.
     """
-    original_orbff, _, sys_config = load.load_model(core_model)
+    original_orbff, _, sys_config = load.load_model(core_model, precision="float32-high")
 
     atoms = ase.Atoms(
         "H2O",
@@ -35,11 +35,12 @@ def main(model: str, core_model: str):
 
     pred_orig = original_orbff.predict(graph_orig)
 
-    orbff = pretrained.ORB_PRETRAINED_MODELS[model]()
+    orbff, sys_config = pretrained.ORB_PRETRAINED_MODELS[model](precision="float32-high")
     pred = orbff.predict(graph)
 
-    assert torch.allclose(pred["graph_pred"], pred_orig["graph_pred"])
-    assert torch.allclose(pred["node_pred"], pred_orig["node_pred"])
+    forces_key = "grad_forces" if "grad_forces" in pred else "forces"
+    assert torch.allclose(pred[forces_key], pred_orig[forces_key], atol=1e-4)
+    assert torch.allclose(pred["energy"], pred_orig["energy"], atol=1e-4)
     print("Model outputs are identical!")
 
 

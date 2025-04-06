@@ -270,7 +270,7 @@ def orb_v3_direct_architecture(
     return model
 
 def orb_v3_conservative_20_omat(
-    weights_path: str = "",  # noqa: E501
+    weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-v3/orb-v3-conservative-20-omat-20250404.ckpt",  # noqa: E501
     device: Union[torch.device, str, None] = None,
     precision: str = "float32-high",
     compile: Optional[bool] = None,
@@ -284,7 +284,7 @@ def orb_v3_conservative_20_omat(
     return model, SystemConfig(radius=6.0, max_num_neighbors=20)
 
 def orb_v3_conservative_inf_omat(
-    weights_path: str = "",  # noqa: E501
+    weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-v3/orb-v3-conservative-inf-omat-20250404.ckpt",  # noqa: E501
     device: Union[torch.device, str, None] = None,
     precision: str = "float32-high",
     compile: Optional[bool] = None,
@@ -302,7 +302,7 @@ def orb_v3_conservative_inf_omat(
     return model, SystemConfig(radius=6.0, max_num_neighbors=120)
 
 def orb_v3_direct_20_omat(
-    weights_path: str = "",  # noqa: E501
+    weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-v3/orb-v3-direct-20-omat-20250404.ckpt",  # noqa: E501
     device: Union[torch.device, str, None] = None,
     precision: str = "float32-high",
     compile: Optional[bool] = None,
@@ -316,7 +316,7 @@ def orb_v3_direct_20_omat(
     return model, SystemConfig(radius=6.0, max_num_neighbors=20)
 
 def orb_v3_direct_inf_omat(
-    weights_path: str = "",  # noqa: E501
+    weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-v3/orb-v3-direct-inf-omat-20250404.ckpt",  # noqa: E501
     device: Union[torch.device, str, None] = None,
     precision: str = "float32-high",
     compile: Optional[bool] = None,
@@ -334,7 +334,7 @@ def orb_v3_direct_inf_omat(
     return model, SystemConfig(radius=6.0, max_num_neighbors=120)
 
 def orb_v3_conservative_20_mpa(
-    weights_path: str = "",  # noqa: E501
+    weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-v3/orb-v3-conservative-20-mpa-20250404.ckpt",  # noqa: E501
     device: Union[torch.device, str, None] = None,
     precision: str = "float32-high",
     compile: Optional[bool] = None,
@@ -348,7 +348,7 @@ def orb_v3_conservative_20_mpa(
     return model, SystemConfig(radius=6.0, max_num_neighbors=20)
 
 def orb_v3_conservative_inf_mpa(
-    weights_path: str = "",  # noqa: E501
+    weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-v3/orb-v3-conservative-inf-mpa-20250404.ckpt",  # noqa: E501
     device: Union[torch.device, str, None] = None,
     precision: str = "float32-high",
     compile: Optional[bool] = None,
@@ -366,7 +366,7 @@ def orb_v3_conservative_inf_mpa(
     return model, SystemConfig(radius=6.0, max_num_neighbors=120)
 
 def orb_v3_direct_20_mpa(
-    weights_path: str = "",  # noqa: E501
+    weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-v3/orb-v3-direct-20-mpa-20250404.ckpt",  # noqa: E501
     device: Union[torch.device, str, None] = None,
     precision: str = "float32-high",
     compile: Optional[bool] = None,
