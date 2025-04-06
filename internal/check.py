@@ -35,7 +35,7 @@ def main(model: str, core_model: str):
 
     pred_orig = original_orbff.predict(graph_orig)
 
-    orbff, sys_config = pretrained.ORB_PRETRAINED_MODELS[model](precision="float32-high")
+    orbff = pretrained.ORB_PRETRAINED_MODELS[model](precision="float32-high")
     pred = orbff.predict(graph)
 
     forces_key = "grad_forces" if "grad_forces" in pred else "forces"
