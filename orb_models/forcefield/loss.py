@@ -6,7 +6,7 @@ from orb_models.forcefield.forcefield_utils import (
     remove_fixed_atoms,
 )
 from orb_models.forcefield import base
-from orb_models.forcefield.graph_regressor import bucketed_mean_error, mean_error
+from orb_models.forcefield.forcefield_utils import bucketed_mean_error, mean_error
 from orb_models.forcefield.nn_util import ScalarNormalizer
 
 

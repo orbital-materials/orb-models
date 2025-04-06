@@ -20,7 +20,7 @@ def test_energy_forces_stress_prediction(model_fn):
     """Tests model compatibility on energy, forces and stress."""
     orb = model_fn(device="cpu")
     atoms = bulk("Cu", "fcc", a=3.58, cubic=True)
-    graph = atomic_system.ase_atoms_to_atom_graphs(atoms)
+    graph = atomic_system.ase_atoms_to_atom_graphs(atoms, system_config=orb.system_config)
     result = orb.predict(graph)
     energy = result["energy"][0]
     forces = result["forces"][0]

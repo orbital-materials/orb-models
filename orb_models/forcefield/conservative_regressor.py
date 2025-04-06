@@ -1,28 +1,27 @@
 from typing import Any, Mapping, Optional, Dict, Literal
-
 import torch
 from torch import nn
 
 from orb_models.forcefield import base
 from orb_models.forcefield.gns import MoleculeGNS
-from orb_models.forcefield.graph_regressor import (
-    _split_prediction,
-    _validate_regressor_inputs,
+from orb_models.forcefield.forcefield_utils import (
+    split_prediction,
+    validate_regressor_inputs,
 )
 from orb_models.forcefield.forcefield_utils import compute_gradient_forces_and_stress
-from orb_models.forcefield.load import _load_forcefield_state_dict
+from orb_models.forcefield.load import load_forcefield_state_dict
 from orb_models.forcefield.pair_repulsion import ZBLBasis
 from orb_models.forcefield.nn_util import ScalarNormalizer
 from orb_models.forcefield.property_definitions import PROPERTIES
 from orb_models.forcefield.loss import forces_loss_function, stress_loss_function
+from orb_models.forcefield.atomic_system import SystemConfig
 
 
 class ConservativeForcefieldRegressor(nn.Module):
-    """A specialized regressor that handles both direct and conservative predictions.
+    """A specialized regressor that handles conservative (and optionally direct) predictions.
 
-    This class is used to train a model that produces both the direct and conservative
-    predictions of energy, forces, and stress. The conservative force/stress predictions
-    are computed using the gradient of the direct predictions.
+    This class is used to train a model that produces both conservative predictions of
+    forces/stress via gradients of its energy with respect to positions/cell.
 
     Args:
         heads: A mapping of head names to heads.
@@ -35,9 +34,6 @@ class ConservativeForcefieldRegressor(nn.Module):
         distill_direct_heads: Whether to distill the direct heads into the conservative heads.
         ensure_grad_loss_weights: Whether to ensure that the grad_forces and grad_stress keys are
             present in the loss_weights. Should only be used during training.
-        online_normalisation: Whether to use online normalisation.
-        forces_loss_type: The type of loss to use for the forces.
-        pair_repulsion: Whether to use pair repulsion.
         **kwargs: Additional kwargs, used for backwards compatibility of deprecated arguments.
     """
 
@@ -51,10 +47,12 @@ class ConservativeForcefieldRegressor(nn.Module):
         distill_direct_heads: bool = False,
         ensure_grad_loss_weights: bool = True,
         online_normalisation: bool = True,
+        level_of_theory: Optional[str] = None,
         forces_loss_type: Literal[
             "mae", "mse", "huber_0.01", "condhuber_0.01"
         ] = "condhuber_0.01",
         pair_repulsion: bool = False,
+        system_config: Optional[SystemConfig] = None,
         **kwargs,
     ):
         super().__init__()
@@ -64,39 +62,36 @@ class ConservativeForcefieldRegressor(nn.Module):
                     f"Unknown kwargs: {kwarg}, expected only backward compatible kwargs "
                     f"from {self._deprecated_kwargs}"
                 )
-
         if "energy" not in heads.keys():
             raise ValueError("Missing required energy head.")
 
-        self.pair_repulsion = pair_repulsion
-        if self.pair_repulsion:
-            self.pair_repulsion_fn = ZBLBasis(p=6, compute_gradients=False)
+        loss_weights = loss_weights or {}
+        loss_weights = {k: v for k, v in loss_weights.items() if v is not None}
+        validate_regressor_inputs(
+            heads, loss_weights, ensure_grad_loss_weights=ensure_grad_loss_weights
+        )
+        self.loss_weights = loss_weights
+        self.distill_direct_heads = distill_direct_heads
+        self.forces_loss_type = forces_loss_type
 
-        # Validate required heads are present
         self.model = model
         self.heads = torch.nn.ModuleDict(heads)
         self.grad_forces_normalizer = ScalarNormalizer(online=online_normalisation)
         self.grad_stress_normalizer = ScalarNormalizer(online=online_normalisation)
 
-        loss_weights = loss_weights or {}
-        loss_weights = {k: v for k, v in loss_weights.items() if v is not None}
-        _validate_regressor_inputs(
-            heads, loss_weights, ensure_grad_loss_weights=ensure_grad_loss_weights
-        )
-
-        self.loss_weights = loss_weights
-        self.distill_direct_heads = distill_direct_heads
-        self.forces_loss_type = forces_loss_type
+        self.pair_repulsion = pair_repulsion
+        if self.pair_repulsion:
+            self.pair_repulsion_fn = ZBLBasis(p=6, compute_gradients=False)
 
         # Target names
         self.energy_name = heads["energy"].target.fullname  # type: ignore
         self.grad_prefix = "grad"
 
-        self.forces_name = "forces"
+        self.forces_name = f"forces-{level_of_theory}" if level_of_theory else "forces"
         self.forces_target = PROPERTIES[self.forces_name]
         self.grad_forces_name = f"{self.grad_prefix}_{self.forces_name}"
 
-        self.stress_name = "stress"
+        self.stress_name = f"stress-{level_of_theory}" if level_of_theory else "stress"
         self.stress_target = PROPERTIES[self.stress_name]
         self.grad_stress_name = f"{self.grad_prefix}_{self.stress_name}"
 
@@ -105,6 +100,12 @@ class ConservativeForcefieldRegressor(nn.Module):
         self.extra_properties = []
         for name in heads.keys() - {"energy"}:
             self.extra_properties.append(heads[name].target.fullname)  # type: ignore
+
+        self._system_config = system_config
+
+    @property
+    def system_config(self) -> SystemConfig:
+        return self._system_config
 
     @property
     def properties(self):
@@ -134,21 +135,13 @@ class ConservativeForcefieldRegressor(nn.Module):
         out = self.model(batch)
         node_features = out["node_features"]
 
-        out[self.energy_name] = self.heads[self.energy_name](node_features, batch)
-
+        energy_head = self.heads[self.energy_name]
+        base_energy = energy_head(node_features, batch)
+        raw_energy = energy_head.denormalize(base_energy, batch)
         if self.pair_repulsion:
-            pair_energy = self.pair_repulsion_fn(batch)["energy"]
-            if self.heads[self.energy_name].atom_avg:
-                pair_energy = pair_energy / batch.n_node
-            normalized = self.heads[self.energy_name].normalizer(
-                pair_energy,
-                online=False,
-            )
-            out[self.energy_name] += normalized.unsqueeze(1)
+            raw_energy += self.pair_repulsion_fn(batch)["energy"]
+        out[self.energy_name] = energy_head.normalize(raw_energy, batch, online=False)
 
-        raw_energy = self.heads[self.energy_name].denormalise_prediction(
-            pred=out[self.energy_name], batch=batch
-        )
         forces, stress, rotational_grad = compute_gradient_forces_and_stress(
             energy=raw_energy,
             positions=batch.node_features["positions"],
@@ -158,7 +151,6 @@ class ConservativeForcefieldRegressor(nn.Module):
             compute_stress=True,
             generator=batch.system_features["generator"],
         )
-
         out[self.grad_forces_name] = forces  # eV / A
         out[self.grad_stress_name] = stress  # eV / A^3
 
@@ -175,16 +167,16 @@ class ConservativeForcefieldRegressor(nn.Module):
         preds = self(batch)
 
         out = {}
-        out[self.energy_name] = self.heads[self.energy_name].denormalise_prediction(
-            pred=preds[self.energy_name], batch=batch
+        out[self.energy_name] = self.heads[self.energy_name].denormalize(
+            preds[self.energy_name], batch
         )
         out[self.grad_forces_name] = preds[self.grad_forces_name]
         out[self.grad_stress_name] = preds[self.grad_stress_name]
         out[self.grad_rotation_name] = preds[self.grad_rotation_name]
         for name in self.extra_properties:
             head = self.heads[name]
-            if hasattr(head, "normalizer"):
-                out[name] = head.normalizer.inverse(preds[name])
+            if hasattr(head, "denormalize"):
+                out[name] = head.denormalize(preds[name], batch)
             elif name == "confidence":
                 out[name] = torch.softmax(preds[name], dim=-1)
             else:
@@ -192,7 +184,7 @@ class ConservativeForcefieldRegressor(nn.Module):
 
         if split:
             for name, pred in out.items():
-                out[name] = _split_prediction(pred, batch.n_node)
+                out[name] = split_prediction(pred, batch.n_node)
 
         return out  # type: ignore
 
@@ -313,8 +305,8 @@ class ConservativeForcefieldRegressor(nn.Module):
         assign: bool = False,
         skip_artifact_reference_energy: bool = False,
     ):
-        """Load state dict for GraphRegressor."""
-        _load_forcefield_state_dict(
+        """Load state dict for ConservativeGraphRegressor."""
+        load_forcefield_state_dict(
             self,
             state_dict,
             strict=strict,

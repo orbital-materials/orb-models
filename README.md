@@ -66,14 +66,17 @@ from orb_models.forcefield import atomic_system, pretrained
 from orb_models.forcefield.base import batch_graphs
 
 device = "cpu"  # or device="cuda"
-orbff = pretrained.orb_v2(device=device)
+orbff = pretrained.orb_v3_conservative_inf_omat(
+  device=device
+  precision="float32-high",   # or "float32-highest" / "float64
+)
 atoms = bulk('Cu', 'fcc', a=3.58, cubic=True)
-graph = atomic_system.ase_atoms_to_atom_graphs(atoms, device=device)
+graph = atomic_system.ase_atoms_to_atom_graphs(atoms, orbff.system_config, device=device)
 
 # Optionally, batch graphs for faster inference
 # graph = batch_graphs([graph, graph, ...])
 
-result = orbff.predict(graph)
+result = orbff.predict(graph, split=False)
 
 # Convert to ASE atoms (unbatches the results and transfers to cpu if necessary)
 atoms = atomic_system.atom_graphs_to_ase_atoms(
@@ -94,7 +97,11 @@ from orb_models.forcefield import pretrained
 from orb_models.forcefield.calculator import ORBCalculator
 
 device="cpu" # or device="cuda"
-orbff = pretrained.orb_v2(device=device) # or choose another model using ORB_PRETRAINED_MODELS[model_name]()
+# or choose another model using ORB_PRETRAINED_MODELS[model_name]()
+orbff = pretrained.orb_v3_conservative_inf_omat(
+  device=device
+  precision="float32-high",   # or "float32-highest" / "float64
+)
 calc = ORBCalculator(orbff, device=device)
 atoms = bulk('Cu', 'fcc', a=3.58, cubic=True)
 
@@ -120,30 +127,48 @@ print("Optimized Energy:", atoms.get_potential_energy())
 Or you can use it to run MD simulations. The script, an example input xyz file and a Colab notebook demonstration are available in the [examples directory.](./examples) This should work with any input, simply modify the input_file and cell_size parameters. We recommend using constant volume simulations.
 
 
+### Floating Point Precision
+
+As shown in usage snippets above, we support 3 floating point precision types: `"float32-high"`, `"float32-highest"` and `"float64"`.
+
+The default value of `"float32-high"` is recommended for maximal acceleration when using A100 / H100 Nvidia GPUs. However, we have observed some performance loss for high-precision calculations involving second and third order properties of the PES. In these cases, we recommend `"float32-highest"`. 
+
+In stark constrast to other universal forcefields, we have not found any benefit to using `"float64"`.
+
 ### Finetuning
 You can finetune the model using your custom dataset.
 The dataset should be an [ASE sqlite database](https://wiki.fysik.dtu.dk/ase/ase/db/db.html#module-ase.db.core).
 ```python
-python finetune.py --dataset=<dataset_name> --data_path=<your_data_path>
+python finetune.py --dataset=<dataset_name> --data_path=<your_data_path> --base_model=<base_model>
 ```
-After the model is finetuned, checkpoints will, by default, be saved to the ckpts folder in the directory you ran the finetuning script from. 
+Where base_model is one of:
+- "orb_v3_conservative_inf_omat"
+- "orb_v3_conservative_20_omat"
+- "orb_v3_direct_inf_omat"
+- "orb_v3_direct_20_omat"
+- "orb_v2"
+
+After the model is finetuned, checkpoints will, by default, be saved to the ckpts folder in the directory you ran the finetuning script from.
 
 You can use the new model and load the checkpoint by:
 ```python
 from orb_models.forcefield import pretrained
 
-model = pretrained.orb_v2(weights_path=<path_to_ckpt>)
+model = getattr(pretrained, <base_model>)(
+  weights_path=<path_to_ckpt>, 
+  device="cpu",               # or device="cuda"
+  precision="float32-high",   # or precision="float32-highest"
+)
 ```
 
 > ⚠ **Caveats**
 >
-> Our finetuning script is designed for simplicity and advanced users may wish to develop it further. Please be aware that:
+> Our finetuning script is designed for simplicity. We strongly advise users to customise it further for their use-case to get the best performance. Please be aware that:
 > - The script assumes that your ASE database rows contain **energy, forces, and stress** data. To train on molecular data without stress, you will need to edit the code.
 > - **Early stopping** is not implemented. However, you can use the command line argument `save_every_x_epochs` (default is 5), so "retrospective" early stopping can be applied by selecting a suitable checkpoint.
 > - The **learning rate schedule is hardcoded** to be `torch.optim.lr_scheduler.OneCycleLR` with `pct_start=0.05`. The `max_lr`/`min_lr` will be 10x greater/smaller than the `lr` specified via the command line. To get the best performance, you may wish to try other schedulers.
 > - The defaults of `--num_steps=100` and `--max_epochs=50` are small. This may be suitable for very small finetuning datasets (e.g. 100s of systems), but you will likely want to increase the number of steps for larger datasets (e.g. 1000s of datapoints).
 > - The script only tracks a limited set of metrics (energy/force/stress MAEs) which may be insufficient for some downstream use-cases. For instance, if you wish to finetune a model for Molecular Dynamics simulations, we have found (anecdotally) that models that are just on the cusp of overfitting to force MAEs can be substantially worse for simulations. Ideally, more robust "rollout" metrics would be included in the finetuning training loop. In lieu of this, we recommend more aggressive early-stopping i.e. using models several epochs prior to any sign of overfitting.
-
 
 
 

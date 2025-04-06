@@ -1,7 +1,8 @@
 import numpy
 import torch
-from typing import Literal, Optional
+from typing import Literal, Optional, Union
 
+from orb_models.forcefield.loss import forces_loss_function
 from orb_models.forcefield.property_definitions import PROPERTIES, PropertyDefinition
 from orb_models.forcefield.forcefield_utils import (
     conditional_huber_force_loss,
@@ -11,7 +12,7 @@ from orb_models.forcefield.forcefield_utils import (
 )
 from orb_models.forcefield.reference_energies import REFERENCE_ENERGIES
 from orb_models.forcefield import base, segment_ops
-from orb_models.forcefield.graph_regressor import bucketed_mean_error, mean_error
+from orb_models.forcefield.forcefield_utils import bucketed_mean_error, mean_error
 from orb_models.forcefield.nn_util import build_mlp, ScalarNormalizer
 
 
@@ -132,14 +133,14 @@ class EnergyHead(torch.nn.Module):
             node_features, batch.n_node, reduction=self.node_aggregation
         )
         pred = self.mlp(input)
-        return pred
+        return pred.squeeze(-1)
 
     def predict(
         self, node_features: torch.Tensor, batch: base.AtomGraphs
     ) -> torch.Tensor:
         """Predict energy."""
         pred = self(node_features, batch)
-        return self.denormalise_prediction(pred, batch)
+        return self.denormalize(pred, batch)
 
     def loss(
         self,
@@ -153,21 +154,20 @@ class EnergyHead(torch.nn.Module):
         if alternative_target is not None:
             raw_target = alternative_target.reshape(-1)
         else:
-            raw_target = batch.system_targets[name].reshape(-1)  # type: ignore
+            raw_target = batch.system_targets[name].reshape(-1)
 
         reference = self.reference(batch.atomic_numbers, batch.n_node).reshape(-1)
+        target = self.normalize(raw_target, batch, reference)
         assert (
-            pred.shape == raw_target.shape == reference.shape
-        ), f"{pred.shape} != {raw_target.shape} != {reference.shape}"
+            pred.shape == raw_target.shape == target.shape
+        ), f"{pred.shape} != {raw_target.shape} != {target.shape}"
+
+        loss = mean_error(pred, target, self.loss_type)
 
         reference_error = raw_target - reference
         if self.atom_avg:
             reference_error = reference_error / batch.n_node
-
-        target = self.normalizer(reference_error)
-        loss = mean_error(pred, target, self.loss_type)
-
-        raw_pred = self.denormalise_prediction(pred, batch)
+        raw_pred = self.denormalize(pred, batch)
         metrics = {
             f"{name}_loss": loss,
             f"{name}_mae_raw": torch.abs(raw_pred - raw_target).mean(),
@@ -176,12 +176,27 @@ class EnergyHead(torch.nn.Module):
         }
         return base.ModelOutput(loss=loss, log=metrics)
 
-    def denormalise_prediction(self, pred: torch.Tensor, batch: base.AtomGraphs):
-        """Denormalise the energy prediction."""
-        pred = self.normalizer.inverse(pred).squeeze(-1)
+    def denormalize(self, x: torch.Tensor, batch: base.AtomGraphs):
+        """Denormalize the energy prediction."""
+        x = self.normalizer.inverse(x).squeeze(-1)
         if self.atom_avg:
-            pred = pred * batch.n_node
-        return pred + self.reference(batch.atomic_numbers, batch.n_node)
+            x = x * batch.n_node
+        return x + self.reference(batch.atomic_numbers, batch.n_node)
+
+    def normalize(
+        self,
+        x: torch.Tensor,
+        batch: base.AtomGraphs,
+        reference: Optional[torch.Tensor] = None,
+        online: Optional[bool] = None,
+    ):
+        """Normalize the energy prediction."""
+        if reference is None:
+            reference = self.reference(batch.atomic_numbers, batch.n_node)
+        x = x - reference
+        if self.atom_avg:
+            x = x / batch.n_node
+        return self.normalizer(x, online=online)
 
 
 class ForceHead(torch.nn.Module):
@@ -203,6 +218,7 @@ class ForceHead(torch.nn.Module):
         output_size: int = 3,
         online_normalisation: bool = True,
         activation: str = "ssp",
+        detach_node_features: bool = False,
     ):
         """Initializes the ForceHead MLP.
 
@@ -222,6 +238,9 @@ class ForceHead(torch.nn.Module):
             output_size: The size of the output layer.
             online_normalisation: Whether to update the normalisation statistics online.
             activation: The activation function to use.
+            detach_node_features: If True, detaches node features from computational graph.
+                This means that the force loss has no impact on training the underlying
+                forcefield model.
         """
         super().__init__()
         target_name = f"forces-{level_of_theory}" if level_of_theory else "forces"
@@ -240,11 +259,14 @@ class ForceHead(torch.nn.Module):
         self.remove_mean = remove_mean
         self.remove_torque_for_nonpbc_systems = remove_torque_for_nonpbc_systems
         self.loss_type = loss_type
+        self.detach_node_features = detach_node_features
 
     def forward(
         self, node_features: torch.Tensor, batch: base.AtomGraphs
     ) -> torch.Tensor:
         """Forward pass (without inverse normalisation)."""
+        if self.detach_node_features:
+            node_features = node_features.detach()
         pred = self.mlp(node_features)
         pred = maybe_remove_net_force_and_torque(
             batch, pred, self.remove_mean, self.remove_torque_for_nonpbc_systems
@@ -266,60 +288,154 @@ class ForceHead(torch.nn.Module):
     ):
         """Compute loss and metrics."""
         name = self.target.fullname
-
-        pred = pred.squeeze(-1)
-        if alternative_target is not None:
-            raw_target = alternative_target
-        else:
-            raw_target = batch.node_targets[name].squeeze(-1)  # type: ignore
-
-        # remove before applying normalizer
-        pred, raw_target, batch_n_node = remove_fixed_atoms(
-            pred, raw_target, batch.n_node, batch.fix_atoms, self.training
+        gold_target = batch.node_targets[name]
+        raw_target = gold_target if alternative_target is None else alternative_target
+        return forces_loss_function(
+            pred=pred,
+            raw_target=raw_target,
+            raw_gold_target=gold_target,
+            name=name,
+            normalizer=self.normalizer,
+            n_node=batch.n_node,
+            fix_atoms=batch.fix_atoms,
+            loss_type=self.loss_type,
+            training=self.training,
         )
-        target = self.normalizer(raw_target)
+
+    def denormalize(self, x: torch.Tensor, batch: base.AtomGraphs):
+        """Denormalize the force prediction."""
+        return self.normalizer.inverse(x)
+
+    def normalize(
+        self, x: torch.Tensor, batch: base.AtomGraphs, online: Optional[bool] = None
+    ):
+        """Normalize the force prediction."""
+        return self.normalizer(x, online=online)
+
+
+class StressHead(torch.nn.Module):
+    """MLP Regression head for stress."""
+
+    def __init__(
+        self,
+        latent_dim: int,
+        num_mlp_layers: int,
+        mlp_hidden_dim: int,
+        level_of_theory: Optional[str] = None,
+        node_aggregation: Literal["sum", "mean"] = "mean",
+        loss_type: Literal["mae", "mse", "huber_0.01"] = "huber_0.01",
+        dropout: Optional[float] = None,
+        checkpoint: Optional[str] = None,
+        online_normalisation: bool = True,
+        activation: str = "ssp",
+        off_diag_loss_weight: float = 0.1,
+    ):
+        """Initializes the StressHead MLP.
+
+        Args:
+            latent_dim (int): Dimensionality of the incoming latent vector from the base model.
+            num_mlp_layers (int): Number of MLP layers.
+            mlp_hidden_dim (int): MLP hidden size.
+            level_of_theory: The method used to compute the gold energies e.g. "SCAN"/ "D3" / "D4".
+                If provided, PROPERTIES['forces-{level_of_theory}'] will be used.
+            node_aggregation: The method for aggregating the node features
+                from the pretrained model representations.
+            loss_type: The type of loss to use. Either "mae", "mse", or "huber_x"
+                where x is the delta parameter for the huber loss.
+            dropout: The level of dropout to apply.
+            checkpoint: Whether to use PyTorch checkpointing.
+                None (no checkpointing), 'reentrant' or 'non-reentrant'.
+            online_normalisation: Whether to normalise the target online.
+            activation: The activation function to use.
+            off_diag_loss_weight: The weight of the off-diagonal stress loss.
+        """
+        super().__init__()
+        target_name = f"stress-{level_of_theory}" if level_of_theory else "stress"
+        self.target = PROPERTIES[target_name]
+        self.off_diag_loss_weight = off_diag_loss_weight
+
+        self.diag_normalizer = ScalarNormalizer(online=online_normalisation)
+        self.offdiag_normalizer = ScalarNormalizer(online=online_normalisation)
+        self.node_aggregation = node_aggregation
+        self.mlp = build_mlp(
+            input_size=latent_dim,
+            hidden_layer_sizes=[mlp_hidden_dim] * num_mlp_layers,
+            output_size=self.target.dim,
+            activation=activation,
+            dropout=dropout,
+            checkpoint=checkpoint,
+        )
+        self.loss_type = loss_type
+
+    def forward(
+        self, node_features: torch.Tensor, batch: base.AtomGraphs
+    ) -> torch.Tensor:
+        """Predictions with raw logits (no sigmoid/softmax or any inverse transformations)."""
+        input = segment_ops.aggregate_nodes(
+            node_features,
+            batch.n_node,
+            reduction=self.node_aggregation,
+        )
+        pred = self.mlp(input)
+        return pred
+
+    def predict(
+        self, node_features: torch.Tensor, batch: base.AtomGraphs
+    ) -> torch.Tensor:
+        """Predict stress in eV/Å^3."""
+        pred = self(node_features, batch)
+        return self.denormalize(pred, batch)
+
+    def loss(
+        self,
+        pred: torch.Tensor,
+        batch: base.AtomGraphs,
+        alternative_target: Optional[torch.Tensor] = None,
+    ):
+        """Apply mlp to compute loss and metrics."""
+        name = self.target.fullname
+        if alternative_target is not None:
+            target = alternative_target
+        else:
+            target = batch.system_targets[name]
+
         assert pred.shape == target.shape, f"{pred.shape} != {target.shape}"
 
-        if self.loss_type.startswith("condhuber"):
-            huber_delta = float(self.loss_type.split("_")[1])
-            loss = conditional_huber_force_loss(pred, target, huber_delta)
-        else:
-            loss = mean_error(pred, target, self.loss_type, batch_n_node)  # type: ignore
+        normalized_target = self.normalize(target, batch)
+        loss_diag = mean_error(pred[:, :3], normalized_target[:, :3], self.loss_type)
+        loss_offdiag = mean_error(pred[:, 3:], normalized_target[:, 3:], self.loss_type)
+        loss = loss_diag + (self.off_diag_loss_weight * loss_offdiag)
 
-        raw_pred = self.normalizer.inverse(pred)
-        metrics = self._metrics(raw_pred, raw_target, batch_n_node)
-        metrics[f"{name}_loss"] = loss
+        raw_pred = self.denormalize(pred, batch)
+        metrics = {
+            f"{name}_loss": loss,
+            f"{name}_mae_raw": torch.abs(raw_pred - target).mean(),
+            f"{name}_mse_raw": ((raw_pred - target) ** 2).mean(),
+            f"{name}_diag_mae_raw": torch.abs(raw_pred[:, :3] - target[:, :3]).mean(),
+            f"{name}_diag_mse_raw": ((raw_pred[:, :3] - target[:, :3]) ** 2).mean(),
+            f"{name}_offdiag_mae_raw": torch.abs(
+                raw_pred[:, 3:] - target[:, 3:]
+            ).mean(),
+            f"{name}_offdiag_mse_raw": ((raw_pred[:, 3:] - target[:, 3:]) ** 2).mean(),
+        }
 
         return base.ModelOutput(loss=loss, log=metrics)
 
-    def _metrics(
-        self,
-        raw_pred: torch.Tensor,
-        raw_target: torch.Tensor,
-        batch_n_node: torch.Tensor,
+    def denormalize(self, pred: torch.Tensor, batch: base.AtomGraphs):
+        """Denormalize the stress prediction."""
+        diag = self.diag_normalizer.inverse(pred[:, :3])
+        offdiag = self.offdiag_normalizer.inverse(pred[:, 3:])
+        out = torch.cat([diag, offdiag], dim=-1)
+        return out
+
+    def normalize(
+        self, x: torch.Tensor, batch: base.AtomGraphs, online: Optional[bool] = None
     ):
-        name = self.target.fullname
-        metrics = {
-            f"{name}_mae_raw": mean_error(raw_pred, raw_target, "mae", batch_n_node),
-            f"{name}_mse_raw": mean_error(raw_pred, raw_target, "mse", batch_n_node),
-            f"{name}_cosine_sim": torch.cosine_similarity(
-                raw_pred, raw_target, dim=-1
-            ).mean(),
-            f"{name}_wt_0.03": forces_within_threshold(
-                raw_pred, raw_target, batch_n_node
-            ),
-        }
-        bucket_metrics = bucketed_mean_error(
-            raw_target,
-            raw_pred,
-            bucket_by="target",
-            thresholds=[0.1, 1.0],
-            batch_n_node=batch_n_node,
-            error_type="mae",
-        )
-        bucket_metrics = {f"{name}_mae_raw_{k}": v for k, v in bucket_metrics.items()}
-        metrics.update(bucket_metrics)
-        return metrics
+        """Normalize the stress prediction."""
+        diag = self.diag_normalizer(x[:, :3], online=online)
+        offdiag = self.offdiag_normalizer(x[:, 3:], online=online)
+        out = torch.cat([diag, offdiag], dim=-1)
+        return out
 
 
 def confidence_row_fn(row, dataset_name: str):
@@ -470,6 +586,124 @@ class ConfidenceHead(torch.nn.Module):
         metrics = {
             "confidence_loss": loss,
             "confidence_accuracy": accuracy,
+        }
+
+        return base.ModelOutput(loss=loss, log=metrics)
+
+
+class GraphHead(torch.nn.Module):
+    """MLP Regression head that can be appended to a base model.
+
+    NOTE: This head is deprecated. Use EnergyHead, ForceHead, or StressHead instead.
+    We only support this head for backwards compatibility with orb-v2 models.
+    """
+
+    def __init__(
+        self,
+        latent_dim: int,
+        num_mlp_layers: int,
+        mlp_hidden_dim: int,
+        target: Union[str, PropertyDefinition],
+        node_aggregation: Literal["sum", "mean"] = "mean",
+        real_loss_type: Literal["mae", "mse", "huber_0.01"] = "huber_0.01",
+        dropout: Optional[float] = None,
+        checkpoint: Optional[str] = None,
+        online_normalisation: bool = True,
+        activation: str = "ssp",
+    ):
+        """Initializes the GraphHead MLP.
+
+        Args:
+            latent_dim (int): Dimensionality of the incoming latent vector from the base model.
+            num_mlp_layers (int): Number of MLP layers.
+            mlp_hidden_dim (int): MLP hidden size.
+            target: either the name of a PropertyDefinition or a PropertyDefinition itself
+            node_aggregation: The method for aggregating the node features
+                from the pretrained model representations.
+            loss_type: The type of loss to use. Either "mae", "mse", or "huber_x"
+                where x is the delta parameter for the huber loss.
+            dropout: The level of dropout to apply.
+            checkpoint: Whether to use PyTorch checkpointing.
+                    None (no checkpointing), 'reentrant' or 'non-reentrant'.
+            online_normalisation: Whether to normalize the target online.
+            activation: The activation function to use.
+        """
+        super().__init__()
+        self.target = PROPERTIES[target] if isinstance(target, str) else target
+
+        self.normalizer = ScalarNormalizer(
+            init_mean=self.target.means,
+            init_std=self.target.stds,
+            online=online_normalisation,
+        )
+        self.node_aggregation = node_aggregation
+        self.mlp = build_mlp(
+            input_size=latent_dim,
+            hidden_layer_sizes=[mlp_hidden_dim] * num_mlp_layers,
+            output_size=self.target.dim,
+            activation=activation,
+            dropout=dropout,
+            checkpoint=checkpoint,
+        )
+        activation_dict = {
+            "real": torch.nn.Identity,
+            "binary": torch.nn.Sigmoid,
+            "categorical": torch.nn.Softmax,
+        }
+        self.output_activation = activation_dict[self.target.domain]()
+        self.real_loss_type = real_loss_type
+
+    def forward(
+        self, node_features: torch.Tensor, batch: base.AtomGraphs
+    ) -> torch.Tensor:
+        """Predictions with raw logits (no sigmoid/softmax or any inverse transformations)."""
+        input = segment_ops.aggregate_nodes(
+            node_features,
+            batch.n_node,
+            reduction=self.node_aggregation,
+        )
+        pred = self.mlp(input)
+        return pred
+
+    def predict(
+        self, node_features: torch.Tensor, batch: base.AtomGraphs
+    ) -> torch.Tensor:
+        """Predict graph-level attribute."""
+        pred = self(node_features, batch)
+        logits = pred.squeeze(-1)
+        probs = self.output_activation(logits)
+        if self.target.domain == "real":
+            probs = self.normalizer.inverse(probs)
+        return probs
+
+    def loss(
+        self,
+        pred: torch.Tensor,
+        batch: base.AtomGraphs,
+        alternative_target: Optional[torch.Tensor] = None,
+    ):
+        """Apply mlp to compute loss and metrics.
+
+        Depending on whether the target is real/binary/categorical, we
+        use an MSE/cross-entropy loss. In the case of cross-entropy, the
+        preds are logits (not normalized) to take advantage of numerically
+        stable log-softmax.
+        """
+        name = self.target.fullname
+        if alternative_target is not None:
+            target = alternative_target
+        else:
+            target = batch.system_targets[name].squeeze(-1)
+        pred = pred.squeeze(-1)
+
+        assert pred.shape == target.shape, f"{pred.shape} != {target.shape}"
+        normalized_target = self.normalizer(target)
+        loss = mean_error(pred, normalized_target, self.real_loss_type)
+        raw_pred = self.normalizer.inverse(pred)
+        metrics = {
+            f"{name}_loss": loss,
+            f"{name}_mae_raw": torch.abs(raw_pred - target).mean(),
+            f"{name}_mse_raw": ((raw_pred - target) ** 2).mean(),
         }
 
         return base.ModelOutput(loss=loss, log=metrics)

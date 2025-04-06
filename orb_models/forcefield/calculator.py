@@ -4,7 +4,7 @@ import torch
 from ase.calculators.calculator import Calculator, all_changes
 
 from orb_models.forcefield.atomic_system import SystemConfig, ase_atoms_to_atom_graphs
-from orb_models.forcefield.graph_regressor import GraphRegressor
+from orb_models.forcefield.direct_regressor import DirectForcefieldRegressor
 from orb_models.forcefield.conservative_regressor import ConservativeForcefieldRegressor
 from orb_models.forcefield.featurization_utilities import EdgeCreationMethod
 from orb_models.utils import to_numpy
@@ -15,11 +15,11 @@ class ORBCalculator(Calculator):
 
     def __init__(
         self,
-        model: Union[GraphRegressor, ConservativeForcefieldRegressor],
+        model: Union[DirectForcefieldRegressor, ConservativeForcefieldRegressor],
         *,
+        system_config: Optional[SystemConfig] = None,
         conservative: Optional[bool] = None,
         edge_method: Optional[EdgeCreationMethod] = None,
-        system_config: SystemConfig = SystemConfig(radius=6.0, max_num_neighbors=20),
         max_num_neighbors: Optional[int] = None,
         half_supercell: Optional[bool] = None,
         device: Optional[Union[torch.device, str]] = None,
@@ -30,6 +30,7 @@ class ORBCalculator(Calculator):
         Args:
             model: The finetuned model to use for predictions.
             system_config (SystemConfig): The config defining how an atomic system is featurized.
+                If None, the system config from the model is used.
             conservative (bool, optional):
                 - Defaults to True if the model is a ConservativeForcefieldRegressor, otherwise False.
                 - If True, conservative forces and stresses are computed as the gradient of the energy.
@@ -56,7 +57,7 @@ class ORBCalculator(Calculator):
         self.model = model
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.model = self.model.to(self.device)  # type: ignore
-        self.system_config = system_config
+        self.system_config = system_config or model.system_config
         self.max_num_neighbors = max_num_neighbors
         self.edge_method = edge_method
         self.half_supercell = half_supercell
@@ -72,12 +73,6 @@ class ORBCalculator(Calculator):
             )
 
         self.implemented_properties = model.properties  # type: ignore
-
-        # TODO: Untangle the spaghetti of how we handle the naming for the heads.
-        # This is required because ASE will check the implemented_properties for
-        # the existence of the property before calling the calculator, so it's not
-        # sufficient to just return the property names from the model and handle
-        # the conservative case in `calculate`.
         if self.conservative:
             self.implemented_properties.extend(["forces", "stress"])
 

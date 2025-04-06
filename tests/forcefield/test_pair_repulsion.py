@@ -6,15 +6,14 @@ from ase import Atoms
 from ase.data import covalent_radii
 
 from orb_models.forcefield.pair_repulsion import ZBLBasis
-from orb_models.forcefield.forcefield_heads import EnergyHead, ForceHead
+from orb_models.forcefield.forcefield_heads import EnergyHead, ForceHead, StressHead
 from orb_models.forcefield.forcefield_utils import (
     compute_gradient_forces_and_stress,
 )
 from orb_models.forcefield.conservative_regressor import ConservativeForcefieldRegressor
-from orb_models.forcefield.graph_regressor import GraphHead, GraphRegressor
+from orb_models.forcefield.direct_regressor import DirectForcefieldRegressor
 from orb_models.forcefield.atomic_system import ase_atoms_to_atom_graphs, SystemConfig
 from orb_models.forcefield import base
-from orb_models.forcefield.property_definitions import PropertyDefinition
 
 
 def test_pair_conservative(gns_model):
@@ -28,28 +27,19 @@ def test_pair_conservative(gns_model):
         checkpoint=None,
         online_normalisation=True,
     )
-    for parameter in head.parameters():
-        parameter.data.fill_(0.0)
-        parameter.data.fill_(0.0)
-
-    forces_head = ForceHead(
-        latent_dim=9,
-        num_mlp_layers=1,
-        mlp_hidden_dim=16,
-    )
-    stress_head = GraphHead(
-        target=PropertyDefinition(
-            "stress", dim=6, domain="real", row_to_property_fn=lambda x: x
-        ),
-        latent_dim=9,
-        num_mlp_layers=1,
-        mlp_hidden_dim=16,
-    )
 
     regressor = ConservativeForcefieldRegressor(
-        heads={"energy": head, "forces": forces_head, "stress": stress_head},
+        heads={"energy": head},
         model=gns_model,
         pair_repulsion=True,
+        ensure_grad_loss_weights=False,
+    )
+
+    # compute baseline energy/forces/stress without pair repulsion
+    regressor_base = ConservativeForcefieldRegressor(
+        heads={"energy": head},
+        model=gns_model,
+        pair_repulsion=False,
         ensure_grad_loss_weights=False,
     )
 
@@ -71,24 +61,20 @@ def test_pair_conservative(gns_model):
                 radius=6.0,
                 max_num_neighbors=10,
             )
-            graphs = [
-                ase_atoms_to_atom_graphs(a, system_config=system_config)
-                for a in atoms_list
-            ]
+            graphs = [ase_atoms_to_atom_graphs(a, system_config) for a in atoms_list]
             batch = base.batch_graphs(graphs)
             out = regressor.predict(batch)
+            out_base = regressor_base.predict(batch)
 
-            # energy head has predict_atom_avg=True, so pair energy is normalized by
-            # number of nodes in graph
             pair_energy = regressor.pair_repulsion_fn(batch)["energy"]
-            np.testing.assert_allclose(
-                out["energy"].detach().numpy(),
-                pair_energy.detach().numpy(),
-                atol=1e-5,
-            )
 
-            assert out["energy"][-1] == 0.0
-            assert torch.all(torch.diff(out["energy"]) <= 0)  # decreasing
+            e0 = out["energy"].detach().numpy()
+            e1 = pair_energy.detach().numpy()
+            e2 = out_base["energy"].detach().numpy()
+            np.testing.assert_allclose(e0, e1 + e2, atol=1e-5)
+
+            assert pair_energy[-1] == 0.0
+            assert torch.all(torch.diff(pair_energy) <= 0)  # decreasing
 
 
 @pytest.mark.parametrize("pbc", [True, False])
@@ -104,7 +90,7 @@ def test_pair_grads(pbc):
     graphs = [
         ase_atoms_to_atom_graphs(
             atoms,
-            system_config=system_config,
+            system_config,
             output_dtype=torch.float64,
         )
         for a in [atoms, atoms]
@@ -157,30 +143,37 @@ def test_pair_direct(gns_model):
         output_size=3,
         online_normalisation=True,
     )
-    stress_head = GraphHead(
+    stress_head = StressHead(
         latent_dim=9,
         num_mlp_layers=1,
         mlp_hidden_dim=16,
-        target=PropertyDefinition(
-            "stress", dim=6, domain="real", row_to_property_fn=lambda x: x
-        ),
-        node_aggregation="sum",
+        node_aggregation="mean",
         dropout=None,
         checkpoint=None,
         online_normalisation=True,
     )
-    for head in [energy_head, forces_head, stress_head]:
-        for parameter in head.parameters():
-            parameter.data.fill_(0.0)
-            parameter.data.fill_(0.0)
 
-    regressor = GraphRegressor(
+    regressor = DirectForcefieldRegressor(
         heads={
             "energy": energy_head,
             "forces": forces_head,
             "stress": stress_head,
         },
         pair_repulsion=True,
+        model=gns_model,
+        loss_weights={
+            "energy": 1.0,
+            "forces": 1.0,
+            "stress": 1.0,
+        },
+    )
+    regressor_base = DirectForcefieldRegressor(
+        heads={
+            "energy": energy_head,
+            "forces": forces_head,
+            "stress": stress_head,
+        },
+        pair_repulsion=False,
         model=gns_model,
         loss_weights={
             "energy": 1.0,
@@ -207,34 +200,29 @@ def test_pair_direct(gns_model):
                 radius=6.0,
                 max_num_neighbors=10,
             )
-            graphs = [
-                ase_atoms_to_atom_graphs(a, system_config=system_config)
-                for a in atoms_list
-            ]
+            graphs = [ase_atoms_to_atom_graphs(a, system_config) for a in atoms_list]
             batch = base.batch_graphs(graphs)
             forward = regressor(batch)
             predict = regressor.predict(batch)
+            predict_base = regressor_base.predict(batch)
 
             pair_energy = regressor.pair_repulsion_fn(batch)["energy"]
             pair_forces = regressor.pair_repulsion_fn(batch)["forces"]
             pair_stress = regressor.pair_repulsion_fn(batch)["stress"]
 
             np.testing.assert_allclose(
-                forward["energy"].detach().numpy(),
-                energy_head.normalizer(pair_energy / batch.n_node, online=False)
-                .unsqueeze(1)
-                .detach()
-                .numpy(),
+                predict["energy"].detach().numpy(),
+                pair_energy.detach().numpy() + predict_base["energy"].detach().numpy(),
                 atol=1e-5,
             )
             np.testing.assert_allclose(
                 predict["forces"].detach().numpy(),
-                pair_forces.detach().numpy(),
+                pair_forces.detach().numpy() + predict_base["forces"].detach().numpy(),
                 atol=1e-5,
             )
             np.testing.assert_allclose(
                 predict["stress"].detach().numpy(),
-                pair_stress.detach().numpy(),
+                pair_stress.detach().numpy() + predict_base["stress"].detach().numpy(),
                 atol=1e-5,
             )
 
