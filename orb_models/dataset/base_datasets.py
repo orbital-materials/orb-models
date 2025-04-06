@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
-from collections import namedtuple
-from typing import Callable, Dict, List, Literal, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple
 
 import ase
 import ase.db
@@ -10,27 +9,6 @@ from torch.utils.data import Dataset
 from orb_models.forcefield import atomic_system
 from orb_models.forcefield.base import AtomGraphs
 
-
-DatasetIndex = namedtuple("DatasetIndex", ["index", "max_num_neighbors", "time_index"])
-# the __get_item__ of our datasets accepts one of:
-# - A single datapoint index
-# - DatasetIndex defining a datapoint index, max_num_neighbors, and time_index
-DatasetIndexOrInt = Union[int, DatasetIndex]
-EvalState = Literal["eval_with_noise", "eval_no_noise", "train"]
-
-
-def parse_data_indices(
-    idx: DatasetIndexOrInt,
-) -> Tuple[int, Optional[int], Optional[int]]:
-    """Get the indices from the DatasetIndex."""
-    if isinstance(idx, int):
-        return idx, None, None
-    elif isinstance(idx, DatasetIndex):
-        return idx.index, idx.max_num_neighbors, idx.time_index
-    else:
-        raise ValueError(
-            f"Index should be an int or a DatasetIndex, but got {type(idx)}"
-        )
 
 
 class AtomsDataset(ABC, Dataset):
@@ -47,7 +25,6 @@ class AtomsDataset(ABC, Dataset):
         name: The dataset name.
         system_config: A config for controlling how an atomic system is represented
         target_config: A config for regression/classification targets
-        evaluation: Three modes: "eval_with_noise", "eval_no_noise", "train".
         position_override_path: Path to a json file containing position overrides.
         augmentations: A list of augmentation functions to apply to the atoms object.
 
@@ -59,27 +36,14 @@ class AtomsDataset(ABC, Dataset):
         self,
         name: str,
         system_config: atomic_system.SystemConfig,
-        evaluation: EvalState,
         augmentations: Optional[List[Callable[[ase.Atoms], None]]] = None,
     ):
         super().__init__()
         self.name = name
         self.system_config = system_config
-        self.evaluation = evaluation
         self.augmentations = augmentations or []
 
-    def eval(self, with_noise: bool = False):
-        """Set the dataset to evaluation mode."""
-        if with_noise:
-            self.evaluation = "eval_with_noise"
-        else:
-            self.evaluation = "eval_no_noise"
-
-    def train(self):
-        """Set the dataset to training mode."""
-        self.evaluation = "train"
-
-    def __getitem__(self, idx: DatasetIndexOrInt) -> AtomGraphs:
+    def __getitem__(self, idx: int) -> AtomGraphs:
         """Fetch an AtomGraphs system.
 
         Args:
@@ -92,7 +56,7 @@ class AtomsDataset(ABC, Dataset):
         """
         raise NotImplementedError
 
-    def __getitems__(self, indices: List[DatasetIndexOrInt]) -> List[AtomGraphs]:
+    def __getitems__(self, indices: List[int]) -> List[AtomGraphs]:
         """Get a list of items from the dataset."""
         return [self[idx] for idx in indices]
 

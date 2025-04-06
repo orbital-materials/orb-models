@@ -24,20 +24,6 @@ def system_config():
     )
 
 
-def test_system_config_is_compatible_with(system_config):
-    system_config_2 = copy.deepcopy(system_config)
-
-    # Modify config2 to make it incompatible
-    system_config_2.radius = 100
-
-    with pytest.raises(ValueError):
-        system_config.is_compatible_with(system_config_2)
-
-    # Reset config2 to be identical to config1
-    system_config_2.radius = system_config.radius
-    assert system_config.is_compatible_with(system_config_2)
-
-
 def test_ase_atoms_to_atom_graphs_wraps(fixtures_path, system_config):
     atoms_unwrapped = ase.Atoms(ase.io.read(fixtures_path / "AFI.cif"))
     atoms_unwrapped.positions[:10] += 2.0 * atoms_unwrapped.cell.array.max()

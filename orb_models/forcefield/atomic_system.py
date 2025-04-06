@@ -20,79 +20,10 @@ class SystemConfig:
     Args:
         radius: radius for edge construction
         max_num_neighbors: maximum number of neighbours each node can send messages to.
-        diffuse_atom_types: whether to add atom type noise
-        conditioning_feats: Optional Dict of conditioning features.
-            Keys must one of 'node', 'edge' or 'graph'.
-            Values must be lists of names in global PROPERTIES dict.
     """
 
     radius: float
     max_num_neighbors: int
-    diffuse_atom_types: bool = False
-    conditioning_feats: Optional[Dict[str, List[str]]] = None
-
-    def is_compatible_with(self, other: "SystemConfig"):
-        """Check if this SystemConfig is compatible with another and print incompatibilities.
-
-        By 'compatible', we mean the following:
-        No bug will occur if a model was trained with the 'other' SystemConfig
-        and we use the 'self' SystemConfig for finetuning/inference.
-
-        Args:
-            other: SystemConfig to compare to.
-
-        Raises:
-            ValueError: If any of the compatibility conditions are violated.
-
-        Returns:
-            True if compatible.
-        """
-        errors = []
-
-        if self.radius != other.radius:
-            errors.append(f"Radius: {self.radius} != {other.radius}")
-        if self.diffuse_atom_types != other.diffuse_atom_types:
-            errors.append(
-                f"Diffuse atom types: {self.diffuse_atom_types} != {other.diffuse_atom_types}"
-            )
-        node_error = self._invalid_feat(
-            self.conditioning_feats, other.conditioning_feats, "node"
-        )
-        if node_error:
-            errors.append(node_error)
-        edge_error = self._invalid_feat(
-            self.conditioning_feats, other.conditioning_feats, "edge"
-        )
-        if edge_error:
-            errors.append(edge_error)
-        graph_error = self._invalid_feat(
-            self.conditioning_feats, other.conditioning_feats, "graph"
-        )
-        if graph_error:
-            errors.append(graph_error)
-        if errors:
-            error_message = "SystemConfig Incompatibilities found:\n" + "\n".join(
-                errors
-            )
-            raise ValueError(error_message)
-
-        return True
-
-    def _invalid_feat(self, feats1, feats2, type="node"):
-        """Return error message if first set of feats is not a superset of the second."""
-        if feats2 is None:
-            return ""
-        elif feats1 is None:
-            return f"Conditioning feats is None, expected: {feats2}"
-        set1 = set(feats1.get(type, []))
-        set2 = set(feats2.get(type, []))
-        is_valid = set1.issuperset(set2)
-        return (
-            f"Missing {type} conditioning feats. Expected {set1} to be a superset of {set2}."
-            if not is_valid
-            else ""
-        )
-
 
 def atom_graphs_to_ase_atoms(
     graphs: AtomGraphs,
@@ -214,7 +145,7 @@ def ase_atoms_to_atom_graphs(
     atomic_numbers = torch.from_numpy(atoms.numbers).to(torch.long)
     atomic_numbers_embedding = atoms.info.get("node_features", {}).get(
         "atomic_numbers_embedding",
-        feat_util.get_atom_embedding(atoms, system_config.diffuse_atom_types),
+        feat_util.get_atom_embedding(atoms, k_hot=False),
     )
     positions = torch.from_numpy(atoms.positions)
     cell = torch.from_numpy(atoms.cell.array)
