@@ -14,7 +14,13 @@ from orb_models.forcefield.featurization_utilities import (
     gaussian_basis_function,
 )
 from orb_models.forcefield.gns import MoleculeGNS
-from orb_models.forcefield.forcefield_heads import ConfidenceHead, EnergyHead, ForceHead, GraphHead, StressHead
+from orb_models.forcefield.forcefield_heads import (
+    ConfidenceHead,
+    EnergyHead,
+    ForceHead,
+    GraphHead,
+    StressHead,
+)
 from orb_models.forcefield.rbf import BesselBasis
 from orb_models.utils import set_torch_precision
 
@@ -88,7 +94,7 @@ def orb_v2_architecture(
                 activation="ssp",
             ),
             "forces": ForceHead(
-                latent_dim=256, 
+                latent_dim=256,
                 num_mlp_layers=1,
                 mlp_hidden_dim=256,
                 remove_mean=True,
@@ -140,7 +146,7 @@ def orb_v3_conservative_architecture(
     head_mlp_depth: int = 1,
     num_message_passing_steps: int = 5,
     activation: str = "silu",
-    device: Optional[torch.device] = None,
+    device: Optional[Union[torch.device, str]] = None,
     system_config: Optional[SystemConfig] = None,
 ) -> ConservativeForcefieldRegressor:
     """The orb-v3 conservative architecture."""
@@ -189,6 +195,7 @@ def orb_v3_conservative_architecture(
         pair_repulsion=True,
         system_config=system_config,
     )
+    device = get_device(device)
     if device is not None and device != torch.device("cpu"):
         model.cuda(device)
     else:
@@ -268,12 +275,14 @@ def orb_v3_direct_architecture(
         pair_repulsion=True,
         system_config=system_config,
     )
+    device = get_device(device)
     if device is not None and device != torch.device("cpu"):
         model.cuda(device)
     else:
         model = model.cpu()
 
     return model
+
 
 def orb_v3_conservative_20_omat(
     weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-v3/orb-v3-conservative-20-omat-20250404.ckpt",  # noqa: E501
@@ -290,6 +299,7 @@ def orb_v3_conservative_20_omat(
     )
 
     return model
+
 
 def orb_v3_conservative_inf_omat(
     weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-v3/orb-v3-conservative-inf-omat-20250404.ckpt",  # noqa: E501
@@ -310,6 +320,7 @@ def orb_v3_conservative_inf_omat(
 
     return model
 
+
 def orb_v3_direct_20_omat(
     weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-v3/orb-v3-direct-20-omat-20250404.ckpt",  # noqa: E501
     device: Union[torch.device, str, None] = None,
@@ -324,6 +335,7 @@ def orb_v3_direct_20_omat(
     )
 
     return model
+
 
 def orb_v3_direct_inf_omat(
     weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-v3/orb-v3-direct-inf-omat-20250404.ckpt",  # noqa: E501
@@ -344,6 +356,7 @@ def orb_v3_direct_inf_omat(
 
     return model
 
+
 def orb_v3_conservative_20_mpa(
     weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-v3/orb-v3-conservative-20-mpa-20250404.ckpt",  # noqa: E501
     device: Union[torch.device, str, None] = None,
@@ -358,6 +371,7 @@ def orb_v3_conservative_20_mpa(
     )
 
     return model
+
 
 def orb_v3_conservative_inf_mpa(
     weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-v3/orb-v3-conservative-inf-mpa-20250404.ckpt",  # noqa: E501
@@ -378,6 +392,7 @@ def orb_v3_conservative_inf_mpa(
 
     return model
 
+
 def orb_v3_direct_20_mpa(
     weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-v3/orb-v3-direct-20-mpa-20250404.ckpt",  # noqa: E501
     device: Union[torch.device, str, None] = None,
@@ -392,6 +407,7 @@ def orb_v3_direct_20_mpa(
     )
 
     return model
+
 
 def orb_v3_direct_inf_mpa(
     weights_path: str = "",  # noqa: E501
@@ -469,7 +485,9 @@ def orb_d3_sm_v2(
 ) -> DirectForcefieldRegressor:
     """Load ORB D3 small v2 with 20 max neighbors, trained on MPTraj + Alexandria."""
     system_config = SystemConfig(radius=6.0, max_num_neighbors=20)
-    model = orb_v2_architecture(num_message_passing_steps=10, device=device, system_config=system_config)
+    model = orb_v2_architecture(
+        num_message_passing_steps=10, device=device, system_config=system_config
+    )
     model = load_model_for_inference(
         model, weights_path, device, precision=precision, compile=compile
     )
@@ -485,7 +503,9 @@ def orb_d3_xs_v2(
 ) -> DirectForcefieldRegressor:
     """Load ORB D3 xs v2 with 20 max neighbors, trained on MPTraj + Alexandria."""
     system_config = SystemConfig(radius=6.0, max_num_neighbors=20)
-    model = orb_v2_architecture(num_message_passing_steps=5, device=device, system_config=system_config)
+    model = orb_v2_architecture(
+        num_message_passing_steps=5, device=device, system_config=system_config
+    )
     model = load_model_for_inference(
         model, weights_path, device, precision=precision, compile=compile
     )
@@ -547,7 +567,7 @@ def orb_v1_mptraj_only(
 
 ORB_PRETRAINED_MODELS = {
     # most performant orb-v3 omat models
-    "orb-v3-conservative-20-omat": orb_v3_conservative_20_omat, 
+    "orb-v3-conservative-20-omat": orb_v3_conservative_20_omat,
     "orb-v3-conservative-inf-omat": orb_v3_conservative_inf_omat,
     "orb-v3-direct-20-omat": orb_v3_direct_20_omat,
     "orb-v3-direct-inf-omat": orb_v3_direct_inf_omat,

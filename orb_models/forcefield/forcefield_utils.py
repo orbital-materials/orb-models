@@ -6,7 +6,6 @@ from orb_models.forcefield import base, segment_ops
 from orb_models.forcefield.gns import MoleculeGNS
 
 
-
 def validate_regressor_inputs(
     heads: Union[Sequence[torch.nn.Module], Mapping[str, torch.nn.Module]],
     loss_weights: Dict[str, float],

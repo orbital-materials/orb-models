@@ -118,7 +118,9 @@ class ORBCalculator(Calculator):
             self.results[property] = to_numpy(out[_property].squeeze())
 
         if self.conservative:
-            self.results["direct_forces"] = self.results["forces"]
-            self.results["direct_stress"] = self.results["stress"]
+            if self.model.forces_name in self.results:
+                self.results["direct_forces"] = self.results[self.model.forces_name]
+            if self.model.stress_name in self.results:
+                self.results["direct_stress"] = self.results[self.model.stress_name]
             self.results["forces"] = self.results[self.model.grad_forces_name]
             self.results["stress"] = self.results[self.model.grad_stress_name]

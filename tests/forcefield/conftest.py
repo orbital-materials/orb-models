@@ -167,14 +167,12 @@ def gns_model():
 
 
 @pytest.fixture
-def conservative_regressor(gns_model, energy_head, force_head, stress_head):
+def conservative_regressor(gns_model, energy_head):
     return ConservativeForcefieldRegressor(
-        heads={"energy": energy_head, "forces": force_head, "stress": stress_head},
+        heads={"energy": energy_head},
         model=gns_model,
         loss_weights={
             "energy": 1.0,
-            "forces": 1.0,
-            "stress": 1.0,
             "grad_forces": 1.0,
             "grad_stress": 1.0,
             "rotational_grad": 1.0,
