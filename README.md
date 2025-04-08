@@ -30,6 +30,18 @@ pip install --extra-index-url=https://pypi.nvidia.com "cuml-cu12==25.2.*"  # Fo
 
 ### Updates
 
+**April 2025**: We have released the Orb-v3 set of potentials. These models improve substantially over Orb-v2, in particular:
+
+- Model compilation using PyTorch 2.6.0+, enabling faster inference while maintaining support for dynamic graph sizes
+- Wider architecture (1024 vs 512) with fewer layers (5 vs 15) compared to v2, resulting in 2-3x faster performance with similar parameter count
+- Two variants available: direct models and conservative models (forces/stress computed via backpropagation)
+- Trained on the larger, more diverse OMat24 dataset
+- Improved edge embeddings using Bessel-Spherical Harmonic outer products (8 Bessel bases, Lmax=3)
+- Enhanced stability through Huber loss and a ZBL pair repulsion term added to forces
+- Models available with both unlimited neighbors and 20-neighbor maximum configurations
+- New confidence head providing intrinsic uncertainty estimates for predictions
+
+
 **Oct 2024**: We have released a new version of the models, `orb-v2`. This version has 2 major changes:
 - v2 models use a smoothed cosine distance cutoff for the attention mechanism. This is a more physically motivated cutoff that is better suited for MPNNs.
 - The force predictions now have net zero forces, meaning they are much more stable for MD simulations.
@@ -43,6 +55,26 @@ These models are substantially better for all use cases, so we have removed the 
 ### Pretrained models
 
 We provide several pretrained models that can be used to calculate energies, forces & stresses of atomic systems. All models are provided in the `orb_models.forcefield.pretrained` module.
+
+#### V3 Models
+V3 models use the following naming convention:
+
+```orb-v3-X-Y-Z```
+
+where:
+- `X`: Model type (`direct` or `conservative`) - determines how forces/stress are computed
+- `Y`: Maximum neighbors per atom (`20` or `inf`)
+- `Z`: Training dataset (`omat` or `mpa`)
+
+For example, `orb-v3-conservative-inf-omat` is a model that:
+- Computes forces/stress as gradients of energy
+- Has effectively infinite neighbors (120 in practice)
+- Was trained on the OMat24 dataset
+```
+
+*We suggest using models trained on OMAT24, as these models are more performant and the data they are trained on uses newer pseudopotentials in VASP (PBE54 vs PBE52)*. `-mpa` models should be used if compatability with benchmarks (for example, Matbench Discovery) is required.
+
+#### V2 Models
 
 - `orb-v2` - trained on [MPTraj](https://figshare.com/articles/dataset/Materials_Project_Trjectory_MPtrj_Dataset/23713842?file=41619375) + [Alexandria](https://alexandria.icams.rub.de/).
 - `orb-mptraj-only-v2` - trained on the MPTraj dataset only to reproduce our second Matbench Discovery result. We do not recommend using this model for general use.
