@@ -146,7 +146,7 @@ def orb_v3_conservative_architecture(
     head_mlp_depth: int = 1,
     num_message_passing_steps: int = 5,
     activation: str = "silu",
-    device: Optional[torch.device] = None,
+    device: Optional[Union[torch.device, str]] = None,
     system_config: Optional[SystemConfig] = None,
 ) -> ConservativeForcefieldRegressor:
     """The orb-v3 conservative architecture."""
@@ -195,6 +195,7 @@ def orb_v3_conservative_architecture(
         pair_repulsion=True,
         system_config=system_config,
     )
+    device = get_device(device)
     if device is not None and device != torch.device("cpu"):
         model.cuda(device)
     else:
