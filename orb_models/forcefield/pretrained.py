@@ -275,6 +275,7 @@ def orb_v3_direct_architecture(
         pair_repulsion=True,
         system_config=system_config,
     )
+    device = get_device(device)
     if device is not None and device != torch.device("cpu"):
         model.cuda(device)
     else:
