@@ -36,15 +36,11 @@ def test_conservative_calculator(conservative_regressor, shared_fixtures_path):
         conservative_calc.results["stress"],
         nonconservative_calc.results[conservative_calc.model.grad_stress_name],
     )
-    assert np.allclose(
-        conservative_calc.results["direct_forces"],
-        nonconservative_calc.results["forces"],
-    )
-    assert np.allclose(
-        conservative_calc.results["direct_stress"],
-        nonconservative_calc.results["stress"],
-    )
 
+    # Check that the direct forces and stress are not present in the results dict.
+    # This is a sanity check as we do not have multi-headed models.
+    assert "direct_forces" not in conservative_calc.results
+    assert "direct_stress" not in conservative_calc.results
 
 def test_calc_conservative_defaults(conservative_regressor):
 

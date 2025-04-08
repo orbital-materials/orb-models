@@ -10,7 +10,6 @@ from orb_models.forcefield import atomic_system
 from orb_models.forcefield.base import AtomGraphs
 
 
-
 class AtomsDataset(ABC, Dataset):
     """AtomsDataset.
 

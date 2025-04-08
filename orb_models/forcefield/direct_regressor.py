@@ -3,10 +3,14 @@ from typing import Any, Mapping, Optional, Dict, Union
 
 from orb_models.forcefield.pair_repulsion import ZBLBasis
 from orb_models.forcefield import base
-from orb_models.forcefield.forcefield_utils import split_prediction, validate_regressor_inputs
+from orb_models.forcefield.forcefield_utils import (
+    split_prediction,
+    validate_regressor_inputs,
+)
 from orb_models.forcefield.gns import MoleculeGNS
 from orb_models.forcefield.load import load_forcefield_state_dict
 from orb_models.forcefield.atomic_system import SystemConfig
+
 
 class DirectForcefieldRegressor(torch.nn.Module):
     """Direct Forcefield regressor."""
@@ -70,18 +74,16 @@ class DirectForcefieldRegressor(torch.nn.Module):
                 param.requires_grad = False
 
         if heads_require_grad is not None:
-             for head_name, requires_grad in heads_require_grad.items():
-                 assert head_name in self.heads
-                 for param in self.heads[head_name].parameters():
-                     param.requires_grad = requires_grad
-
+            for head_name, requires_grad in heads_require_grad.items():
+                assert head_name in self.heads
+                for param in self.heads[head_name].parameters():
+                    param.requires_grad = requires_grad
 
         self._system_config = system_config
 
     @property
     def system_config(self) -> SystemConfig:
         return self._system_config
-
 
     def forward(
         self, batch: base.AtomGraphs

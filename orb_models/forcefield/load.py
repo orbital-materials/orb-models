@@ -25,7 +25,7 @@ def load_forcefield_state_dict(
             if skip_artifact_reference_energy is True.
 
     NOTE: We assume that the presence of the prefix "heads." in any key of the
-    state_dict implies that the state_dict comes from a DirectForcefieldRegressor 
+    state_dict implies that the state_dict comes from a DirectForcefieldRegressor
     or ConservativeForcefieldRegressor.
     """
     state_dict = dict(state_dict)  # Shallow copy

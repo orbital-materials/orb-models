@@ -25,6 +25,7 @@ class SystemConfig:
     radius: float
     max_num_neighbors: int
 
+
 def atom_graphs_to_ase_atoms(
     graphs: AtomGraphs,
     energy: Optional[torch.Tensor] = None,
@@ -82,6 +83,7 @@ def atom_graphs_to_ase_atoms(
         atoms_list.append(atoms)
 
     return atoms_list
+
 
 def ase_atoms_to_atom_graphs(
     atoms: ase.Atoms,
