@@ -70,9 +70,12 @@ For example, `orb-v3-conservative-inf-omat` is a model that:
 - Computes forces/stress as gradients of energy
 - Has effectively infinite neighbors (120 in practice)
 - Was trained on the OMat24 dataset
-```
 
-*We suggest using models trained on OMAT24, as these models are more performant and the data they are trained on uses newer pseudopotentials in VASP (PBE54 vs PBE52)*. `-mpa` models should be used if compatability with benchmarks (for example, Matbench Discovery) is required.
+
+Orb-v3 models are **compiled** by default and use Pytorch's dynamic batching, which means that they do not need to recompile as graph sizes change. However, the first call to the model will be slower, as the graph is compiled by torch.
+
+
+**We suggest using models trained on OMAT24**, as these models are more performant and the data they are trained on uses newer pseudopotentials in VASP (PBE54 vs PBE52)*. `-mpa` models should be used if compatability with benchmarks (for example, Matbench Discovery) is required.
 
 #### V2 Models
 
