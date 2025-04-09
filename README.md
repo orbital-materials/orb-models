@@ -4,11 +4,6 @@
 </p>
 <br/>
 
-## Announcement
-
-**Important Notice**: All models pre version 4.1.0 will reach End of Life (EOL) on 26th January due to removal of the old model weights. Please ensure to update to the latest version to continue receiving support and updates.
-
-
 # Pretrained models for atomic simulations
 
 ![example workflow](https://github.com/orbital-materials/orb-models/actions/workflows/test.yml/badge.svg)
@@ -30,7 +25,7 @@ pip install --extra-index-url=https://pypi.nvidia.com "cuml-cu12==25.2.*"  # Fo
 
 ### Updates
 
-**April 2025**: We have released the Orb-v3 set of potentials. These models improve substantially over Orb-v2, in particular:
+**April 2025**: We have released the [Orb-v3 set of potentials](https://arxiv.org/abs/2504.06231). These models improve substantially over Orb-v2, in particular:
 
 - Model compilation using PyTorch 2.6.0+, enabling faster inference while maintaining support for dynamic graph sizes
 - Wider architecture (1024 vs 512) with fewer layers (5 vs 15) compared to v2, resulting in 2-3x faster performance with similar parameter count
@@ -42,7 +37,7 @@ pip install --extra-index-url=https://pypi.nvidia.com "cuml-cu12==25.2.*"  # Fo
 - New confidence head providing intrinsic uncertainty estimates for predictions
 
 
-**Oct 2024**: We have released a new version of the models, `orb-v2`. This version has 2 major changes:
+**Oct 2024**: We have released the [Orb-v2 set of potentials](https://arxiv.org/abs/2410.22570). These models have two major changes:
 - v2 models use a smoothed cosine distance cutoff for the attention mechanism. This is a more physically motivated cutoff that is better suited for MPNNs.
 - The force predictions now have net zero forces, meaning they are much more stable for MD simulations.
 - The models are generally more accurate (Increase in 2-3% on the matbench discovery dataset).
@@ -212,9 +207,21 @@ model = getattr(pretrained, <base_model>)(
 
 ### Citing
 
-A preprint describing the model in more detail can be found here: https://arxiv.org/abs/2410.22570
+Preprints describing the models in more detail can be found at:
+* **Orb-v3:** https://arxiv.org/abs/2504.06231
+* **Orb-v2:** https://arxiv.org/abs/2410.22570
 
 ```bibtex
+@misc{rhodes2025orbv3atomisticsimulationscale,
+      title={Orb-v3: atomistic simulation at scale}, 
+      author={Benjamin Rhodes and Sander Vandenhaute and Vaidotas Šimkus and James Gin and Jonathan Godwin and Tim Duignan and Mark Neumann},
+      year={2025},
+      eprint={2504.06231},
+      archivePrefix={arXiv},
+      primaryClass={cond-mat.mtrl-sci},
+      url={https://arxiv.org/abs/2504.06231}, 
+}
+
 @misc{neumann2024orbfastscalableneural,
       title={Orb: A Fast, Scalable Neural Network Potential}, 
       author={Mark Neumann and James Gin and Benjamin Rhodes and Steven Bennett and Zhiyi Li and Hitarth Choubisa and Arthur Hussey and Jonathan Godwin},
