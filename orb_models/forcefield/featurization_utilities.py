@@ -23,7 +23,7 @@ TORCH_FLOAT_DTYPES = [
 ]
 ATOM_TYPE_K = 5
 
-EdgeCreationMethod = Literal["knn_brute_force", "knn_scipy"]
+EdgeCreationMethod = Literal["knn_brute_force", "knn_scipy","knn_cuml_rbc"]
 
 
 def get_device(
