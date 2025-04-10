@@ -93,7 +93,7 @@ def ase_atoms_to_atom_graphs(
     edge_method: Optional[EdgeCreationMethod] = None,
     max_num_neighbors: Optional[int] = None,
     system_id: Optional[int] = None,
-    half_supercell: bool = False,
+    half_supercell: Optional[bool] = None,
     device: Optional[torch.device] = None,
     output_dtype: Optional[torch.dtype] = None,
     graph_construction_dtype: Optional[torch.dtype] = None,
@@ -119,7 +119,7 @@ def ase_atoms_to_atom_graphs(
         system_id: Optional index that is relative to a particular dataset.
         half_supercell (bool): Whether to use half the supercell for graph construction, and then symmetrize.
             This flag does not affect the resulting graph; it is purely an optimization that can double
-            throughput and half memory for very large cells (e.g. 10k+ atoms). For smaller systems, it can harm
+            throughput and half memory for very large cells (e.g. 5k+ atoms). For smaller systems, it can harm
             performance due to additional computation to enforce max_num_neighbors.
         device: The device to put the tensors on.
         output_dtype: The dtype to use for all floating point tensors stored on the AtomGraphs object.

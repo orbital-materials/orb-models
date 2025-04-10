@@ -89,17 +89,12 @@ class ORBCalculator(Calculator):
         """
         Calculator.calculate(self, atoms)
 
-        half_supercell = (
-            len(atoms.positions) >= 5_000
-            if self.half_supercell is None
-            else self.half_supercell
-        )
         batch = ase_atoms_to_atom_graphs(
             atoms,
             system_config=self.system_config,
             max_num_neighbors=self.max_num_neighbors,
             edge_method=self.edge_method,
-            half_supercell=half_supercell,
+            half_supercell=self.half_supercell,
             device=self.device,
         )
         batch = batch.to(self.device)  # type: ignore
