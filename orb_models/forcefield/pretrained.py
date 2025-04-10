@@ -54,7 +54,7 @@ def load_model_for_inference(
 
     # Load the weights
     local_path = cached_path(weights_path)
-    state_dict = torch.load(local_path, map_location="cpu")
+    state_dict = torch.load(local_path, map_location="cpu", weights_only=True)
     model.load_state_dict(state_dict, strict=True)
 
     # Move the model to the device

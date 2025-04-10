@@ -23,7 +23,9 @@ TORCH_FLOAT_DTYPES = [
 ]
 ATOM_TYPE_K = 5
 
-EdgeCreationMethod = Literal["knn_brute_force", "knn_scipy"]
+EdgeCreationMethod = Literal[
+    "knn_brute_force", "knn_scipy", "knn_cuml_brute", "knn_cuml_rbc"
+]
 
 
 def get_device(
@@ -464,7 +466,7 @@ def compute_pbc_radius_graph(
     edge_method: Optional[EdgeCreationMethod] = None,
     n_workers: int = 1,
     device: Optional[Union[torch.device, str, int]] = None,
-    half_supercell: bool = False,
+    half_supercell: Optional[bool] = None,
     float_dtype: torch.dtype = torch.float32,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Computes graph edges within a max radius and num_neighbors, accounting for periodic-boundary conditions.
@@ -490,7 +492,7 @@ def compute_pbc_radius_graph(
             Defaults to None, in which case GPU is used if available.
         half_supercell (bool): Whether to use half the supercell for graph construction, and then symmetrize.
             This flag does not affect the resulting graph; it is purely an optimization that can double
-            throughput and half memory for very large cells (e.g. 10k+ atoms). For smaller systems, it can harm
+            throughput and half memory for very large cells (e.g. 5k+ atoms). For smaller systems, it can harm
             performance due to additional computation to enforce max_num_neighbors.
         float_dtype (torch.dtype): The dtype to use for floating point tensors in the graph construction.
     Returns:
@@ -507,6 +509,9 @@ def compute_pbc_radius_graph(
     cell = cell.to(dtype=float_dtype)
 
     natoms = positions.shape[0]
+    half_supercell = (
+        len(positions) >= 5_000 if half_supercell is None else half_supercell
+    )
     half_supercell = half_supercell and bool(torch.any(cell != 0.0))
     is_periodic = bool(torch.any(cell != 0.0).item() and torch.any(pbc).item())
 
