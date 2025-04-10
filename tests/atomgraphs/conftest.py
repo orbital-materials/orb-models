@@ -98,7 +98,7 @@ def get_CO2():
 
 def compute_pbc_radius_graph_nequip(
     positions: torch.Tensor,
-    periodic_boundaries: torch.Tensor,
+    cell: torch.Tensor,
     radius: Union[float, torch.Tensor],
     max_number_neighbors: int = 20,
     self_interaction: bool = False,
@@ -127,7 +127,7 @@ def compute_pbc_radius_graph_nequip(
 
     Args:
         positions (shape [N, 3]): Positional coordinate; Tensor or numpy array. If Tensor, must be on CPU.
-        periodic_boundaries (numpy shape [3, 3]): Cell for periodic boundary conditions.
+        cell (numpy shape [3, 3]): Cell for periodic boundary conditions.
             Ignored if ``pbc == False``.
         radius (float): Radial cutoff distance for neighbor finding.
         max_number_neighbors (int): maximum number os neighbors for each node.
@@ -142,7 +142,7 @@ def compute_pbc_radius_graph_nequip(
         distance_vector_top_k (torch.tensor shape [num_edges, 3]): Relative cell shift
             vectors. Returned only if cell is not None.
     """
-    if torch.any(periodic_boundaries != 0.0):
+    if torch.any(cell != 0.0):
         pbc = True
     if isinstance(pbc, bool):
         pbc = (pbc,) * 3  # type: ignore[assignment]
@@ -158,10 +158,10 @@ def compute_pbc_radius_graph_nequip(
         out_dtype = torch.get_default_dtype()
 
     # Get a cell on the CPU no matter what
-    if isinstance(periodic_boundaries, torch.Tensor):
-        temp_cell = periodic_boundaries.detach().cpu().numpy()
-    elif periodic_boundaries is not None:
-        temp_cell = np.asarray(periodic_boundaries)
+    if isinstance(cell, torch.Tensor):
+        temp_cell = cell.detach().cpu().numpy()
+    elif cell is not None:
+        temp_cell = np.asarray(cell)
     else:
         # ASE will "complete" this correctly.
         temp_cell = np.zeros((3, 3), dtype=temp_pos.dtype)
@@ -233,6 +233,7 @@ def compute_pbc_radius_graph_nequip(
 def assert_edges_match_nequips(
     positions: torch.Tensor,
     cell: torch.Tensor,
+    pbc: torch.Tensor,
     edge_method: EdgeCreationMethod,
     half_supercell: bool = False,
     max_num_neighbors: int = 20,
@@ -247,18 +248,21 @@ def assert_edges_match_nequips(
         # pbc[0] here is because we have added an outer dim for batching,
         # but a bunch of internal stuff assumesthat the pbc is 3x3 exactly.
         cell=cell[0],
+        pbc=pbc,
         radius=max_radius,
         max_number_neighbors=max_num_neighbors,  # set to s large value so that all neighbours are considered
         edge_method=edge_method,
         half_supercell=half_supercell,
     )
+    edge_index = edge_index.to(positions.device)
+    edge_vectors = edge_vectors.to(positions.device)
 
     (
         edge_index_nequip,
         edge_vectors_nequip,
     ) = compute_pbc_radius_graph_nequip(
         positions=positions,
-        periodic_boundaries=cell[0],
+        cell=cell[0],
         radius=max_radius,
         max_number_neighbors=max_num_neighbors,
         self_interaction=False,
@@ -286,8 +290,12 @@ def assert_edges_match_nequips(
         # As the edge vectors may have opposite directions, we compare their norms here.
         edge_vector_norm = torch.norm(edge_vectors[start_index:end_index])
         edge_vector_norm_nequip = torch.norm(edge_vectors_nequip[start_index:end_index])
-        assert torch.allclose(edge_vector_norm, edge_vector_norm_nequip), (
-            f"Edge vector norm: {edge_vector_norm} and edge vector norm nequip: "
-            f"{edge_vector_norm_nequip} are not close."
+        torch.testing.assert_close(
+            edge_vector_norm,
+            edge_vector_norm_nequip,
+            msg=(
+                f"Edge vector norm: {edge_vector_norm} and edge vector norm nequip: "
+                f"{edge_vector_norm_nequip} are not close."
+            ),
         )
         start_index = end_index

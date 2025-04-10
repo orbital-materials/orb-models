@@ -180,10 +180,10 @@ class ScalarNormalizer(torch.nn.Module):
     def forward(self, x: torch.Tensor, online: Optional[bool] = None) -> torch.Tensor:
         """Normalize by running mean and std."""
         online = online if online is not None else self.online
-        x_reshaped = x.view(-1, 1)
+        x_reshaped = x.reshape(-1, 1)
         if self.training and online and x_reshaped.shape[0] > 1:
             # hack: call batch norm, but only to update a running mean/std
-            self.bn(x.view(-1, 1))
+            self.bn(x_reshaped)
 
         mu = self.bn.running_mean  # type: ignore
         sigma = torch.sqrt(self.bn.running_var)  # type: ignore

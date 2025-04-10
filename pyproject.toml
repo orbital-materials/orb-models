@@ -19,7 +19,7 @@ dependencies = [
     "numpy>=1.26.4",
     "scipy>=1.15.1",
     "torch>=2.6.0, <3.0.0",
-    "dm-tree>=0.1.8",
+    "dm-tree==0.1.8", # Pinned because of https://github.com/google-deepmind/tree/issues/128
     "tqdm>=4.66.5",
 ]
 

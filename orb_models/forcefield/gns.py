@@ -1,7 +1,7 @@
 """Pyg implementation of Graph Net Simulator."""
 
 from collections import OrderedDict
-from typing import Callable, List, Optional, Literal, Dict, Any, Tuple
+from typing import Callable, List, Optional, Literal, Dict, Any, Tuple, Union
 
 import torch
 from torch import nn
@@ -10,6 +10,7 @@ from torch.nn import functional as F
 from orb_models.forcefield import base, segment_ops
 from orb_models.forcefield.nn_util import build_mlp, get_cutoff, mlp_and_layer_norm
 from orb_models.forcefield.embedding import AtomEmbedding, AtomEmbeddingBag
+from orb_models.forcefield.angular import UnitVector
 
 _KEY = "feat"
 
@@ -274,23 +275,31 @@ class Decoder(nn.Module):
 class MoleculeGNS(nn.Module):
     """GNS that works on molecular data."""
 
-    _deprecated_args = ["noise_scale", "add_virtual_node", "self_cond", "interactions"]
+    _deprecated_args = [
+        "noise_scale",
+        "add_virtual_node",
+        "self_cond",
+        "interactions",
+        "num_node_in_features",
+        "num_edge_in_features",
+    ]
 
     def __init__(
         self,
-        num_node_in_features: int,
-        num_node_out_features: int,
-        num_edge_in_features: int,
         latent_dim: int,
         num_message_passing_steps: int,
         num_mlp_layers: int,
         mlp_hidden_dim: int,
         rbf_transform: Callable,
+        angular_transform: Optional[Callable] = None,
+        outer_product_with_cutoff: bool = False,
+        use_embedding: bool = False,  # atom type embedding
+        expects_atom_type_embedding: bool = False,
+        interaction_params: Optional[Dict[str, Any]] = None,
+        num_node_out_features: int = 3,
+        extra_embed_dims: Union[int, Tuple[int, int]] = 0,
         node_feature_names: Optional[List[str]] = None,
         edge_feature_names: Optional[List[str]] = None,
-        expects_atom_type_embedding: bool = False,
-        use_embedding: bool = False,
-        interaction_params: Optional[Dict[str, Any]] = None,
         checkpoint: Optional[str] = None,
         activation="ssp",
         mlp_norm: str = "layer_norm",
@@ -299,13 +308,26 @@ class MoleculeGNS(nn.Module):
         """Initializes the molecular GNS.
 
         Args:
-            num_node_in_features (int): Number input nodes features.
-            num_node_out_features (int): Number output nodes features.
-            num_edge_in_features (int): Number input edge features.
             latent_dim (int): Latent dimension of processor.
             num_message_passing_steps (int): Number of message passing steps.
             num_mlp_layers (int): Number of MLP layers.
             mlp_hidden_dim (int): MLP hidden dimension.
+            rbf_transform (Callable): A function that takes in edge lengths and returns
+                a tensor of RBF features.
+            angular_transform (Callable): A function that takes in edge vectors and
+                returns a tensor of angular features.
+            outer_product_with_cutoff (bool): Create initial edge embeddings via
+                an outer product of rbf and angular embeddings and a envelope cutoff.
+            use_embedding: Whether to embed atom types using an embedding table or embedding bag.
+            expects_atom_type_embedding (bool): Whether or not the model expects the input
+                to be pre-embedded. This is used for atom type models, because the one-hot
+                embedding is noised, rather than being explicitly one-hot.
+            interaction_params (Optional[Dict[str, Any]]): Additional parameters
+                to pass to the interaction network.
+            num_node_out_features (int): Number output nodes features.
+            extra_embed_dims (int): Number of extra embedding dimensions to use.
+                If an int, both the node and edge embeddings will have this number of extra dims.
+                If a tuple, then it is interpreted as [extra_node_embed_dim, extra_edge_embed_dim].
             node_feature_names (List[str]): Which tensors from batch.node_features to
                 concatenate to form the initial node latents. Note: These are "extra"
                 features - we assume the base atomic number representation is already
@@ -313,14 +335,6 @@ class MoleculeGNS(nn.Module):
             edge_feature_names (List[str]): Which tensors from batch.edge_features to
                 concatenate to form the initial edge latents. Note: These are "extra"
                 features - we assume the base edge vector features are already included.
-            rbf_transform: An RBF transform to use for the edge features.
-            expects_atom_type_embedding (bool): Whether or not the model expects
-                the input to be pre-embedded. This is used for atom type models,
-                because the one-hot embedding is noised, rather than being
-                explicitly one-hot.
-            use_embedding: Whether to embed atom types using an embedding table or embedding bag.
-            interaction_params (Optional[Dict[str, Any]]): Additional parameters
-                to pass to the interaction network.
             checkpoint (bool): Whether or not to use checkpointing.
             activation (str): Activation function to use.
             mlp_norm (str): Normalization layer to use in the MLP.
@@ -330,12 +344,45 @@ class MoleculeGNS(nn.Module):
         kwargs = {k: v for k, v in kwargs.items() if k not in self._deprecated_args}
         if kwargs:
             raise ValueError(
-                f"The following kwargs are not arguments to GraphRegressor: {kwargs.keys()}"
+                f"The following kwargs are not arguments to MoleculeGNS: {kwargs.keys()}"
             )
 
+        self.node_feature_names = node_feature_names or []
+        self.edge_feature_names = edge_feature_names or []
+
+        # Edge embedding
+        self.outer_product_with_cutoff = outer_product_with_cutoff
+        self.rbf_transform = rbf_transform
+        if angular_transform is None:
+            angular_transform = UnitVector()
+        self.angular_transform = angular_transform
+        if self.outer_product_with_cutoff:
+            self.edge_embed_size = rbf_transform.num_bases * angular_transform.dim  # type: ignore
+        else:
+            if hasattr(rbf_transform, "num_bases"):
+                num_bases = rbf_transform.num_bases
+            else:
+                num_bases = rbf_transform.keywords["num_bases"]  # type: ignore
+            self.edge_embed_size = num_bases + angular_transform.dim  # type: ignore
+
+        # Node embedding
+        self.expects_atom_type_embedding = expects_atom_type_embedding
+        self.use_embedding = use_embedding
+        if self.use_embedding:
+            self.node_embed_size = latent_dim
+            if self.expects_atom_type_embedding:
+                # Use embedding bag for atom type diffusion
+                self.atom_emb = AtomEmbeddingBag(self.node_embed_size, 118)
+            else:
+                self.atom_emb = AtomEmbedding(self.node_embed_size, 118)  # type: ignore
+        else:
+            self.node_embed_size = 118
+        if isinstance(extra_embed_dims, int):
+            extra_embed_dims = (extra_embed_dims, extra_embed_dims)  # type: ignore
+
         self._encoder = Encoder(
-            num_node_in_features=num_node_in_features,
-            num_edge_in_features=num_edge_in_features,
+            num_node_in_features=self.node_embed_size + extra_embed_dims[0],
+            num_edge_in_features=self.edge_embed_size + extra_embed_dims[1],
             latent_dim=latent_dim,
             num_mlp_layers=num_mlp_layers,
             mlp_hidden_dim=mlp_hidden_dim,
@@ -370,19 +417,6 @@ class MoleculeGNS(nn.Module):
             checkpoint=checkpoint,
             activation=activation,
         )
-        self.rbf = rbf_transform
-        self.expects_atom_type_embedding = expects_atom_type_embedding
-        self.use_embedding = use_embedding
-
-        if self.use_embedding:
-            if self.expects_atom_type_embedding:
-                # Use embedding bag for atom type diffusion
-                self.atom_emb = AtomEmbeddingBag(latent_dim, 118)
-            else:
-                self.atom_emb = AtomEmbedding(latent_dim, 118)  # type: ignore
-
-        self.node_feature_names = node_feature_names or []
-        self.edge_feature_names = edge_feature_names or []
 
     def forward(self, batch: base.AtomGraphs) -> Dict[str, torch.Tensor]:
         """Encode a graph using molecular GNS.
@@ -455,14 +489,22 @@ class MoleculeGNS(nn.Module):
         vectors = batch.edge_features["vectors"]
         # replace 0s with 1s to avoid division by zero
         lengths = vectors.norm(dim=1)
-        non_zero_divisor = torch.where(lengths == 0, torch.ones_like(lengths), lengths)
-        unit_vectors = vectors / non_zero_divisor.unsqueeze(1)
-        rbfs = self.rbf(lengths)
-        edge_features = torch.cat([rbfs, unit_vectors], dim=1)
 
-        # This is for backward compatibility with old code
-        # Configs now assume that the base model features are already included
-        # and only specify "extra" features
+        angular_embedding = self.angular_transform(vectors)  # (nedges, x)
+        rbfs = self.rbf_transform(lengths)  # (nedges, y)
+
+        if self.outer_product_with_cutoff:
+            cutoff = get_cutoff(lengths)
+            # (nedges, x, y)
+            outer_product = rbfs[:, :, None] * angular_embedding[:, None, :]
+            # (nedges, x * y)
+            edge_features = cutoff * outer_product.view(
+                vectors.shape[0], self.edge_embed_size
+            )
+        else:
+            edge_features = torch.cat([rbfs, angular_embedding], dim=1)
+
+        # For backwards compatibility, exclude 'feat'
         feature_names = [k for k in self.edge_feature_names if k != "feat"]
         return torch.cat(
             [edge_features, *[batch.edge_features[k] for k in feature_names]], dim=-1

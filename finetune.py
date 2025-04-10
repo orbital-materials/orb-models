@@ -166,9 +166,9 @@ def build_train_loader(
     dataset_path: str,
     num_workers: int,
     batch_size: int,
+    system_config: atomic_system.SystemConfig,
     augmentation: Optional[bool] = True,
     target_config: Optional[Dict] = None,
-    system_config: Optional[atomic_system.SystemConfig] = None,
     **kwargs,
 ) -> DataLoader:
     """Builds the train dataloader from a config file.
@@ -189,8 +189,7 @@ def build_train_loader(
     aug = []
     if augmentation:
         aug = [augmentations.rotate_randomly]
-    if system_config is None:
-        system_config = atomic_system.SystemConfig(radius=6.0, max_num_neighbors=20)
+
     target_config = property_definitions.instantiate_property_config(target_config)
     dataset = AseSqliteDataset(
         dataset_name,
@@ -232,13 +231,17 @@ def run(args):
     device = utils.init_device(device_id=args.device_id)
     utils.seed_everything(args.random_seed)
 
-    # Make sure to use this flag for matmuls on A100 and H100 GPUs.
+    # Setting this is 2x faster on A100 and H100 
+    # GPUs and does not appear to hurt training
     precision = "float32-high"
 
     # Instantiate model
-    model = pretrained.orb_v2(device=device, precision=precision)
+    base_model = args.base_model
+    model = getattr(pretrained, base_model)(device=device, precision=precision)
+
     for param in model.parameters():
         param.requires_grad = True
+
     model_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logging.info(f"Model has {model_params} trainable parameters.")
 
@@ -267,6 +270,7 @@ def run(args):
     )
     train_loader = build_train_loader(
         **loader_args,
+        system_config=model.system_config,
         augmentation=True,
     )
     logging.info("Starting training!")
@@ -380,6 +384,19 @@ def main():
         default=3e-04,
         type=float,
         help="Learning rate. 3e-4 is purely a sensible default; you may want to tune this for your problem.",
+    )
+    parser.add_argument(
+        "--base_model",
+        default="orb_v3_conservative_inf_omat",
+        type=str,
+        help="Base model to finetune.",
+        choices=[
+            "orb_v3_conservative_inf_omat",
+            "orb_v3_conservative_20_omat",
+            "orb_v3_direct_inf_omat",
+            "orb_v3_direct_20_omat",
+            "orb_v2",
+        ],
     )
     args = parser.parse_args()
     run(args)

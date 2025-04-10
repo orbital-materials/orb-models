@@ -14,8 +14,6 @@ def test_regressor_forward(request, conservative_regressor, graph_name):
     graph = request.getfixturevalue(graph_name)
     out = conservative_regressor(graph)
     assert "energy" in out
-    assert "forces" in out
-    assert "stress" in out
     assert "grad_forces" in out
     assert "grad_stress" in out
 
@@ -37,7 +35,7 @@ def test_regressor_loss(conservative_regressor, batch):
 def test_regressor_head_config_raises_error(
     gns_model, energy_head, force_head, stress_head
 ):
-    with pytest.raises(ValueError, match="Missing required heads"):
+    with pytest.raises(ValueError, match="Loss weights for unknown targets"):
         ConservativeForcefieldRegressor(
             heads={"energy": energy_head, "forces": force_head},
             model=gns_model,
@@ -85,20 +83,8 @@ def test_regressor_predict(batch, conservative_regressor):
     conservative_regressor.eval()
     inference = conservative_regressor.predict(batch)
     assert "energy" in inference
-    assert "forces" in inference
-    assert "stress" in inference
     assert "grad_forces" in inference
     assert "grad_stress" in inference
-
-
-def test_conservative_model_can_distill(batch, conservative_regressor):
-    conservative_regressor.eval()
-    conservative_regressor.distill_direct_heads = True
-    distill_output = conservative_regressor.loss(batch)
-
-    conservative_regressor.distill_direct_heads = False
-    output = conservative_regressor.loss(batch)
-    assert not torch.allclose(output.loss, distill_output.loss)
 
 
 def test_featurization_differentiability_with_conservative_regressor(

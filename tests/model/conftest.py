@@ -1,12 +1,10 @@
-import copy
 import pytest
 import torch
 
 from orb_models.forcefield import gns
-from orb_models.forcefield.property_definitions import PropertyDefinition
 from orb_models.forcefield.rbf import ExpNormalSmearing
 from orb_models.forcefield import base
-from orb_models.forcefield import graph_regressor
+from orb_models.forcefield.forcefield_heads import EnergyHead, ForceHead
 
 
 def one_hot(x):
@@ -39,38 +37,14 @@ def graph():
             "cell": torch.eye(3).unsqueeze(0),
             "prior_loss": torch.tensor([0.0]),
         },
-        node_targets={"noise_target": torch.randn_like(positions)},
+        node_targets={"forces": torch.randn_like(positions)},
         edge_targets={},
-        system_targets={"graph_target": torch.tensor([[23.3]])},
-        fix_atoms=torch.tensor([1, 0, 0, 1, 0, 0, 1, 1, 0, 0], dtype=torch.bool),
+        system_targets={"energy": torch.tensor([[23.3]])},
+        fix_atoms=None,
         system_id=None,
         tags=None,
         radius=6.0,
         max_num_neighbors=torch.tensor([20]),
-    )
-
-
-@pytest.fixture()
-def graph_binary(graph):
-    cloned_graph = copy.deepcopy(graph)
-    node_target = torch.randint(
-        0, 2, (len(cloned_graph.node_features["positions"]),)
-    ).long()
-    return cloned_graph._replace(
-        node_targets={"binary_node_target": node_target},
-        system_targets={"binary_graph_target": torch.tensor([[1]]).long()},
-    )
-
-
-@pytest.fixture()
-def graph_categorical(graph):
-    cloned_graph = copy.deepcopy(graph)
-    node_target = torch.randint(
-        0, 5, (len(cloned_graph.node_features["positions"]),)
-    ).long()
-    return cloned_graph._replace(
-        node_targets={"cat_node_target": node_target},
-        system_targets={"cat_graph_target": torch.tensor([[3]]).long()},
     )
 
 
@@ -97,38 +71,14 @@ def single_node_graph():
             unit_shifts=torch.zeros_like(vectors),
         ),
         system_features={"cell": torch.eye(3).unsqueeze(0)},
-        node_targets={"noise_target": torch.randn_like(positions)},
+        node_targets={"forces": torch.randn_like(positions)},
         edge_targets={},
-        system_targets={"graph_target": torch.tensor([[23.3]])},
+        system_targets={"energy": torch.tensor([[23.3]])},
         system_id=None,
         fix_atoms=None,
         tags=None,
         radius=6.0,
         max_num_neighbors=20,
-    )
-
-
-@pytest.fixture()
-def single_node_graph_binary(single_node_graph):
-    cloned_graph = copy.deepcopy(single_node_graph)
-    node_target = torch.randint(
-        0, 2, (len(cloned_graph.node_features["positions"]),)
-    ).long()
-    return cloned_graph._replace(
-        node_targets={"binary_node_target": node_target},
-        system_targets={"binary_graph_target": torch.tensor([[1]]).long()},
-    )
-
-
-@pytest.fixture()
-def single_node_graph_categorical(single_node_graph):
-    cloned_graph = copy.deepcopy(single_node_graph)
-    node_target = torch.randint(
-        0, 5, (len(cloned_graph.node_features["positions"]),)
-    ).long()
-    return cloned_graph._replace(
-        node_targets={"cat_node_target": node_target},
-        system_targets={"cat_graph_target": torch.tensor([[3]]).long()},
     )
 
 
@@ -150,35 +100,18 @@ def gns_model():
 
 
 @pytest.fixture
-def graph_head():
-    def graph_head_(target=None, latent_dim=8):
-        if target is None:
-            target = PropertyDefinition(
-                "graph_target", dim=1, domain="real", row_to_property_fn=lambda x: x
-            )
-        return graph_regressor.GraphHead(
-            latent_dim=latent_dim,
-            num_mlp_layers=0,
-            mlp_hidden_dim=0,
-            target=target,
-            node_aggregation="sum",
+def forces_head():
+    return ForceHead(
+        latent_dim=8,
+        num_mlp_layers=0,
+        mlp_hidden_dim=0,
         )
-
-    return graph_head_
 
 
 @pytest.fixture
-def node_head():
-    def node_head_(target=None):
-        if target is None:
-            target = PropertyDefinition(
-                "noise_target", dim=3, domain="real", row_to_property_fn=lambda x: x
-            )
-        return graph_regressor.NodeHead(
-            latent_dim=8,
-            num_mlp_layers=0,
-            mlp_hidden_dim=0,
-            target=target,
-        )
-
-    return node_head_
+def energy_head():
+    return EnergyHead(
+        latent_dim=8,
+        num_mlp_layers=0,
+        mlp_hidden_dim=0,
+    )

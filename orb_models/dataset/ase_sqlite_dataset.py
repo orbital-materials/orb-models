@@ -9,8 +9,6 @@ import torch
 from orb_models.forcefield import atomic_system, property_definitions
 from orb_models.dataset.base_datasets import (
     AtomsDataset,
-    DatasetIndexOrInt,
-    parse_data_indices,
 )
 from orb_models.forcefield.base import AtomGraphs
 
@@ -25,7 +23,6 @@ class AseSqliteDataset(AtomsDataset):
         path: Local path to read the data from.
         system_config: A config for controlling how an atomic system is represented.
         target_config: A config for regression/classification targets.
-        evaluation: Three modes: "eval_with_noise", "eval_no_noise", "train".
         augmentations: A list of augmentation functions to apply to the atoms object.
         dtype: The dtype for floating point tensors in the output.
 
@@ -39,23 +36,18 @@ class AseSqliteDataset(AtomsDataset):
         path: Union[str, Path],
         system_config: atomic_system.SystemConfig,
         target_config: Optional[property_definitions.PropertyConfig] = None,
-        evaluation: Literal["eval_with_noise", "eval_no_noise", "train"] = "train",
         augmentations: Optional[List[Callable[[ase.Atoms], None]]] = None,
         dtype: Optional[torch.dtype] = None,
     ):
         super().__init__(
             name=name,
             system_config=system_config,
-            evaluation=evaluation,
             augmentations=augmentations,
         )
         self.dtype = dtype if dtype is not None else torch.get_default_dtype()
         self.path = path
         self.db = ase.db.connect(str(self.path), serial=True, type="db")
 
-        self.feature_config = property_definitions.instantiate_property_config(
-            system_config.conditioning_feats
-        )
         self.target_config = (
             target_config
             if target_config is not None
@@ -63,7 +55,7 @@ class AseSqliteDataset(AtomsDataset):
         )
         self.constraints = []  # type: ignore[var-annotated]
 
-    def __getitem__(self, idx: DatasetIndexOrInt) -> AtomGraphs:
+    def __getitem__(self, idx: int) -> AtomGraphs:
         """Fetch an item from the db.
 
         Args:
@@ -74,8 +66,6 @@ class AseSqliteDataset(AtomsDataset):
             positions and atom types and other auxillary information, such as
             fine tuning targets, or global graph features.
         """
-        idx, max_num_neighbors, maybe_time_idx = parse_data_indices(idx)
-
         # Sqlite db is 1 indexed.
         row = self.db.get(idx + 1)
         atoms = row.toatoms()
@@ -84,7 +74,6 @@ class AseSqliteDataset(AtomsDataset):
         # This dict may be modified as part of an augmentation e.g.
         # Force and stress targets are transformed when rotating a system.
         atoms.info = {}
-        atoms.info.update(self.feature_config.extract(row, self.name, "features"))
         atoms.info.update(self.target_config.extract(row, self.name, "targets"))
 
         for augmentation in self.augmentations:
@@ -99,7 +88,6 @@ class AseSqliteDataset(AtomsDataset):
         return atomic_system.ase_atoms_to_atom_graphs(
             atoms=atoms,
             system_config=self.system_config,
-            max_num_neighbors=max_num_neighbors if self.evaluation == "train" else None,
             edge_method="knn_scipy",
             wrap=True,
             system_id=idx,

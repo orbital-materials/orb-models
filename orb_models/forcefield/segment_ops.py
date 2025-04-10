@@ -159,7 +159,7 @@ def scatter_sum(
     Returns:
         torch.Tensor: The output tensor with values scattered and summed.
     """
-    assert reduce == "sum"  # for now, TODO
+    assert reduce == "sum"
     index = _broadcast(index, src, dim)
     if out is None:
         size = list(src.size())

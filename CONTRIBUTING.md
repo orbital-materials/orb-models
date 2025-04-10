@@ -7,6 +7,12 @@ pip install poetry  # Install Poetry if you don't have it
 poetry install
 ```
 
+Optionally, also install [cuML](https://docs.rapids.ai/install/) (requires CUDA):
+```bash
+pip install --extra-index-url=https://pypi.nvidia.com "cuml-cu11==25.2.*"  # For cuda versions >=11.4, <11.8
+pip install --extra-index-url=https://pypi.nvidia.com "cuml-cu12==25.2.*"  # For cuda versions >=12.0, <13.0
+```
+
 ### Running tests
 
 The `orb_models` package uses `pytest` for testing. To run the tests, navigate to the root directory of the package and run the following command:
