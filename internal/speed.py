@@ -284,7 +284,9 @@ def benchmark_orb_featurize(
     """Benchmark orb featurize."""
     edge_method: EdgeCreationMethod = extra_kwargs.pop("edge_method", None)
     half_supercell = extra_kwargs.pop("half_supercell", None)
-    system_config = SystemConfig(**extra_kwargs)
+    radius = extra_kwargs.pop("radius", 6.0)
+    max_num_neighbors = extra_kwargs.pop("max_num_neighbors", 20)
+    system_config = SystemConfig(radius=radius, max_num_neighbors=max_num_neighbors)
 
     def featurize(idx: int):
         ase_atoms_to_atom_graphs(
