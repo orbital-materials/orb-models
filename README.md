@@ -203,6 +203,31 @@ model = getattr(pretrained, <base_model>)(
 > - The script only tracks a limited set of metrics (energy/force/stress MAEs) which may be insufficient for some downstream use-cases. For instance, if you wish to finetune a model for Molecular Dynamics simulations, we have found (anecdotally) that models that are just on the cusp of overfitting to force MAEs can be substantially worse for simulations. Ideally, more robust "rollout" metrics would be included in the finetuning training loop. In lieu of this, we recommend more aggressive early-stopping i.e. using models several epochs prior to any sign of overfitting.
 
 
+## Docker
+
+You can also run the model using Docker:
+
+1. Build the Docker image locally:
+
+   ```bash
+   docker build -t orb_models .
+   ```
+
+   Or pull the pre-built image from Docker Hub:
+
+   ```bash
+   docker pull cford38/orb_models:v3
+   ```
+
+2. Run the Docker container:
+
+   ```bash
+   docker run --gpus all --rm --name orb_models -it orb_models /bin/bash
+   # docker run --gpus all --rm --name orb_models -it cford38/orb_models:v3 /bin/bash
+   ```
+
+> [!NOTE]
+> This image does not include all of the model weights, which will be downloaded the first time you run the Python library inside in the container.
 
 
 ### Citing
