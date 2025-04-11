@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
+FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime
 
 LABEL authors="Colby T. Ford <colby@tuple.xyz>"
 
@@ -16,5 +16,4 @@ RUN apt-get update && \
 
 ## Install Python requirements
 RUN pip install orb-models && \
-    # pip install "pynanoflann@git+https://github.com/dwastberg/pynanoflann#egg=af434039ae14bedcbb838a7808924d6689274168"
-    pip install git+https://github.com/u1234x1234/pynanoflann.git@0.0.8
+    pip install --extra-index-url=https://pypi.nvidia.com "cuml-cu12==25.2.*"

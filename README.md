@@ -216,14 +216,14 @@ You can also run the model using Docker:
    Or pull the pre-built image from Docker Hub:
 
    ```bash
-   docker pull cford38/orb_models:latest
+   docker pull cford38/orb_models:v3
    ```
 
 2. Run the Docker container:
 
    ```bash
    docker run --gpus all --rm --name orb_models -it orb_models /bin/bash
-   # docker run --gpus all --rm --name orb_models -it cford38/orb_models:latest /bin/bash
+   # docker run --gpus all --rm --name orb_models -it cford38/orb_models:v3 /bin/bash
    ```
 
 > [!NOTE]
