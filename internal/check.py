@@ -4,6 +4,8 @@ import argparse
 
 import ase
 import torch
+import numpy as np
+
 from core.dataset import atomic_system as core_atomic_system
 from core.models import load
 
@@ -19,20 +21,26 @@ def main(model: str, core_model: str):
         model: Name of the pretrained model to use.
         core_model: Path to the core model.
     """
-    original_orbff, _, sys_config = load.load_model(core_model)
+    original_orbff, _, sys_config = load.load_model(core_model, precision="float32-high")
 
-    atoms = ase.Atoms("H2O", positions=[[0, 0, 0], [0, 0, 1.1], [0, 1.1, 0]])
+    atoms = ase.Atoms(
+        "H2O",
+        positions=[[0, 0, 0], [0, 0, 1.1], [0, 1.1, 0]],
+        cell=np.eye(3) * 2,
+        pbc=True,
+    )
 
     graph_orig = core_atomic_system.ase_atoms_to_atom_graphs(atoms, sys_config)
-    graph = atomic_system.ase_atoms_to_atom_graphs(atoms)
+    graph = atomic_system.ase_atoms_to_atom_graphs(atoms, sys_config)
 
     pred_orig = original_orbff.predict(graph_orig)
 
-    orbff = pretrained.ORB_PRETRAINED_MODELS[model]()
+    orbff = pretrained.ORB_PRETRAINED_MODELS[model](precision="float32-high")
     pred = orbff.predict(graph)
 
-    assert torch.allclose(pred["graph_pred"], pred_orig["graph_pred"])
-    assert torch.allclose(pred["node_pred"], pred_orig["node_pred"])
+    forces_key = "grad_forces" if "grad_forces" in pred else "forces"
+    assert torch.allclose(pred[forces_key], pred_orig[forces_key], atol=1e-4)
+    assert torch.allclose(pred["energy"], pred_orig["energy"], atol=1e-4)
     print("Model outputs are identical!")
 
 

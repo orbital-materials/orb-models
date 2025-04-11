@@ -20,78 +20,10 @@ class SystemConfig:
     Args:
         radius: radius for edge construction
         max_num_neighbors: maximum number of neighbours each node can send messages to.
-        diffuse_atom_types: whether to add atom type noise
-        conditioning_feats: Optional Dict of conditioning features.
-            Keys must one of 'node', 'edge' or 'graph'.
-            Values must be lists of names in global PROPERTIES dict.
     """
 
     radius: float
     max_num_neighbors: int
-    diffuse_atom_types: bool = False
-    conditioning_feats: Optional[Dict[str, List[str]]] = None
-
-    def is_compatible_with(self, other: "SystemConfig"):
-        """Check if this SystemConfig is compatible with another and print incompatibilities.
-
-        By 'compatible', we mean the following:
-        No bug will occur if a model was trained with the 'other' SystemConfig
-        and we use the 'self' SystemConfig for finetuning/inference.
-
-        Args:
-            other: SystemConfig to compare to.
-
-        Raises:
-            ValueError: If any of the compatibility conditions are violated.
-
-        Returns:
-            True if compatible.
-        """
-        errors = []
-
-        if self.radius != other.radius:
-            errors.append(f"Radius: {self.radius} != {other.radius}")
-        if self.diffuse_atom_types != other.diffuse_atom_types:
-            errors.append(
-                f"Diffuse atom types: {self.diffuse_atom_types} != {other.diffuse_atom_types}"
-            )
-        node_error = self._invalid_feat(
-            self.conditioning_feats, other.conditioning_feats, "node"
-        )
-        if node_error:
-            errors.append(node_error)
-        edge_error = self._invalid_feat(
-            self.conditioning_feats, other.conditioning_feats, "edge"
-        )
-        if edge_error:
-            errors.append(edge_error)
-        graph_error = self._invalid_feat(
-            self.conditioning_feats, other.conditioning_feats, "graph"
-        )
-        if graph_error:
-            errors.append(graph_error)
-        if errors:
-            error_message = "SystemConfig Incompatibilities found:\n" + "\n".join(
-                errors
-            )
-            raise ValueError(error_message)
-
-        return True
-
-    def _invalid_feat(self, feats1, feats2, type="node"):
-        """Return error message if first set of feats is not a superset of the second."""
-        if feats2 is None:
-            return ""
-        elif feats1 is None:
-            return f"Conditioning feats is None, expected: {feats2}"
-        set1 = set(feats1.get(type, []))
-        set2 = set(feats2.get(type, []))
-        is_valid = set1.issuperset(set2)
-        return (
-            f"Missing {type} conditioning feats. Expected {set1} to be a superset of {set2}."
-            if not is_valid
-            else ""
-        )
 
 
 def atom_graphs_to_ase_atoms(
@@ -155,13 +87,13 @@ def atom_graphs_to_ase_atoms(
 
 def ase_atoms_to_atom_graphs(
     atoms: ase.Atoms,
+    system_config: SystemConfig,
     *,
     wrap: bool = True,
-    edge_method: Optional[EdgeCreationMethod] = "knn_scipy",
-    system_config: Optional[SystemConfig] = None,
+    edge_method: Optional[EdgeCreationMethod] = None,
     max_num_neighbors: Optional[int] = None,
     system_id: Optional[int] = None,
-    half_supercell: bool = False,
+    half_supercell: Optional[bool] = None,
     device: Optional[torch.device] = None,
     output_dtype: Optional[torch.dtype] = None,
     graph_construction_dtype: Optional[torch.dtype] = None,
@@ -171,16 +103,23 @@ def ase_atoms_to_atom_graphs(
     Args:
         atoms: ase.Atoms object
         wrap: whether to wrap atomic positions into the central unit cell (if there is one).
-        edge_method: The method to use for edge creation:
-            - knn_brute_force: Use brute force to find nearest neighbors.
-            - knn_scipy (default): Use scipy to find nearest neighbors.
+        edge_method (EdgeCreationMethod, optional): The method to use for graph edge construction.
+            If None, the edge method is chosen as follows:
+            * knn_brute_force: If device is not CPU, and cuML is not installed or num_atoms is < 5000 (PBC)
+                or < 30000 (non-PBC).
+            * knn_cuml_rbc: If device is not CPU, and cuML is installed, and num_atoms is >= 5000 (PBC) or
+                >= 30000 (non-PBC).
+            * knn_scipy (default): If device is CPU.
+            On GPU, for num_atoms ≲ 5000 (PBC) or ≲ 30000 (non-PBC), knn_brute_force is faster than knn_cuml_*,
+            but uses more memory. For num_atoms ≳ 5000 (PBC) or ≳ 30000 (non-PBC), knn_cuml_* is faster and uses
+            less memory, but requires cuML to be installed. knn_scipy is typically fastest on the CPU.
         system_config: The system configuration to use for graph construction.
         max_num_neighbors: Maximum number of neighbors each node can send messages to.
             If None, will use system_config.max_num_neighbors.
         system_id: Optional index that is relative to a particular dataset.
         half_supercell (bool): Whether to use half the supercell for graph construction, and then symmetrize.
             This flag does not affect the resulting graph; it is purely an optimization that can double
-            throughput and half memory for very large cells (e.g. 10k+ atoms). For smaller systems, it can harm
+            throughput and half memory for very large cells (e.g. 5k+ atoms). For smaller systems, it can harm
             performance due to additional computation to enforce max_num_neighbors.
         device: The device to put the tensors on.
         output_dtype: The dtype to use for all floating point tensors stored on the AtomGraphs object.
@@ -188,8 +127,6 @@ def ase_atoms_to_atom_graphs(
     Returns:
         AtomGraphs object
     """
-    if system_config is None:
-        system_config = SystemConfig(radius=6.0, max_num_neighbors=20)
     if isinstance(atoms.pbc, Iterable) and any(atoms.pbc) and not all(atoms.pbc):
         raise NotImplementedError(
             "We do not support periodicity along a subset of axes. Please ensure atoms.pbc is "
@@ -210,17 +147,19 @@ def ase_atoms_to_atom_graphs(
     atomic_numbers = torch.from_numpy(atoms.numbers).to(torch.long)
     atomic_numbers_embedding = atoms.info.get("node_features", {}).get(
         "atomic_numbers_embedding",
-        feat_util.get_atom_embedding(atoms, system_config.diffuse_atom_types),
+        feat_util.get_atom_embedding(atoms, k_hot=False),
     )
     positions = torch.from_numpy(atoms.positions)
     cell = torch.from_numpy(atoms.cell.array)
+    pbc = torch.from_numpy(atoms.pbc)
     lattice = torch.from_numpy(cell_to_cellpar(cell))
-    if wrap and torch.any(cell != 0):
+    if wrap and (torch.any(cell != 0) and torch.any(pbc)):
         positions = feat_util.map_to_pbc_cell(positions, cell)
 
     edge_index, edge_vectors, unit_shifts = feat_util.compute_pbc_radius_graph(
         positions=positions,
         cell=cell,
+        pbc=pbc,
         radius=system_config.radius,
         max_number_neighbors=max_num_neighbors,
         edge_method=edge_method,
@@ -248,6 +187,7 @@ def ase_atoms_to_atom_graphs(
     graph_feats = {
         **atoms.info.get("graph_features", {}),
         "cell": cell,
+        "pbc": pbc,
         "lattice": lattice,
     }
 
