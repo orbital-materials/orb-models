@@ -159,6 +159,47 @@ print("Optimized Energy:", atoms.get_potential_energy())
 Or you can use it to run MD simulations. The script, an example input xyz file and a Colab notebook demonstration are available in the [examples directory.](./examples) This should work with any input, simply modify the input_file and cell_size parameters. We recommend using constant volume simulations.
 
 
+#### Confidence head (Orb-v3 Models Only)
+
+Orb-v3 models have a confidence head which produces a per-atom discrete confidence measure based on a classifier head which learns to predict the binned MAE between predicted and true forces during training. This classifier head has 50 bins, linearly spaced between 0 and 0.4A.
+
+
+```python
+import ase
+from ase.build import molecule
+from seaborn import heatmap # optional, for visualization only
+import matplotlib.pyplot as plt # optional, for visualization only
+import numpy
+
+from orb_models.forcefield import pretrained
+from orb_models.forcefield.calculator import ORBCalculator
+
+device="cpu" # or device="cuda"
+# or choose another model using ORB_PRETRAINED_MODELS[model_name]()
+orbff = pretrained.orb_v3_conservative_inf_omat(
+  device=device,
+)
+calc = ORBCalculator(orbff, device=device)
+# Use a molecule (OOD for Orb, so confidence plot is
+# more interesting than a bulk crystal)
+atoms = molecule("CH3CH2Cl")
+atoms.calc = calc
+
+forces = atoms.get_forces()
+confidences = calc.results["confidence"]
+predicted_bin_per_atom = numpy.argmax(confidences, axis=-1)
+
+print(forces.shape, confidences.shape) # (num_atoms, 3), (num_atoms, 50)
+print(predicted_bin_per_atom) # List of length num_atoms
+heatmap(confidences)
+plt.xlabel('Confidence Bin')
+plt.ylabel('Atom Index')
+plt.title('Confidence Heatmap')
+plt.show()
+
+```
+
+
 ### Floating Point Precision
 
 As shown in usage snippets above, we support 3 floating point precision types: `"float32-high"`, `"float32-highest"` and `"float64"`.
