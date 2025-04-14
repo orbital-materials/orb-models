@@ -410,7 +410,7 @@ def orb_v3_direct_20_mpa(
 
 
 def orb_v3_direct_inf_mpa(
-    weights_path: str = "",  # noqa: E501
+    weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-v3/orb-v3-direct-inf-mpa-20250404.ckpt",  # noqa: E501
     device: Union[torch.device, str, None] = None,
     precision: str = "float32-high",
     compile: Optional[bool] = None,
