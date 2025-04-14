@@ -1,6 +1,5 @@
 FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime
 
-LABEL authors="Colby T. Ford <colby@tuple.xyz>"
 
 ENV DEBIAN_FRONTEND=noninteractive
 
