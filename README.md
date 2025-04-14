@@ -23,6 +23,8 @@ pip install --extra-index-url=https://pypi.nvidia.com "cuml-cu11==25.2.*"  # Fo
 pip install --extra-index-url=https://pypi.nvidia.com "cuml-cu12==25.2.*"  # For cuda versions >=12.0, <13.0
 ```
 
+Alternatively, you can use Docker to run orb-models; [see instructions below](#docker).
+
 ### Updates
 
 **April 2025**: We have released the [Orb-v3 set of potentials](https://arxiv.org/abs/2504.06231). These models improve substantially over Orb-v2, in particular:
@@ -244,6 +246,20 @@ model = getattr(pretrained, <base_model>)(
 > - The script only tracks a limited set of metrics (energy/force/stress MAEs) which may be insufficient for some downstream use-cases. For instance, if you wish to finetune a model for Molecular Dynamics simulations, we have found (anecdotally) that models that are just on the cusp of overfitting to force MAEs can be substantially worse for simulations. Ideally, more robust "rollout" metrics would be included in the finetuning training loop. In lieu of this, we recommend more aggressive early-stopping i.e. using models several epochs prior to any sign of overfitting.
 
 
+## Docker
+
+You can run orb-models using Docker, which provides a consistent environment with all dependencies pre-installed:
+
+1. Build the Docker image locally:
+
+   ```bash
+   docker build -t orb_models .
+   ```
+2. Run the Docker container:
+
+   ```bash
+   docker run --gpus all --rm --name orb_models -it orb_models /bin/bash
+   ```
 
 
 ### Citing
