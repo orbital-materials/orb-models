@@ -83,6 +83,7 @@ class DirectForcefieldRegressor(torch.nn.Module):
 
     @property
     def system_config(self) -> SystemConfig:
+        """Get the system config."""
         return self._system_config
 
     def forward(

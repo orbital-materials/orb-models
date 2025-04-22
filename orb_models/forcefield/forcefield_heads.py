@@ -5,14 +5,11 @@ from typing import Literal, Optional, Union
 from orb_models.forcefield.loss import forces_loss_function
 from orb_models.forcefield.property_definitions import PROPERTIES, PropertyDefinition
 from orb_models.forcefield.forcefield_utils import (
-    conditional_huber_force_loss,
-    forces_within_threshold,
-    remove_fixed_atoms,
     maybe_remove_net_force_and_torque,
 )
 from orb_models.forcefield.reference_energies import REFERENCE_ENERGIES
 from orb_models.forcefield import base, segment_ops
-from orb_models.forcefield.forcefield_utils import bucketed_mean_error, mean_error
+from orb_models.forcefield.forcefield_utils import mean_error
 from orb_models.forcefield.nn_util import build_mlp, ScalarNormalizer
 
 

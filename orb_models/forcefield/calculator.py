@@ -110,7 +110,7 @@ class ORBCalculator(Calculator):
             if not model_has_direct_heads and property == "stress":
                 continue
             _property = "energy" if property == "free_energy" else property
-            self.results[property] = to_numpy(out[_property].squeeze())
+            self.results[property] = to_numpy(out[_property])
 
         if self.conservative:
             if self.model.forces_name in self.results:

@@ -78,3 +78,21 @@ def test_calc_non_conservative_defaults(graph_regressor):
         "forces",
         "stress",
     }
+
+
+
+def test_calc_produces_non_singleton_dims_for_forces(conservative_regressor, graph_regressor):
+
+    # system with 1 atom
+    atoms = ase.Atoms("H", positions=np.array([[0, 0, 0]]), cell=np.array([[10, 0, 0], [0, 10, 0], [0, 0, 10]]), pbc=True)
+    calc = ORBCalculator(model=conservative_regressor, system_config=SystemConfig(6.0, 20))
+    calc.calculate(atoms)
+    assert calc.results["forces"].shape == (1, 3)
+    assert calc.results["stress"].shape == (1, 6)
+
+
+    atoms = ase.Atoms("H", positions=np.array([[0, 0, 0]]), cell=np.array([[10, 0, 0], [0, 10, 0], [0, 0, 10]]), pbc=True)
+    calc = ORBCalculator(model=graph_regressor, system_config=SystemConfig(6.0, 20))
+    calc.calculate(atoms)
+    assert calc.results["forces"].shape == (1, 3)
+    assert calc.results["stress"].shape == (1, 6)
