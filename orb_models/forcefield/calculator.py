@@ -111,7 +111,7 @@ class ORBCalculator(Calculator):
                 continue
             _property = "energy" if property == "free_energy" else property
 
-            if property == "stress":
+            if property == "stress" or property == "grad_stress":
                 # ASE expects the stress to be a 1D array of shape (6,),
                 # so we need to squeeze the extra dimension.
                 self.results[property] = to_numpy(out[_property].squeeze())
