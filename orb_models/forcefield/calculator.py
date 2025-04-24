@@ -110,7 +110,13 @@ class ORBCalculator(Calculator):
             if not model_has_direct_heads and property == "stress":
                 continue
             _property = "energy" if property == "free_energy" else property
-            self.results[property] = to_numpy(out[_property].squeeze())
+
+            if property == "stress" or property == "grad_stress":
+                # ASE expects the stress to be a 1D array of shape (6,),
+                # so we need to squeeze the extra dimension.
+                self.results[property] = to_numpy(out[_property].squeeze())
+            else:
+                self.results[property] = to_numpy(out[_property])
 
         if self.conservative:
             if self.model.forces_name in self.results:

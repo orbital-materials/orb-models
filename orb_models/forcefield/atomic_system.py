@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Iterable, List, Optional, Dict
+from typing import Iterable, List, Optional
 from copy import deepcopy
 
 import ase
