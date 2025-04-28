@@ -620,11 +620,19 @@ def compute_supercell_neighbors(
         n_workers (int, optional): The number of workers to use for KDTree construction. Defaults to 1.
     """
     if edge_method == "knn_brute_force":
-        distances = torch.cdist(central_cell_positions, supercell_positions)
+
+        # Always use float64 for distance calculations, because
+        # torch.cdist can be quite inprecise for float32 when use_mm_for_euclid_dist is True.
+        # This can lead to incorrect edge selection.
+        original_dtype = central_cell_positions.dtype
+        central_cell_positions_f64 = central_cell_positions.to(torch.float64)
+        supercell_positions_f64 = supercell_positions.to(torch.float64)
+        distances = torch.cdist(central_cell_positions_f64, supercell_positions_f64)
         k = min(max_num_neighbors + 1, len(supercell_positions))
         distances, supercell_receivers = torch.topk(
             distances, k=k, largest=False, sorted=True
         )
+        distances = distances.to(original_dtype)
         # remove self-edges and edges beyond radius
         within_radius = distances[:, 1:] < (radius + 1e-6)
         num_neighbors_per_sender = within_radius.sum(-1)
