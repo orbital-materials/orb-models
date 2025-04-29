@@ -5,7 +5,7 @@ description = "Foundation models for computational chemistry."
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{name = "Orbital Materials"}]
-license = {text = "Apache License, Version 2.0"}
+license = "Apache-2.0"
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
@@ -23,20 +23,9 @@ dependencies = [
     "tqdm>=4.66.5",
 ]
 
-[build-system]
-requires = ["poetry-core>=1.0.0", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]
-build-backend = "poetry_dynamic_versioning.backend"
-
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["orb_models*"]
-
-
-[tool.poetry-dynamic-versioning]
-enable = true
-
-[tool.poetry]
-version = "0.0.0"
 
 [project.urls]
 Homepage = "https://github.com/orbital-materials/orb-models"
