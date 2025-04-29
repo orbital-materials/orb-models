@@ -1,6 +1,7 @@
 """Featurization utilities for molecular models."""
 
 import typing
+import gc
 from typing import Optional, Tuple, Union, Literal, List
 
 import ase
@@ -657,6 +658,18 @@ def compute_supercell_neighbors(
         distances, supercell_receivers = knn.kneighbors(
             central_cell_positions, return_distance=True
         )
+
+        # Repeated use of cuML methods causes memory leaks:
+        # https://github.com/rapidsai/cuml/issues/5666
+        # https://github.com/rapidsai/cuml/issues/4068
+        # https://github.com/rapidsai/cuml/issues/4759
+        # To mitigate this, we de-reference the knn object after use, and force garbage collection.
+        # NOTE: we use gc.collect(0) to specifically collect short-lived objects.
+        # This is faster than calling gc.collect(), which defaults to gc.collect(2)
+        # that scans through all objects, including long-lived objects, which is very slow.
+        del knn
+        gc.collect(0)
+
         # Convert from CuPy arrays to PyTorch tensors
         distances = torch.as_tensor(distances)
         supercell_receivers = torch.as_tensor(supercell_receivers)
