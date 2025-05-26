@@ -12,6 +12,10 @@ from orb_models.forcefield.nn_util import build_mlp, get_cutoff, mlp_and_layer_n
 from orb_models.forcefield.embedding import AtomEmbedding, AtomEmbeddingBag
 from orb_models.forcefield.angular import UnitVector
 
+# Disable dynamo for older CUDA devices to avoid warning spam.
+if torch.cuda.is_available() and torch.cuda.get_device_capability(0) <= (7, 0):
+    torch._dynamo.config.disable = True
+
 _KEY = "feat"
 
 
