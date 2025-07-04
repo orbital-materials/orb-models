@@ -1,6 +1,7 @@
 """Featurization utilities for molecular models."""
 
 import typing
+import gc
 from typing import Optional, Tuple, Union, Literal, List
 
 import ase
@@ -23,7 +24,9 @@ TORCH_FLOAT_DTYPES = [
 ]
 ATOM_TYPE_K = 5
 
-EdgeCreationMethod = Literal["knn_brute_force", "knn_scipy"]
+EdgeCreationMethod = Literal[
+    "knn_brute_force", "knn_scipy", "knn_cuml_brute", "knn_cuml_rbc"
+]
 
 
 def get_device(
@@ -464,7 +467,7 @@ def compute_pbc_radius_graph(
     edge_method: Optional[EdgeCreationMethod] = None,
     n_workers: int = 1,
     device: Optional[Union[torch.device, str, int]] = None,
-    half_supercell: bool = False,
+    half_supercell: Optional[bool] = None,
     float_dtype: torch.dtype = torch.float32,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Computes graph edges within a max radius and num_neighbors, accounting for periodic-boundary conditions.
@@ -490,7 +493,7 @@ def compute_pbc_radius_graph(
             Defaults to None, in which case GPU is used if available.
         half_supercell (bool): Whether to use half the supercell for graph construction, and then symmetrize.
             This flag does not affect the resulting graph; it is purely an optimization that can double
-            throughput and half memory for very large cells (e.g. 10k+ atoms). For smaller systems, it can harm
+            throughput and half memory for very large cells (e.g. 5k+ atoms). For smaller systems, it can harm
             performance due to additional computation to enforce max_num_neighbors.
         float_dtype (torch.dtype): The dtype to use for floating point tensors in the graph construction.
     Returns:
@@ -507,6 +510,9 @@ def compute_pbc_radius_graph(
     cell = cell.to(dtype=float_dtype)
 
     natoms = positions.shape[0]
+    half_supercell = (
+        len(positions) >= 5_000 if half_supercell is None else half_supercell
+    )
     half_supercell = half_supercell and bool(torch.any(cell != 0.0))
     is_periodic = bool(torch.any(cell != 0.0).item() and torch.any(pbc).item())
 
@@ -615,11 +621,19 @@ def compute_supercell_neighbors(
         n_workers (int, optional): The number of workers to use for KDTree construction. Defaults to 1.
     """
     if edge_method == "knn_brute_force":
-        distances = torch.cdist(central_cell_positions, supercell_positions)
+
+        # Always use float64 for distance calculations, because
+        # torch.cdist can be quite inprecise for float32 when use_mm_for_euclid_dist is True.
+        # This can lead to incorrect edge selection.
+        original_dtype = central_cell_positions.dtype
+        central_cell_positions_f64 = central_cell_positions.to(torch.float64)
+        supercell_positions_f64 = supercell_positions.to(torch.float64)
+        distances = torch.cdist(central_cell_positions_f64, supercell_positions_f64)
         k = min(max_num_neighbors + 1, len(supercell_positions))
         distances, supercell_receivers = torch.topk(
             distances, k=k, largest=False, sorted=True
         )
+        distances = distances.to(original_dtype)
         # remove self-edges and edges beyond radius
         within_radius = distances[:, 1:] < (radius + 1e-6)
         num_neighbors_per_sender = within_radius.sum(-1)
@@ -644,6 +658,18 @@ def compute_supercell_neighbors(
         distances, supercell_receivers = knn.kneighbors(
             central_cell_positions, return_distance=True
         )
+
+        # Repeated use of cuML methods causes memory leaks:
+        # https://github.com/rapidsai/cuml/issues/5666
+        # https://github.com/rapidsai/cuml/issues/4068
+        # https://github.com/rapidsai/cuml/issues/4759
+        # To mitigate this, we de-reference the knn object after use, and force garbage collection.
+        # NOTE: we use gc.collect(0) to specifically collect short-lived objects.
+        # This is faster than calling gc.collect(), which defaults to gc.collect(2)
+        # that scans through all objects, including long-lived objects, which is very slow.
+        del knn
+        gc.collect(0)
+
         # Convert from CuPy arrays to PyTorch tensors
         distances = torch.as_tensor(distances)
         supercell_receivers = torch.as_tensor(supercell_receivers)

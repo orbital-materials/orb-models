@@ -89,17 +89,12 @@ class ORBCalculator(Calculator):
         """
         Calculator.calculate(self, atoms)
 
-        half_supercell = (
-            len(atoms.positions) >= 5_000
-            if self.half_supercell is None
-            else self.half_supercell
-        )
         batch = ase_atoms_to_atom_graphs(
             atoms,
             system_config=self.system_config,
             max_num_neighbors=self.max_num_neighbors,
             edge_method=self.edge_method,
-            half_supercell=half_supercell,
+            half_supercell=self.half_supercell,
             device=self.device,
         )
         batch = batch.to(self.device)  # type: ignore
@@ -115,7 +110,13 @@ class ORBCalculator(Calculator):
             if not model_has_direct_heads and property == "stress":
                 continue
             _property = "energy" if property == "free_energy" else property
-            self.results[property] = to_numpy(out[_property].squeeze())
+
+            if property == "stress" or property == "grad_stress":
+                # ASE expects the stress to be a 1D array of shape (6,),
+                # so we need to squeeze the extra dimension.
+                self.results[property] = to_numpy(out[_property].squeeze())
+            else:
+                self.results[property] = to_numpy(out[_property])
 
         if self.conservative:
             if self.model.forces_name in self.results:

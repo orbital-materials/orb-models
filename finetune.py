@@ -231,7 +231,7 @@ def run(args):
     device = utils.init_device(device_id=args.device_id)
     utils.seed_everything(args.random_seed)
 
-    # Setting this is 2x faster on A100 and H100 
+    # Setting this is 2x faster on A100 and H100
     # GPUs and does not appear to hurt training
     precision = "float32-high"
 
