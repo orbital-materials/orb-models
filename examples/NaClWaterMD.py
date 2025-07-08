@@ -13,8 +13,6 @@ def setup_device():
     """Set up and return the appropriate compute device."""
     if torch.cuda.is_available():
         device = torch.device("cuda")
-    elif torch.backends.mps.is_available():
-        device = torch.device("mps")
     else:
         device = torch.device("cpu")
     print(f"Using device: {device}")
@@ -52,7 +50,7 @@ def run_md_simulation(
     atoms.set_pbc([True] * 3)
 
     # Set the calculator
-    atoms.calc = ORBCalculator(*pretrained.orb_d3_v2(), device=device)
+    atoms.calc = ORBCalculator(pretrained.orb_v3_direct_20_omat(), device=device, compile=False)
 
     # Set the initial velocities
     MaxwellBoltzmannDistribution(atoms, temperature_K=temperature_K)
