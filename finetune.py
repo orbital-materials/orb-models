@@ -19,10 +19,9 @@ except ImportError:
 from wandb import wandb_run
 
 from orb_models import utils
-from orb_models.dataset.ase_sqlite_dataset import AseSqliteDataset
-from orb_models.forcefield import base, pretrained, atomic_system, property_definitions
 from orb_models.dataset import augmentations
-
+from orb_models.dataset.ase_sqlite_dataset import AseSqliteDataset
+from orb_models.forcefield import atomic_system, base, pretrained, property_definitions
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -237,10 +236,9 @@ def run(args):
 
     # Instantiate model
     base_model = args.base_model
-    model = getattr(pretrained, base_model)(device=device, precision=precision)
-
-    for param in model.parameters():
-        param.requires_grad = True
+    model = getattr(pretrained, base_model)(
+        device=device, precision=precision, train=True
+    )
 
     model_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logging.info(f"Model has {model_params} trainable parameters.")

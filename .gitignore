@@ -166,3 +166,5 @@ datasets/
 
 # VS Code
 .devcontainer/
+
+wandb/
