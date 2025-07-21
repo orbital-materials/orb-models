@@ -116,8 +116,8 @@ result = orbff.predict(graph, split=False)
 atoms = atomic_system.atom_graphs_to_ase_atoms(
     graph,
     energy=result["energy"],
-    forces=result["forces"],
-    stress=result["stress"]
+    forces=result["grad_forces"],
+    stress=result["grad_stress"]
 )
 ```
 
