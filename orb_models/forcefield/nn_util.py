@@ -197,10 +197,9 @@ class ScalarNormalizer(torch.nn.Module):
         return x * torch.sqrt(self.bn.running_var) + self.bn.running_mean  # type: ignore
 
 
-def get_cutoff(r: torch.Tensor) -> torch.Tensor:
-    """Get a hardcoded cutoff function for attention."""
+def get_cutoff(r: torch.Tensor, r_max: int = 6) -> torch.Tensor:
+    """Get a hardcoded cutoff function for attention. Default cutoff is 6 angstrom."""
     p = 4  # polynomial order
-    r_max = 6.0  # value (in Å) for which cutoff returns zero
     envelope = (
         1.0
         - ((p + 1.0) * (p + 2.0) / 2.0) * torch.pow(r / r_max, p)  # type: ignore
