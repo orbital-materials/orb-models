@@ -1,14 +1,11 @@
 """Integration tests to check compatibility of outputs with internal OM models."""
 
 import argparse
-
 import ase
 import torch
 import numpy as np
 
-from core.dataset import atomic_system as core_atomic_system
 from core.models import load
-
 from orb_models.forcefield import atomic_system, pretrained
 
 
@@ -21,8 +18,11 @@ def main(model: str, core_model: str):
         model: Name of the pretrained model to use.
         core_model: Path to the core model.
     """
-    original_orbff, _, sys_config = load.load_model(core_model, precision="float32-high")
-
+    original_orbff, _, atoms_adapter = load.load_model(core_model, precision="float32-high")
+    sys_config = atomic_system.SystemConfig(
+        radius=atoms_adapter.radius,
+        max_num_neighbors=atoms_adapter.max_num_neighbors
+    )
     atoms = ase.Atoms(
         "H2O",
         positions=[[0, 0, 0], [0, 0, 1.1], [0, 1.1, 0]],
@@ -30,8 +30,8 @@ def main(model: str, core_model: str):
         pbc=True,
     )
 
-    graph_orig = core_atomic_system.ase_atoms_to_atom_graphs(atoms, sys_config)
-    graph = atomic_system.ase_atoms_to_atom_graphs(atoms, sys_config)
+    graph_orig = atoms_adapter.from_ase_atoms(atoms)
+    graph = atomic_system.ase_atoms_to_atom_graphs(atoms=atoms, system_config=sys_config)
 
     pred_orig = original_orbff.predict(graph_orig)
 

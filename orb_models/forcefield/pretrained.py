@@ -488,6 +488,70 @@ def orb_v3_direct_inf_mpa(
     return model
 
 
+def separate_d3_direct_3layer(
+    weights_path: str = "s3://orbitalmaterials-public-models/forcefields/separate-d3-3layer.ckpt",  # noqa: E501
+    device: Union[torch.device, str, None] = None,
+    precision: str = "float32-high",
+    compile: Optional[bool] = None,
+    train: bool = False,
+) -> DirectForcefieldRegressor:
+    """Load a separate D3 direct model."""
+    system_config = SystemConfig(radius=6.0, max_num_neighbors=120)
+    model = orb_v3_direct_architecture(num_message_passing_steps=3, device=device, system_config=system_config)
+    model = load_model(
+        model, weights_path, device, precision=precision, compile=compile, train=train
+    )
+    return model
+
+
+def separate_d3_direct_5layer(
+    weights_path: str = "s3://orbitalmaterials-public-models/forcefields/separate-d3-5layer.ckpt",  # noqa: E501
+    device: Union[torch.device, str, None] = None,
+    precision: str = "float32-high",
+    compile: Optional[bool] = None,
+    train: bool = False,
+) -> DirectForcefieldRegressor:
+    """Load a separate D3 direct model."""
+    system_config = SystemConfig(radius=6.0, max_num_neighbors=120)
+    model = orb_v3_direct_architecture(device=device, system_config=system_config)
+    model = load_model(
+        model, weights_path, device, precision=precision, compile=compile, train=train
+    )
+    return model
+
+
+def separate_d4_direct_3layer(
+    weights_path: str = "s3://orbitalmaterials-public-models/forcefields/separate-d4-3layer.ckpt",  # noqa: E501
+    device: Union[torch.device, str, None] = None,
+    precision: str = "float32-high",
+    compile: Optional[bool] = None,
+    train: bool = False,
+) -> DirectForcefieldRegressor:
+    """Load a separate D4 direct model."""
+    system_config = SystemConfig(radius=6.0, max_num_neighbors=120)
+    model = orb_v3_direct_architecture(num_message_passing_steps=3, device=device, system_config=system_config)
+    model = load_model(
+        model, weights_path, device, precision=precision, compile=compile, train=train
+    )
+    return model
+
+
+def separate_d4_direct_5layer(
+    weights_path: str = "s3://orbitalmaterials-public-models/forcefields/separate-d4-5layer.ckpt",  # noqa: E501
+    device: Union[torch.device, str, None] = None,
+    precision: str = "float32-high",
+    compile: Optional[bool] = None,
+    train: bool = False,
+) -> DirectForcefieldRegressor:
+    """Load a separate D4 direct model."""
+    system_config = SystemConfig(radius=6.0, max_num_neighbors=120)
+    model = orb_v3_direct_architecture(device=device, system_config=system_config)
+    model = load_model(
+        model, weights_path, device, precision=precision, compile=compile, train=train
+    )
+    return model
+
+
 def orb_v2(
     weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-v2-20241011.ckpt",  # noqa: E501
     device: Union[torch.device, str, None] = None,
@@ -635,11 +699,16 @@ ORB_PRETRAINED_MODELS = {
     "orb-v3-conservative-inf-omat": orb_v3_conservative_inf_omat,
     "orb-v3-direct-20-omat": orb_v3_direct_20_omat,
     "orb-v3-direct-inf-omat": orb_v3_direct_inf_omat,
-    # orb-v3 mptraj + alexandria models
+    # less performant orb-v3 mptraj + alexandria models
     "orb-v3-conservative-20-mpa": orb_v3_conservative_20_mpa,
     "orb-v3-conservative-inf-mpa": orb_v3_conservative_inf_mpa,
     "orb-v3-direct-20-mpa": orb_v3_direct_20_mpa,
     "orb-v3-direct-inf-mpa": orb_v3_direct_inf_mpa,
+    # separate d3 and d4 models
+    "separate-d3-3layer": separate_d3_direct_3layer,
+    "separate-d3-5layer": separate_d3_direct_5layer,
+    "separate-d4-3layer": separate_d4_direct_3layer,
+    "separate-d4-5layer": separate_d4_direct_5layer,
     # less performant orb-v2 models
     "orb-v2": orb_v2,
     "orb-d3-v2": orb_d3_v2,
