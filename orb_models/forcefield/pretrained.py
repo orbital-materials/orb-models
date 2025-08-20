@@ -23,6 +23,7 @@ from orb_models.forcefield.forcefield_heads import (
 from orb_models.forcefield.gns import MoleculeGNS
 from orb_models.forcefield.rbf import BesselBasis
 from orb_models.utils import set_torch_precision
+from orb_models.forcefield.nn_util import ChargeSpinConditioner
 
 
 def _should_compile(
@@ -174,10 +175,16 @@ def orb_v3_conservative_architecture(
     head_mlp_depth: int = 1,
     num_message_passing_steps: int = 5,
     activation: str = "silu",
+    has_charge_spin_cond: bool = False,
     device: Optional[Union[torch.device, str]] = None,
     system_config: Optional[SystemConfig] = None,
 ) -> ConservativeForcefieldRegressor:
     """The orb-v3 conservative architecture."""
+    if has_charge_spin_cond:
+        conditioner = ChargeSpinConditioner(latent_dim)
+    else:
+        conditioner = None
+
     model = ConservativeForcefieldRegressor(
         heads={
             "energy": EnergyHead(
@@ -216,6 +223,7 @@ def orb_v3_conservative_architecture(
             },
             node_feature_names=["feat"],
             edge_feature_names=["feat"],
+            conditioner=conditioner,
             activation=activation,
             mlp_norm="rms_norm",
         ),
@@ -240,10 +248,16 @@ def orb_v3_direct_architecture(
     head_mlp_depth: int = 1,
     num_message_passing_steps: int = 5,
     activation: str = "silu",
+    has_charge_spin_cond: bool = False,
     device: Optional[torch.device] = None,
     system_config: Optional[SystemConfig] = None,
 ) -> DirectForcefieldRegressor:
     """The orb-v3 architecture, defaulting to a direct model."""
+    if has_charge_spin_cond:
+        conditioner = ChargeSpinConditioner(latent_dim)
+    else:
+        conditioner = None
+
     model = DirectForcefieldRegressor(
         heads={
             "energy": EnergyHead(
@@ -297,6 +311,7 @@ def orb_v3_direct_architecture(
             },
             node_feature_names=["feat"],
             edge_feature_names=["feat"],
+            conditioner=conditioner,
             activation=activation,
             mlp_norm="rms_norm",
         ),
@@ -308,6 +323,53 @@ def orb_v3_direct_architecture(
         model.cuda(device)
     else:
         model = model.cpu()
+
+    return model
+
+def orb_v3_conservative_omol(
+    weights_path: str = "",  # noqa: E501
+    device: Union[torch.device, str, None] = None,
+    precision: str = "float32-high",
+    compile: Optional[bool] = None,
+    train: bool = False,
+) -> ConservativeForcefieldRegressor:
+    """Load ORB v3 Conservative with effectively unlimited neighbors, trained on OMol25.
+
+    'Effectively unlimited' means that the model will use all neighbors within 6A
+    the cutoff radius. Empirically, for the training distribution, 120 is sufficient.
+    """
+    if compile is None and train:
+        compile = False
+    assert not (
+        train and _should_compile(device, compile)
+    ), "Cannot compile a conservative model in training mode."
+
+    system_config = SystemConfig(radius=6.0, max_num_neighbors=120)
+    model = orb_v3_conservative_architecture(device=device, system_config=system_config, has_charge_spin_cond=True)
+    model = load_model(
+        model, weights_path, device, precision=precision, compile=compile, train=train
+    )
+
+    return model
+
+
+def orb_v3_direct_omol(
+    weights_path: str = "",  # noqa: E501
+    device: Union[torch.device, str, None] = None,
+    precision: str = "float32-high",
+    compile: Optional[bool] = None,
+    train: bool = False,
+) -> DirectForcefieldRegressor:
+    """Load ORB v3 Direct with effectively unlimited neighbors, trained on OMol25.
+
+    'Effectively unlimited' means that the model will use all neighbors within 6A
+    the cutoff radius. Empirically, for the training distribution, 120 is sufficient.
+    """
+    system_config = SystemConfig(radius=6.0, max_num_neighbors=120)
+    model = orb_v3_direct_architecture(device=device, system_config=system_config, has_charge_spin_cond=True)
+    model = load_model(
+        model, weights_path, device, precision=precision, compile=compile, train=train
+    )
 
     return model
 
@@ -486,6 +548,7 @@ def orb_v3_direct_inf_mpa(
     )
 
     return model
+
 
 
 def separate_d3_direct_3layer(

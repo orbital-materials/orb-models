@@ -2,8 +2,8 @@
 
 from collections import OrderedDict
 from typing import Callable, List, Optional, Literal, Dict, Any, Tuple, Union
-
 import torch
+import typing
 from torch import nn
 from torch.nn import functional as F
 
@@ -13,7 +13,7 @@ from orb_models.forcefield.embedding import AtomEmbedding, AtomEmbeddingBag
 from orb_models.forcefield.angular import UnitVector
 
 _KEY = "feat"
-
+ConditioningType = Literal["additive", "concatenative", "none"]
 
 class Encoder(nn.Module):
     r"""Graph network encoder. Encode nodes and edges states to an MLP.
@@ -97,7 +97,7 @@ class AttentionInteractionNetwork(nn.Module):
         num_mlp_layers: int,
         mlp_hidden_dim: int,
         attention_gate: Literal["sigmoid", "softmax"] = "sigmoid",
-        conditioning: bool = False,
+        conditioning: Tuple[ConditioningType, ConditioningType] = ("none", "none"),
         distance_cutoff: bool = False,
         checkpoint: Optional[str] = None,
         activation: str = "ssp",
@@ -114,7 +114,8 @@ class AttentionInteractionNetwork(nn.Module):
             num_mlp_layers (int): Number of MLP layers.
             mlp_hidden_dim (int): MLP hidden dimension size.
             attention_gate (Literal["sigmoid", "softmax"]): Which attention gate to use.
-            conditioning (bool): Whether or not to use conditioning_encoder.
+            conditioning (Tuple[ConditioningType, ConditioningType]):
+                What type of conditioning to use for (nodes, edges).
             distance_cutoff (bool): Whether or not to use a distance cutoff for attention
                 to smooth the distribution.
             checkpoint (bool): Whether or not to use recomputation checkpoint.
@@ -123,8 +124,20 @@ class AttentionInteractionNetwork(nn.Module):
             mlp_norm (str): Normalization layer to use in the MLP.
         """
         super(AttentionInteractionNetwork, self).__init__()
+        self._node_conditioning, self._edge_conditioning = conditioning
+        assert self._node_conditioning in typing.get_args(ConditioningType)
+        assert self._edge_conditioning in typing.get_args(ConditioningType)
+        
+        # Get the dimension of the conditioning features for the MLPs
+        node_mlp_cond_dim = (
+            latent_dim if self._node_conditioning == "concatenative" else 0
+        )
+        edge_mlp_cond_dim = (
+            latent_dim if self._edge_conditioning == "concatenative" else 0
+        )
+
         self._node_mlp = mlp_and_layer_norm(
-            latent_dim * 3,
+            latent_dim * 3 + node_mlp_cond_dim,
             latent_dim,
             mlp_hidden_dim,
             num_mlp_layers,
@@ -133,7 +146,7 @@ class AttentionInteractionNetwork(nn.Module):
             mlp_norm=mlp_norm,
         )
         self._edge_mlp = mlp_and_layer_norm(
-            latent_dim * 3,
+            latent_dim * 3 + edge_mlp_cond_dim + 2 * node_mlp_cond_dim,
             latent_dim,
             mlp_hidden_dim,
             num_mlp_layers,
@@ -142,8 +155,8 @@ class AttentionInteractionNetwork(nn.Module):
             mlp_norm=mlp_norm,
         )
 
-        self._receive_attn = nn.Linear(latent_dim, 1)
-        self._send_attn = nn.Linear(latent_dim, 1)
+        self._receive_attn = nn.Linear(latent_dim + edge_mlp_cond_dim, 1)
+        self._send_attn = nn.Linear(latent_dim + edge_mlp_cond_dim, 1)
 
         if conditioning:
             self._cond_node_proj = nn.Linear(latent_dim, latent_dim)
@@ -176,13 +189,21 @@ class AttentionInteractionNetwork(nn.Module):
         Returns:
             Tuple of (updated_nodes, updated_edges)
         """
-        if cond_nodes is not None:
-            nodes = nodes + self._cond_node_proj(cond_nodes)
-        if cond_edges is not None:
-            edges = edges + self._cond_edge_proj(cond_edges)
+        # Condition on nodes
+        if self._node_conditioning == "additive":
+            if cond_nodes is not None:
+                nodes = nodes + self._cond_node_proj(cond_nodes)
+        elif self._node_conditioning == "concatenative":
+            if cond_nodes is not None:
+                nodes = torch.cat([nodes, self._cond_node_proj(cond_nodes)], dim=-1)
 
-        sent_attributes = nodes[senders]
-        received_attributes = nodes[receivers]
+        # Condition on edges
+        if self._edge_conditioning == "additive":
+            if cond_edges is not None:
+                edges = edges + self._cond_edge_proj(cond_edges)
+        elif self._edge_conditioning == "concatenative":
+            if cond_edges is not None:
+                edges = torch.cat([edges, self._cond_edge_proj(cond_edges)], dim=-1)
 
         if self._attention_gate == "softmax":
             num_segments = nodes.shape[0]
@@ -206,6 +227,8 @@ class AttentionInteractionNetwork(nn.Module):
             receive_attn = receive_attn * cutoff
             send_attn = send_attn * cutoff
 
+        sent_attributes = nodes[senders]
+        received_attributes = nodes[receivers]
         edge_features = torch.cat([edges, sent_attributes, received_attributes], dim=1)
         updated_edges = self._edge_mlp(edge_features)
 
@@ -218,6 +241,12 @@ class AttentionInteractionNetwork(nn.Module):
 
         node_features = torch.cat([nodes, received_attributes, sent_attributes], dim=1)
         updated_nodes = self._node_mlp(node_features)
+
+        # Remove the conditioning features, if using concatenation
+        if self._node_conditioning == "concatenative":
+            nodes = nodes[:, : self.latent_dim]
+        if self._edge_conditioning == "concatenative":
+            edges = edges[:, : self.latent_dim]
 
         nodes = nodes + updated_nodes
         edges = edges + updated_edges
@@ -282,6 +311,7 @@ class MoleculeGNS(nn.Module):
         "interactions",
         "num_node_in_features",
         "num_edge_in_features",
+        "conditioning",
     ]
 
     def __init__(
@@ -300,6 +330,8 @@ class MoleculeGNS(nn.Module):
         extra_embed_dims: Union[int, Tuple[int, int]] = 0,
         node_feature_names: Optional[List[str]] = None,
         edge_feature_names: Optional[List[str]] = None,
+        conditioner: Optional[Callable] = None,
+        conditioning_type: ConditioningType = "additive",
         checkpoint: Optional[str] = None,
         activation="ssp",
         mlp_norm: str = "layer_norm",
@@ -335,6 +367,10 @@ class MoleculeGNS(nn.Module):
             edge_feature_names (List[str]): Which tensors from batch.edge_features to
                 concatenate to form the initial edge latents. Note: These are "extra"
                 features - we assume the base edge vector features are already included.
+            conditioner (Optional[Callable]): A conditioner module that takes in a batch and returns
+                conditioning features for nodes and edges. The conditioner should have attributes
+                `emits_node_embs` and `emits_edge_embs` that indicate what it returns.
+            conditioning_type (ConditioningType): 'Additive' / 'Concatenative' / 'None'
             checkpoint (bool): Whether or not to use checkpointing.
             activation (str): Activation function to use.
             mlp_norm (str): Normalization layer to use in the MLP.
@@ -349,6 +385,7 @@ class MoleculeGNS(nn.Module):
 
         self.node_feature_names = node_feature_names or []
         self.edge_feature_names = edge_feature_names or []
+        self.num_message_passing_steps = num_message_passing_steps
 
         # Edge embedding
         self.outer_product_with_cutoff = outer_product_with_cutoff
@@ -371,7 +408,6 @@ class MoleculeGNS(nn.Module):
         if self.use_embedding:
             self.node_embed_size = latent_dim
             if self.expects_atom_type_embedding:
-                # Use embedding bag for atom type diffusion
                 self.atom_emb = AtomEmbeddingBag(self.node_embed_size, 118)
             else:
                 self.atom_emb = AtomEmbedding(self.node_embed_size, 118)  # type: ignore
@@ -380,6 +416,16 @@ class MoleculeGNS(nn.Module):
         if isinstance(extra_embed_dims, int):
             extra_embed_dims = (extra_embed_dims, extra_embed_dims)  # type: ignore
 
+        # Conditioning
+        if conditioner is not None:
+            node_conditioning = conditioning_type if conditioner.emits_node_embs else "none"  # type: ignore
+            edge_conditioning = conditioning_type if conditioner.emits_edge_embs else "none"  # type: ignore
+            self.conditioner: Optional[Callable] = conditioner
+        else:
+            node_conditioning, edge_conditioning = "none", "none"
+            self.conditioner = None
+
+        # Modules
         self._encoder = Encoder(
             num_node_in_features=self.node_embed_size + extra_embed_dims[0],
             num_edge_in_features=self.edge_embed_size + extra_embed_dims[1],
@@ -390,17 +436,14 @@ class MoleculeGNS(nn.Module):
             activation=activation,
             mlp_norm=mlp_norm,
         )
-
-        self.num_message_passing_steps = num_message_passing_steps
-        if interaction_params is None:
-            interaction_params = {}
         self.gnn_stacks = nn.ModuleList(
             [
                 AttentionInteractionNetwork(
                     latent_dim=latent_dim,
                     num_mlp_layers=num_mlp_layers,
                     mlp_hidden_dim=mlp_hidden_dim,
-                    **interaction_params,
+                    conditioning=(node_conditioning, edge_conditioning),
+                    **(interaction_params or {}),
                     checkpoint=checkpoint,
                     activation=activation,
                     mlp_norm=mlp_norm,
@@ -408,7 +451,6 @@ class MoleculeGNS(nn.Module):
                 for _ in range(self.num_message_passing_steps)
             ]
         )
-
         self._decoder = Decoder(
             num_node_in=latent_dim,
             num_node_out=num_node_out_features,
@@ -430,13 +472,13 @@ class MoleculeGNS(nn.Module):
         # Featurize inputs
         edge_features = self.featurize_edges(batch)
         node_features = self.featurize_nodes(batch)
+        if self.conditioner is not None:
+            cond_nodes, cond_edges = self.conditioner(batch)
+        else:
+            cond_nodes, cond_edges = None, None
 
         # Encode
         nodes, edges = self._encoder(node_features, edge_features)
-
-        # Get conditioning if needed
-        cond_nodes = None
-        cond_edges = None
 
         # Process through interaction networks
         cutoff = get_cutoff(batch.edge_features["vectors"].norm(dim=-1))

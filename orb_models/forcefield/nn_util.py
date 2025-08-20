@@ -10,6 +10,153 @@ from torch import nn
 from torch.utils.checkpoint import checkpoint_sequential
 
 
+class ChargeSpinEmbedding(nn.Module):
+    """Embedding module for charge and spin values with configurable types.
+
+    (Adapted from fairchem)
+
+    Different embedding strategies:
+    - sin_emb: Sinusoidal positional embeddings that encode continuous values
+               using learned frequency components. Good for smooth interpolation
+               and capturing periodic relationships in charge/spin values.
+               pos_emb in older models now got renamed to sin_emb.
+    - lin_emb: Linear transformation that learns a direct mapping from scalar
+               values to embeddings. Simple and effective for continuous values.
+    - rand_emb: Discrete lookup table with separate embeddings for each integer
+               value. Good for categorical-like behavior and fixed value ranges.
+
+    Args:
+        num_channels: total latent dim shared between charge and spin
+        embedding_target: "charge" or "spin"
+        embedding_type: "sin_emb", "lin_emb", or "rand_emb"
+        scale: scaling factor for positional weights
+        requires_grad: whether weights are trainable
+    """
+
+    def __init__(
+        self,
+        num_channels: int,
+        embedding_target: str = "charge",
+        embedding_type: str = "sin_emb",
+        scale: float = 1.0,
+        requires_grad: bool = True,
+    ):
+        super().__init__()
+        assert embedding_target in ["charge", "spin"]
+        assert embedding_type in ["sin_emb", "pos_emb", "lin_emb", "rand_emb"]
+
+        self.embedding_target = embedding_target
+        self.embedding_type = embedding_type
+        dim = num_channels // 2  # half for charge, half for spin
+
+        if self.embedding_type == "sin_emb" or self.embedding_type == "pos_emb":
+            self.W = nn.Parameter(
+                torch.randn(dim // 2) * scale, requires_grad=requires_grad
+            )
+
+        elif embedding_type == "lin_emb":
+            self.lin_emb = nn.Linear(1, dim)
+            if not requires_grad:
+                for p in self.lin_emb.parameters():
+                    p.requires_grad = False
+
+        elif embedding_type == "rand_emb":
+            if embedding_target == "charge":
+                self.min_val, self.max_val = -100, 100
+                self.offset = 100
+                self.rand_emb = nn.Embedding(201, dim)  # -100 → 100
+            else:  # spin
+                self.min_val, self.max_val = 0, 100
+                self.offset = 0
+                self.rand_emb = nn.Embedding(101, dim)  # 0 → 100
+
+            if not requires_grad:
+                for p in self.rand_emb.parameters():
+                    p.requires_grad = False
+
+    def forward(self, values: torch.Tensor) -> torch.Tensor:
+        """Forward pass to embed charge or spin values."""
+        assert len(values.shape) == 1, "Expected 1D tensor"
+        values = values.float()
+
+        if self.embedding_type == "sin_emb" or self.embedding_type == "pos_emb":
+            x_proj = values.unsqueeze(-1) * self.W.unsqueeze(0) * 2 * torch.pi
+            emb = torch.cat([torch.sin(x_proj), torch.cos(x_proj)], dim=-1)
+            if self.embedding_target == "spin":
+                emb[values == 0] = 0
+            return emb
+
+        elif self.embedding_type == "lin_emb":
+            values_ = values.clone()
+            if self.embedding_target == "spin":
+                values_[values_ == 0] = -100  # optional null spin handling
+            return self.lin_emb(values_.unsqueeze(-1))
+
+        elif self.embedding_type == "rand_emb":
+            values_rounded = values.round().long()
+            values_clamped = values_rounded.clamp(min=self.min_val, max=self.max_val)
+            indices = values_clamped + self.offset
+            return self.rand_emb(indices)
+
+        raise ValueError(f"Unsupported embedding type: {self.embedding_type}")
+
+
+class ChargeSpinConditioner(nn.Module):
+    """Handles charge and spin conditioning with multiple embedding types.
+
+    Args:
+        latent_dim: total latent dimension (split equally between charge and spin)
+        embedding_type: "sin_emb", "lin_emb", or "rand_emb"
+        emits_node_embs: if True, return node-wise embeddings
+        emits_edge_embs: if True, return edge-wise embeddings
+    """
+
+    def __init__(
+        self,
+        latent_dim: int,
+        embedding_type: str = "sin_emb",
+        emits_node_embs: bool = True,
+        emits_edge_embs: bool = False,
+    ):
+        super().__init__()
+        self.charge_embedding = ChargeSpinEmbedding(
+            num_channels=latent_dim,
+            embedding_target="charge",
+            embedding_type=embedding_type,
+            requires_grad=True,
+        )
+        self.spin_embedding = ChargeSpinEmbedding(
+            num_channels=latent_dim,
+            embedding_target="spin",
+            embedding_type=embedding_type,
+            requires_grad=True,
+        )
+        self.emits_node_embs = emits_node_embs
+        self.emits_edge_embs = emits_edge_embs
+
+    def forward(self, batch) -> tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """Creates charge and spin embeddings for nodes and edges."""
+        assert (
+            batch.system_features is not None
+            and "total_charge" in batch.system_features
+            and "total_spin" in batch.system_features
+        ), "Batch is missing required system_features."
+
+        charges = batch.system_features["total_charge"]
+        spins = batch.system_features["total_spin"]
+
+        charge_emb = self.charge_embedding(charges)
+        spin_emb = self.spin_embedding(spins)
+        combined_emb = torch.cat([charge_emb, spin_emb], dim=-1)
+
+        node_embs, edge_embs = None, None
+        if self.emits_node_embs:
+            node_embs = combined_emb.repeat_interleave(batch.n_node, dim=0)
+        if self.emits_edge_embs:
+            edge_embs = combined_emb.repeat_interleave(batch.n_edge, dim=0)
+
+        return node_embs, edge_embs
+
 class SSP(nn.Softplus):
     """Shifted Softplus activation function.
 
