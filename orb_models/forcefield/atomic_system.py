@@ -190,6 +190,10 @@ def ase_atoms_to_atom_graphs(
         "pbc": pbc,
         "lattice": lattice,
     }
+    if "charge" in atoms.info:
+        assert "spin" in atoms.info, "Charge and spin must be present together"
+        graph_feats["total_charge"] = atoms.info["charge"]
+        graph_feats["total_spin"] = atoms.info["spin"]
 
     # Add a batch dimension to non-scalar graph features/targets
     graph_feats = {

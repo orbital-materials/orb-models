@@ -29,6 +29,8 @@ def main(model: str, core_model: str):
         cell=np.eye(3) * 2,
         pbc=True,
     )
+    atoms.info["charge"] = 1
+    atoms.info["spin"] = 0
 
     graph_orig = atoms_adapter.from_ase_atoms(atoms)
     graph = atomic_system.ase_atoms_to_atom_graphs(atoms=atoms, system_config=sys_config)
@@ -49,15 +51,21 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model",
         type=str,
-        default="orb-v1",
+        default="orb-v3-conservative-omol",
         help="Name of the pretrained model to use",
     )
     parser.add_argument(
         "--core_model",
         type=str,
-        default="orbitalmaterials/model-registry/orbFF:v1",
+        default="orbital-materials/wandb-registry-model/orb-v3-conservative-120-omol:v1",
         help="Path to the core model",
     )
     args = parser.parse_args()
 
     main(args.model, args.core_model)
+
+
+# TODO (BEN):
+# - check calculator as well as model
+# - stress must be optional everywhere in the codebase now
+# - update readme

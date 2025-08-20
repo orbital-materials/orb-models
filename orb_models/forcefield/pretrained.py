@@ -327,7 +327,7 @@ def orb_v3_direct_architecture(
     return model
 
 def orb_v3_conservative_omol(
-    weights_path: str = "",  # noqa: E501
+    weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-v3-conservative-omol-20250820.ckpt",  # noqa: E501
     device: Union[torch.device, str, None] = None,
     precision: str = "float32-high",
     compile: Optional[bool] = None,
@@ -354,7 +354,7 @@ def orb_v3_conservative_omol(
 
 
 def orb_v3_direct_omol(
-    weights_path: str = "",  # noqa: E501
+    weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-v3-direct-omol-20250820.ckpt",  # noqa: E501
     device: Union[torch.device, str, None] = None,
     precision: str = "float32-high",
     compile: Optional[bool] = None,
@@ -552,7 +552,7 @@ def orb_v3_direct_inf_mpa(
 
 
 def separate_d3_direct_3layer(
-    weights_path: str = "s3://orbitalmaterials-public-models/forcefields/separate-d3-3layer.ckpt",  # noqa: E501
+    weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/separate-d3-3layer.ckpt",  # noqa: E501
     device: Union[torch.device, str, None] = None,
     precision: str = "float32-high",
     compile: Optional[bool] = None,
@@ -568,7 +568,7 @@ def separate_d3_direct_3layer(
 
 
 def separate_d3_direct_5layer(
-    weights_path: str = "s3://orbitalmaterials-public-models/forcefields/separate-d3-5layer.ckpt",  # noqa: E501
+    weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/separate-d3-5layer.ckpt",  # noqa: E501
     device: Union[torch.device, str, None] = None,
     precision: str = "float32-high",
     compile: Optional[bool] = None,
@@ -584,7 +584,7 @@ def separate_d3_direct_5layer(
 
 
 def separate_d4_direct_3layer(
-    weights_path: str = "s3://orbitalmaterials-public-models/forcefields/separate-d4-3layer.ckpt",  # noqa: E501
+    weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/separate-d4-3layer.ckpt",  # noqa: E501
     device: Union[torch.device, str, None] = None,
     precision: str = "float32-high",
     compile: Optional[bool] = None,
@@ -600,7 +600,7 @@ def separate_d4_direct_3layer(
 
 
 def separate_d4_direct_5layer(
-    weights_path: str = "s3://orbitalmaterials-public-models/forcefields/separate-d4-5layer.ckpt",  # noqa: E501
+    weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/separate-d4-5layer.ckpt",  # noqa: E501
     device: Union[torch.device, str, None] = None,
     precision: str = "float32-high",
     compile: Optional[bool] = None,
@@ -757,6 +757,9 @@ def orb_v1_mptraj_only(
 
 
 ORB_PRETRAINED_MODELS = {
+    # orb-v3 omol models
+    "orb-v3-conservative-omol": orb_v3_conservative_omol,
+    "orb-v3-direct-omol": orb_v3_direct_omol,
     # most performant orb-v3 omat models
     "orb-v3-conservative-20-omat": orb_v3_conservative_20_omat,
     "orb-v3-conservative-inf-omat": orb_v3_conservative_inf_omat,

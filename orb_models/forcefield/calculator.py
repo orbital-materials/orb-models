@@ -7,6 +7,7 @@ from orb_models.forcefield.atomic_system import SystemConfig, ase_atoms_to_atom_
 from orb_models.forcefield.direct_regressor import DirectForcefieldRegressor
 from orb_models.forcefield.conservative_regressor import ConservativeForcefieldRegressor
 from orb_models.forcefield.featurization_utilities import EdgeCreationMethod
+from orb_models.forcefield.nn_util import ChargeSpinConditioner
 from orb_models.utils import to_numpy
 
 
@@ -71,10 +72,17 @@ class ORBCalculator(Calculator):
             raise ValueError(
                 "Conservative mode requested, but model is not a ConservativeForcefieldRegressor."
             )
+        
+        conditioner = model.model.conditioner
+        self.expects_charge_and_spin = (
+            (conditioner is not None) and isinstance(conditioner, ChargeSpinConditioner)
+        )
 
         self.implemented_properties = model.properties  # type: ignore
         if self.conservative:
-            self.implemented_properties.extend(["forces", "stress"])
+            # for BC, add if model doesn't have has_stress attribute
+            if not hasattr(self.model, "has_stress") or self.model.has_stress:
+                self.implemented_properties.append("stress")
 
     def calculate(self, atoms=None, properties=None, system_changes=all_changes):
         """Calculate properties.
@@ -88,6 +96,10 @@ class ORBCalculator(Calculator):
             None. Results are stored in self.results.
         """
         Calculator.calculate(self, atoms)
+
+        if self.expects_charge_and_spin:
+            if ("charge" not in atoms.info) or ("spin" not in atoms.info):
+                raise ValueError("atoms.info must contain both 'charge' and 'spin'")
 
         batch = ase_atoms_to_atom_graphs(
             atoms,
