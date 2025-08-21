@@ -176,6 +176,7 @@ def orb_v3_conservative_architecture(
     num_message_passing_steps: int = 5,
     activation: str = "silu",
     has_charge_spin_cond: bool = False,
+    has_stress: bool = True,
     device: Optional[Union[torch.device, str]] = None,
     system_config: Optional[SystemConfig] = None,
 ) -> ConservativeForcefieldRegressor:
@@ -230,6 +231,7 @@ def orb_v3_conservative_architecture(
         ensure_grad_loss_weights=False,
         pair_repulsion=True,
         system_config=system_config,
+        has_stress=has_stress,
     )
     device = get_device(device)
     if device is not None and device != torch.device("cpu"):
@@ -249,6 +251,7 @@ def orb_v3_direct_architecture(
     num_message_passing_steps: int = 5,
     activation: str = "silu",
     has_charge_spin_cond: bool = False,
+    has_stress: bool = True,
     device: Optional[torch.device] = None,
     system_config: Optional[SystemConfig] = None,
 ) -> DirectForcefieldRegressor:
@@ -258,37 +261,40 @@ def orb_v3_direct_architecture(
     else:
         conditioner = None
 
-    model = DirectForcefieldRegressor(
-        heads={
-            "energy": EnergyHead(
-                latent_dim=latent_dim,
-                num_mlp_layers=head_mlp_depth,
-                mlp_hidden_dim=head_mlp_hidden_dim,
-                predict_atom_avg=True,
-                activation=activation,
-            ),
-            "forces": ForceHead(
-                latent_dim=latent_dim,
-                num_mlp_layers=head_mlp_depth,
-                mlp_hidden_dim=head_mlp_hidden_dim,
-                remove_mean=True,
-                remove_torque_for_nonpbc_systems=True,
-                activation=activation,
-            ),
-            "stress": StressHead(
+    heads = {
+        "energy": EnergyHead(
+            latent_dim=latent_dim,
+            num_mlp_layers=head_mlp_depth,
+            mlp_hidden_dim=head_mlp_hidden_dim,
+            predict_atom_avg=True,
+            activation=activation,
+        ),
+        "forces": ForceHead(
+            latent_dim=latent_dim,
+            num_mlp_layers=head_mlp_depth,
+            mlp_hidden_dim=head_mlp_hidden_dim,
+            remove_mean=True,
+            remove_torque_for_nonpbc_systems=True,
+            activation=activation,
+        ),
+        "confidence": ConfidenceHead(
+            latent_dim=latent_dim,
+            num_mlp_layers=head_mlp_depth,
+            mlp_hidden_dim=head_mlp_hidden_dim,
+            activation=activation,
+        ),
+    }
+    if has_stress:
+        heads["stress"] = StressHead(
                 latent_dim=latent_dim,
                 num_mlp_layers=head_mlp_depth,
                 mlp_hidden_dim=head_mlp_hidden_dim,
                 node_aggregation="mean",
                 activation=activation,
-            ),
-            "confidence": ConfidenceHead(
-                latent_dim=latent_dim,
-                num_mlp_layers=head_mlp_depth,
-                mlp_hidden_dim=head_mlp_hidden_dim,
-                activation=activation,
-            ),
-        },
+            )
+
+    model = DirectForcefieldRegressor(
+        heads=heads,
         model=MoleculeGNS(
             latent_dim=latent_dim,
             num_message_passing_steps=num_message_passing_steps,
@@ -345,7 +351,12 @@ def orb_v3_conservative_omol(
     ), "Cannot compile a conservative model in training mode."
 
     system_config = SystemConfig(radius=6.0, max_num_neighbors=120)
-    model = orb_v3_conservative_architecture(device=device, system_config=system_config, has_charge_spin_cond=True)
+    model = orb_v3_conservative_architecture(
+        device=device, 
+        system_config=system_config, 
+        has_charge_spin_cond=True,
+        has_stress=False,
+    )
     model = load_model(
         model, weights_path, device, precision=precision, compile=compile, train=train
     )
@@ -366,7 +377,12 @@ def orb_v3_direct_omol(
     the cutoff radius. Empirically, for the training distribution, 120 is sufficient.
     """
     system_config = SystemConfig(radius=6.0, max_num_neighbors=120)
-    model = orb_v3_direct_architecture(device=device, system_config=system_config, has_charge_spin_cond=True)
+    model = orb_v3_direct_architecture(
+        device=device, 
+        system_config=system_config, 
+        has_charge_spin_cond=True,
+        has_stress=False,
+    )
     model = load_model(
         model, weights_path, device, precision=precision, compile=compile, train=train
     )

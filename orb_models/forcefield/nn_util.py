@@ -260,6 +260,7 @@ def mlp_and_layer_norm(
     checkpoint: Optional[str] = None,
     activation: str = "ssp",
     mlp_norm: str = "layer_norm",
+    dropout: Optional[float] = None,
 ) -> nn.Sequential:
     """Create an MLP followed by layer norm."""
     return nn.Sequential(
@@ -270,6 +271,7 @@ def mlp_and_layer_norm(
                     [hidden_dim for _ in range(n_layers)],
                     out_dim,
                     activation=activation,
+                    dropout=dropout,
                     checkpoint=checkpoint,
                 ),
                 "layer_norm": get_mlp_norm(mlp_norm)(out_dim),

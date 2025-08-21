@@ -14,12 +14,13 @@ def graph_with_charge_spin_batch(graph):
     """Create a batch of graphs with charge and spin system features."""
     graph_with_features = deepcopy(graph)
     # Create 3 identical graphs
-    graph_with_features.n_node = torch.tensor([10, 10, 10])  # 3 graphs, 10 nodes each
-    graph_with_features.n_edge = torch.tensor([6, 6, 6])  # 3 graphs, 6 edges each
-    graph_with_features.system_features.update(
-        {
+    graph_with_features = graph_with_features._replace(
+        n_node=torch.tensor([10, 10, 10]),  # 3 graphs, 10 nodes each
+        n_edge=torch.tensor([6, 6, 6]),     # 3 graphs, 6 edges each
+        system_features={
+            **graph_with_features.system_features,
             "total_charge": torch.tensor([-1.0, 0.0, 1.0]),  # 3 graphs
-            "total_spin": torch.tensor([0.0, 1.0, 2.0]),  # 3 graphs
+            "total_spin": torch.tensor([0.0, 1.0, 2.0]),     # 3 graphs
         }
     )
     return graph_with_features

@@ -97,11 +97,14 @@ class AttentionInteractionNetwork(nn.Module):
         num_mlp_layers: int,
         mlp_hidden_dim: int,
         attention_gate: Literal["sigmoid", "softmax"] = "sigmoid",
-        conditioning: Tuple[ConditioningType, ConditioningType] = ("none", "none"),
+        conditioning: Union[
+            ConditioningType, Tuple[ConditioningType, ConditioningType]
+        ] = "none",
         distance_cutoff: bool = False,
         checkpoint: Optional[str] = None,
         activation: str = "ssp",
         mlp_norm: str = "layer_norm",
+        dropout: Optional[float] = None,
     ):
         """Interaction network, similar to an MPNN.
 
@@ -122,19 +125,20 @@ class AttentionInteractionNetwork(nn.Module):
                 None (no checkpointing), 'reentrant' or 'non-reentrant'.
             activation (str): Activation function to use.
             mlp_norm (str): Normalization layer to use in the MLP.
+            dropout (float): Dropout rate to use in the MLP.
         """
         super(AttentionInteractionNetwork, self).__init__()
-        self._node_conditioning, self._edge_conditioning = conditioning
-        assert self._node_conditioning in typing.get_args(ConditioningType)
-        assert self._edge_conditioning in typing.get_args(ConditioningType)
-        
+        if isinstance(conditioning, tuple):
+            self._node_cond, self._edge_cond = conditioning
+        else:
+            self._node_cond, self._edge_cond = conditioning, conditioning
+
+        assert self._node_cond in typing.get_args(ConditioningType)
+        assert self._edge_cond in typing.get_args(ConditioningType)
+
         # Get the dimension of the conditioning features for the MLPs
-        node_mlp_cond_dim = (
-            latent_dim if self._node_conditioning == "concatenative" else 0
-        )
-        edge_mlp_cond_dim = (
-            latent_dim if self._edge_conditioning == "concatenative" else 0
-        )
+        node_mlp_cond_dim = latent_dim if self._node_cond == "concatenative" else 0
+        edge_mlp_cond_dim = latent_dim if self._edge_cond == "concatenative" else 0
 
         self._node_mlp = mlp_and_layer_norm(
             latent_dim * 3 + node_mlp_cond_dim,
@@ -144,6 +148,7 @@ class AttentionInteractionNetwork(nn.Module):
             checkpoint=checkpoint,
             activation=activation,
             mlp_norm=mlp_norm,
+            dropout=dropout,
         )
         self._edge_mlp = mlp_and_layer_norm(
             latent_dim * 3 + edge_mlp_cond_dim + 2 * node_mlp_cond_dim,
@@ -153,17 +158,25 @@ class AttentionInteractionNetwork(nn.Module):
             checkpoint=checkpoint,
             activation=activation,
             mlp_norm=mlp_norm,
+            dropout=dropout,
         )
 
         self._receive_attn = nn.Linear(latent_dim + edge_mlp_cond_dim, 1)
         self._send_attn = nn.Linear(latent_dim + edge_mlp_cond_dim, 1)
 
-        if conditioning:
+        if self._node_cond != "none":
             self._cond_node_proj = nn.Linear(latent_dim, latent_dim)
+        if self._edge_cond != "none":
             self._cond_edge_proj = nn.Linear(latent_dim, latent_dim)
 
         self._distance_cutoff = distance_cutoff
         self._attention_gate = attention_gate
+        self.latent_dim = latent_dim
+
+    @property
+    def conditioning_type(self) -> Tuple[ConditioningType, ConditioningType]:
+        """The type of conditioning used by the interaction network."""
+        return self._node_cond, self._edge_cond
 
     def forward(
         self,
@@ -190,18 +203,18 @@ class AttentionInteractionNetwork(nn.Module):
             Tuple of (updated_nodes, updated_edges)
         """
         # Condition on nodes
-        if self._node_conditioning == "additive":
+        if self._node_cond == "additive":
             if cond_nodes is not None:
                 nodes = nodes + self._cond_node_proj(cond_nodes)
-        elif self._node_conditioning == "concatenative":
+        elif self._node_cond == "concatenative":
             if cond_nodes is not None:
                 nodes = torch.cat([nodes, self._cond_node_proj(cond_nodes)], dim=-1)
 
         # Condition on edges
-        if self._edge_conditioning == "additive":
+        if self._edge_cond == "additive":
             if cond_edges is not None:
                 edges = edges + self._cond_edge_proj(cond_edges)
-        elif self._edge_conditioning == "concatenative":
+        elif self._edge_cond == "concatenative":
             if cond_edges is not None:
                 edges = torch.cat([edges, self._cond_edge_proj(cond_edges)], dim=-1)
 
@@ -243,9 +256,9 @@ class AttentionInteractionNetwork(nn.Module):
         updated_nodes = self._node_mlp(node_features)
 
         # Remove the conditioning features, if using concatenation
-        if self._node_conditioning == "concatenative":
+        if self._node_cond == "concatenative":
             nodes = nodes[:, : self.latent_dim]
-        if self._edge_conditioning == "concatenative":
+        if self._edge_cond == "concatenative":
             edges = edges[:, : self.latent_dim]
 
         nodes = nodes + updated_nodes
