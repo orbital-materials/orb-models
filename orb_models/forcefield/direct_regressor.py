@@ -85,6 +85,11 @@ class DirectForcefieldRegressor(torch.nn.Module):
     def system_config(self) -> SystemConfig:
         """Get the system config."""
         return self._system_config
+    
+    @property
+    def has_stress(self) -> bool:
+        """Check if the model has stress prediction."""
+        return "stress" in self.heads
 
     def forward(
         self, batch: base.AtomGraphs

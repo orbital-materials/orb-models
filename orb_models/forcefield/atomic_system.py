@@ -139,8 +139,6 @@ def ase_atoms_to_atom_graphs(
         else graph_construction_dtype
     )
     if output_dtype == torch.float64:
-        # when using fp64 precision, we must ensure all features + targets
-        # stored in the atoms.info dict are already fp64
         _check_floating_point_tensors_are_fp64(atoms.info)
 
     max_num_neighbors = max_num_neighbors or system_config.max_num_neighbors
@@ -178,7 +176,6 @@ def ase_atoms_to_atom_graphs(
         "atomic_numbers_embedding": atomic_numbers_embedding,
         "atom_identity": torch.arange(len(atoms)).to(torch.long),
     }
-
     edge_feats = {
         **atoms.info.get("edge_features", {}),
         "vectors": edge_vectors,
@@ -189,6 +186,7 @@ def ase_atoms_to_atom_graphs(
         "cell": cell,
         "pbc": pbc,
         "lattice": lattice,
+        **_get_charge_and_spin(atoms)
     }
 
     # Add a batch dimension to non-scalar graph features/targets
@@ -219,6 +217,21 @@ def ase_atoms_to_atom_graphs(
     ).to(device=device, dtype=output_dtype)
 
 
+def _get_charge_and_spin(atoms: ase.Atoms) -> dict:
+    out = {}
+    if "charge" in atoms.info or "spin" in atoms.info:
+        assert (
+            "charge" in atoms.info and "spin" in atoms.info
+        ), "Charge and spin must be present together"
+
+        chg, spin = atoms.info["charge"], atoms.info["spin"]
+        assert isinstance(chg, (float, int)), "Charge must be a float or int"
+        assert isinstance(spin, (float, int)), "Spin must be a float or int"
+        out["total_charge"] = torch.tensor([chg], dtype=torch.get_default_dtype())
+        out["total_spin"] = torch.tensor([spin], dtype=torch.get_default_dtype())
+
+    return out
+    
 def _get_ase_tags(atoms: ase.Atoms) -> torch.Tensor:
     """Get tags from ase.Atoms object."""
     tags = atoms.get_tags()

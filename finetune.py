@@ -259,12 +259,13 @@ def run(args):
         wandb.define_metric("step")
         wandb.define_metric("finetune_step/*", step_metric="step")
 
+    graph_targets = ["energy", "stress"] if model.has_stress else ["energy"]
     loader_args = dict(
         dataset_name=args.dataset,
         dataset_path=args.data_path,
         num_workers=args.num_workers,
         batch_size=args.batch_size,
-        target_config={"graph": ["energy", "stress"], "node": ["forces"]},
+        target_config={"graph": graph_targets, "node": ["forces"]},
     )
     train_loader = build_train_loader(
         **loader_args,
@@ -379,7 +380,7 @@ def main():
     )
     parser.add_argument(
         "--lr",
-        default=3e-04,
+        default=3e-4,
         type=float,
         help="Learning rate. 3e-4 is purely a sensible default; you may want to tune this for your problem.",
     )

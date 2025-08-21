@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Dict, Optional, Union
 
 import torch
 from ase.calculators.calculator import Calculator, all_changes
@@ -7,6 +7,7 @@ from orb_models.forcefield.atomic_system import SystemConfig, ase_atoms_to_atom_
 from orb_models.forcefield.direct_regressor import DirectForcefieldRegressor
 from orb_models.forcefield.conservative_regressor import ConservativeForcefieldRegressor
 from orb_models.forcefield.featurization_utilities import EdgeCreationMethod
+from orb_models.forcefield.nn_util import ChargeSpinConditioner
 from orb_models.utils import to_numpy
 
 
@@ -71,10 +72,17 @@ class ORBCalculator(Calculator):
             raise ValueError(
                 "Conservative mode requested, but model is not a ConservativeForcefieldRegressor."
             )
+        
+        conditioner = model.model.conditioner
+        self.expects_charge_and_spin = (
+            (conditioner is not None) and isinstance(conditioner, ChargeSpinConditioner)
+        )
 
         self.implemented_properties = model.properties  # type: ignore
         if self.conservative:
-            self.implemented_properties.extend(["forces", "stress"])
+            self.implemented_properties.append("forces")
+            if self.model.has_stress:
+                self.implemented_properties.append("stress")
 
     def calculate(self, atoms=None, properties=None, system_changes=all_changes):
         """Calculate properties.
@@ -89,6 +97,10 @@ class ORBCalculator(Calculator):
         """
         Calculator.calculate(self, atoms)
 
+        if self.expects_charge_and_spin:
+            if ("charge" not in atoms.info) or ("spin" not in atoms.info):
+                raise ValueError("atoms.info must contain both 'charge' and 'spin'")
+
         batch = ase_atoms_to_atom_graphs(
             atoms,
             system_config=self.system_config,
@@ -99,21 +111,27 @@ class ORBCalculator(Calculator):
         )
         batch = batch.to(self.device)  # type: ignore
         out = self.model.predict(batch)  # type: ignore
+        self._update_results(out)
+
+    def _update_results(self, out: Dict[str, torch.Tensor]):
+        """Updates the results dictionary with the computed properties."""
         self.results = {}
-        model_has_direct_heads = (
-            "forces" in self.model.heads and "stress" in self.model.heads  # type: ignore
-        )
+        no_direct_energy_head = "energy" not in self.model.heads  # type: ignore
+        no_direct_force_head = "forces" not in self.model.heads  # type: ignore
+        no_direct_stress_head = "stress" not in self.model.heads  # type: ignore
         for property in self.implemented_properties:
-            # The model has no direct heads for forces/stress, so we skip these properties.
-            if not model_has_direct_heads and property == "forces":
+            if property == "free_energy" and no_direct_energy_head:
                 continue
-            if not model_has_direct_heads and property == "stress":
+            if property == "forces" and no_direct_force_head:
+                continue
+            if property == "stress" and no_direct_stress_head:
                 continue
             _property = "energy" if property == "free_energy" else property
 
+            # ASE expects:
+            #  - stresses to be squeezed to a 1D array of shape (6,)
+            #  - forces to never be squeezed i.e. single-atom systems should be (1, 3)
             if property == "stress" or property == "grad_stress":
-                # ASE expects the stress to be a 1D array of shape (6,),
-                # so we need to squeeze the extra dimension.
                 self.results[property] = to_numpy(out[_property].squeeze())
             else:
                 self.results[property] = to_numpy(out[_property])
@@ -121,7 +139,9 @@ class ORBCalculator(Calculator):
         if self.conservative:
             if self.model.forces_name in self.results:
                 self.results["direct_forces"] = self.results[self.model.forces_name]
-            if self.model.stress_name in self.results:
-                self.results["direct_stress"] = self.results[self.model.stress_name]
             self.results["forces"] = self.results[self.model.grad_forces_name]
-            self.results["stress"] = self.results[self.model.grad_stress_name]
+
+            if self.model.has_stress:
+                if self.model.stress_name in self.results:
+                    self.results["direct_stress"] = self.results[self.model.stress_name]
+                self.results["stress"] = self.results[self.model.grad_stress_name]

@@ -12,7 +12,7 @@ from orb_models.forcefield.forcefield_utils import compute_gradient_forces_and_s
 from orb_models.forcefield.load import load_forcefield_state_dict
 from orb_models.forcefield.pair_repulsion import ZBLBasis
 from orb_models.forcefield.nn_util import ScalarNormalizer
-from orb_models.forcefield.property_definitions import PROPERTIES
+from orb_models.forcefield.property_definitions import PROPERTIES, PropertyDefinition
 from orb_models.forcefield.loss import forces_loss_function, stress_loss_function
 from orb_models.forcefield.atomic_system import SystemConfig
 
@@ -53,6 +53,7 @@ class ConservativeForcefieldRegressor(nn.Module):
         ] = "condhuber_0.01",
         pair_repulsion: bool = False,
         system_config: Optional[SystemConfig] = None,
+        has_stress: bool = True,
         **kwargs,
     ):
         super().__init__()
@@ -91,9 +92,22 @@ class ConservativeForcefieldRegressor(nn.Module):
         self.forces_target = PROPERTIES[self.forces_name]
         self.grad_forces_name = f"{self.grad_prefix}_{self.forces_name}"
 
-        self.stress_name = f"stress-{level_of_theory}" if level_of_theory else "stress"
-        self.stress_target = PROPERTIES[self.stress_name]
-        self.grad_stress_name = f"{self.grad_prefix}_{self.stress_name}"
+        # Stress is optional since only periodic systems have it
+        self.has_stress = has_stress
+        if self.has_stress:
+            self.stress_name: Optional[str] = (
+                f"stress-{level_of_theory}" if level_of_theory else "stress"
+            )
+            self.stress_target: Optional[PropertyDefinition] = PROPERTIES[
+                self.stress_name
+            ]
+            self.grad_stress_name: Optional[str] = (
+                f"{self.grad_prefix}_{self.stress_name}"
+            )
+        else:
+            self.stress_name = None
+            self.stress_target = None
+            self.grad_stress_name = None
 
         self.grad_rotation_name = "rotational_grad"
 
@@ -115,9 +129,10 @@ class ConservativeForcefieldRegressor(nn.Module):
             self.energy_name,
             "free_energy",
             self.grad_forces_name,
-            self.grad_stress_name,
             self.grad_rotation_name,
         ]
+        if self.has_stress:
+            props.append(self.grad_stress_name)
         props.extend(self.extra_properties)
         return props
 
@@ -149,11 +164,12 @@ class ConservativeForcefieldRegressor(nn.Module):
             displacement=batch.system_features["stress_displacement"],
             cell=batch.system_features["cell"],
             training=self.training,
-            compute_stress=True,
+            compute_stress=self.has_stress,
             generator=batch.system_features["generator"],
         )
         out[self.grad_forces_name] = forces  # eV / A
-        out[self.grad_stress_name] = stress  # eV / A^3
+        if self.has_stress:
+            out[self.grad_stress_name] = stress  # eV / A^3
 
         out[self.grad_rotation_name] = rotational_grad
         for name in self.extra_properties:
@@ -172,7 +188,8 @@ class ConservativeForcefieldRegressor(nn.Module):
             preds[self.energy_name], batch
         )
         out[self.grad_forces_name] = preds[self.grad_forces_name]
-        out[self.grad_stress_name] = preds[self.grad_stress_name]
+        if self.has_stress:
+            out[self.grad_stress_name] = preds[self.grad_stress_name]
         out[self.grad_rotation_name] = preds[self.grad_rotation_name]
         for name in self.extra_properties:
             head = self.heads[name]
@@ -197,10 +214,6 @@ class ConservativeForcefieldRegressor(nn.Module):
         raw_grad_forces_pred = out[self.grad_forces_name]
         grad_forces_pred = self.grad_forces_normalizer(
             raw_grad_forces_pred, online=False
-        )
-        raw_grad_stress_pred = out[self.grad_stress_name]
-        grad_stress_pred = self.grad_stress_normalizer(
-            raw_grad_stress_pred, online=False
         )
 
         # metrics
@@ -237,25 +250,38 @@ class ConservativeForcefieldRegressor(nn.Module):
         total_loss += loss
         metrics.update({f"{self.grad_prefix}-{k}": v for k, v in loss_out.log.items()})
 
-        # Conservative stress
-        loss_out = stress_loss_function(
-            pred=grad_stress_pred,
-            raw_target=batch.system_targets[self.stress_name],
-            raw_gold_target=batch.system_targets[self.stress_name],
-            name=self.stress_name,
-            normalizer=self.grad_stress_normalizer,
-            loss_type=energy_head.loss_type,
-        )
-        loss = self.loss_weights.get(self.grad_stress_name, 1.0) * loss_out.loss
-        loss_out.log[f"{self.grad_stress_name}_loss"] = loss
-        total_loss += loss
-        metrics.update({f"{self.grad_prefix}-{k}": v for k, v in loss_out.log.items()})
+        # Conservative stress (optional)
+        if self.has_stress and self.grad_stress_name in out:
+            assert self.stress_name is not None
+            assert self.grad_stress_name is not None
+            raw_grad_stress_pred = out[self.grad_stress_name]
+            grad_stress_pred = self.grad_stress_normalizer(
+                raw_grad_stress_pred, online=False
+            )
+            loss_out = stress_loss_function(
+                pred=grad_stress_pred,
+                raw_target=batch.system_targets[self.stress_name],
+                raw_gold_target=batch.system_targets[self.stress_name],
+                name=self.stress_name,
+                normalizer=self.grad_stress_normalizer,
+                loss_type=energy_head.loss_type,
+            )
+            loss = self.loss_weights.get(self.grad_stress_name, 1.0) * loss_out.loss
+            loss_out.log[f"{self.grad_stress_name}_loss"] = loss
+            total_loss += loss
+            metrics.update(
+                {f"{self.grad_prefix}-{k}": v for k, v in loss_out.log.items()}
+            )
 
         # Direct forces / stress predictions
         for grad_name, grad_pred in [
             (self.grad_forces_name, raw_grad_forces_pred),
-            (self.grad_stress_name, raw_grad_stress_pred),
-        ]:
+        ] + (
+            [(self.grad_stress_name, out[self.grad_stress_name])]
+            if self.has_stress and self.grad_stress_name in out
+            else []
+        ):
+            assert grad_name is not None
             direct_name = grad_name.replace(self.grad_prefix + "_", "")
             if direct_name in self.extra_properties:
                 direct_head = self.heads[direct_name]
