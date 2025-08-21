@@ -13,8 +13,6 @@ from torch.utils.checkpoint import checkpoint_sequential
 class ChargeSpinEmbedding(nn.Module):
     """Embedding module for charge and spin values with configurable types.
 
-    (Adapted from fairchem)
-
     Different embedding strategies:
     - sin_emb: Sinusoidal positional embeddings that encode continuous values
                using learned frequency components. Good for smooth interpolation
