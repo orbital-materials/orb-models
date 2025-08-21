@@ -58,6 +58,16 @@ def test_aggregate_nodes(reduction, dtype):
     assert torch.allclose(res[2, :], reduce_fn(tensor[8:, :]))
 
 
+@pytest.mark.parametrize("reduction", ["sum", "mean", "max"])
+def test_aggregate_nodes_with_zero_size_last_graph(reduction):
+    tensor = torch.randn(10, 10)
+    n_node = torch.tensor([8, 2, 0, 0], dtype=torch.int32)
+
+    res = segment_ops.aggregate_nodes(tensor, n_node=n_node, reduction=reduction)
+
+    assert res.shape == (4, 10)
+
+
 @pytest.mark.parametrize(
     "dtype", [torch.float32, torch.float64, torch.int32, torch.int64]
 )
