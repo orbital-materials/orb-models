@@ -215,10 +215,6 @@ class ConservativeForcefieldRegressor(nn.Module):
         grad_forces_pred = self.grad_forces_normalizer(
             raw_grad_forces_pred, online=False
         )
-        raw_grad_stress_pred = out[self.grad_stress_name]
-        grad_stress_pred = self.grad_stress_normalizer(
-            raw_grad_stress_pred, online=False
-        )
 
         # metrics
         metrics = {}
@@ -270,7 +266,7 @@ class ConservativeForcefieldRegressor(nn.Module):
                 normalizer=self.grad_stress_normalizer,
                 loss_type=energy_head.loss_type,
             )
-            loss = self.loss_weights[self.grad_stress_name] * loss_out.loss
+            loss = self.loss_weights.get(self.grad_stress_name, 1.0) * loss_out.loss
             loss_out.log[f"{self.grad_stress_name}_loss"] = loss
             total_loss += loss
             metrics.update(
