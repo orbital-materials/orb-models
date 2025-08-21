@@ -134,8 +134,8 @@ orbff = pretrained.orb_v3_conservative_omol(
   precision="float32-high",   # or "float32-highest" / "float64
 )
 atoms = molecule("C6H6")
-atoms.info["charge"] = 1.0  # total charge
-atoms.info["spin"] = 0.0  # total spin
+atoms.info["charge"] = 0  # total charge
+atoms.info["spin"] = 1  # total spin
 graph = atomic_system.ase_atoms_to_atom_graphs(atoms, orbff.system_config, device=device)
 
 result = orbff.predict(graph, split=False)
