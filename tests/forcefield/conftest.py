@@ -8,7 +8,7 @@ from orb_models.forcefield.forcefield_heads import EnergyHead, ForceHead, Stress
 from orb_models.forcefield import base
 from orb_models.forcefield import atomic_system
 from orb_models.forcefield.gns import _KEY
-from orb_models.forcefield.rbf import ExpNormalSmearing
+from orb_models.forcefield.rbf import BesselBasis, ExpNormalSmearing
 from orb_models.forcefield import gns, segment_ops
 from orb_models.forcefield.conservative_regressor import ConservativeForcefieldRegressor
 
@@ -62,6 +62,7 @@ def get_batch_from_ase_with_latents():
 
 
 class EuclideanNormModel(torch.nn.Module):
+
     def __init__(self, minimum=[-0.5, -2.0, -1.0]):
         super(EuclideanNormModel, self).__init__()
         self.minimum = torch.tensor(minimum)
@@ -72,6 +73,15 @@ class EuclideanNormModel(torch.nn.Module):
                 "stress": torch.nn.Linear(3, 6),  # Dummy head}
             }
         )
+        # unused dummy model
+        self.model = gns.MoleculeGNS(
+            latent_dim=9,
+            num_message_passing_steps=2,
+            num_mlp_layers=1,
+            mlp_hidden_dim=16,
+            rbf_transform=BesselBasis(6.0)
+        )
+        self.has_stress = True
 
     def forward(self, batch):
         positions = batch.positions

@@ -19,10 +19,9 @@ except ImportError:
 from wandb import wandb_run
 
 from orb_models import utils
-from orb_models.dataset.ase_sqlite_dataset import AseSqliteDataset
-from orb_models.forcefield import base, pretrained, atomic_system, property_definitions
 from orb_models.dataset import augmentations
-
+from orb_models.dataset.ase_sqlite_dataset import AseSqliteDataset
+from orb_models.forcefield import atomic_system, base, pretrained, property_definitions
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -237,10 +236,9 @@ def run(args):
 
     # Instantiate model
     base_model = args.base_model
-    model = getattr(pretrained, base_model)(device=device, precision=precision)
-
-    for param in model.parameters():
-        param.requires_grad = True
+    model = getattr(pretrained, base_model)(
+        device=device, precision=precision, train=True
+    )
 
     model_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logging.info(f"Model has {model_params} trainable parameters.")
@@ -261,12 +259,13 @@ def run(args):
         wandb.define_metric("step")
         wandb.define_metric("finetune_step/*", step_metric="step")
 
+    graph_targets = ["energy", "stress"] if model.has_stress else ["energy"]
     loader_args = dict(
         dataset_name=args.dataset,
         dataset_path=args.data_path,
         num_workers=args.num_workers,
         batch_size=args.batch_size,
-        target_config={"graph": ["energy", "stress"], "node": ["forces"]},
+        target_config={"graph": graph_targets, "node": ["forces"]},
     )
     train_loader = build_train_loader(
         **loader_args,
@@ -381,7 +380,7 @@ def main():
     )
     parser.add_argument(
         "--lr",
-        default=3e-04,
+        default=3e-4,
         type=float,
         help="Learning rate. 3e-4 is purely a sensible default; you may want to tune this for your problem.",
     )

@@ -44,11 +44,11 @@ def aggregate_nodes(
         torch.use_deterministic_algorithms(True)
     segments = torch.arange(count, device=device).repeat_interleave(n_node)
     if reduction == "sum":
-        return scatter_sum(tensor, segments, dim=0)
+        return scatter_sum(tensor, segments, dim=0, dim_size=count)
     elif reduction == "mean":
-        return scatter_mean(tensor, segments, dim=0)
+        return scatter_mean(tensor, segments, dim=0, dim_size=count)
     elif reduction == "max":
-        return segment_max(tensor, segments, count)
+        return segment_max(tensor, segments, num_segments=count)
     else:
         raise ValueError("Invalid reduction argument. Use sum, mean or max.")
 

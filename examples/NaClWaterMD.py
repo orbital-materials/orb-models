@@ -50,7 +50,7 @@ def run_md_simulation(
     atoms.set_pbc([True] * 3)
 
     # Set the calculator
-    atoms.calc = ORBCalculator(*pretrained.orb_v3_direct_20_omat(), device=device, compile=False)
+    atoms.calc = ORBCalculator(pretrained.orb_v3_direct_20_omat(), device=device, compile=False)
 
     # Set the initial velocities
     MaxwellBoltzmannDistribution(atoms, temperature_K=temperature_K)
