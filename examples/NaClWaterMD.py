@@ -54,7 +54,11 @@ def run_md_simulation(
     atoms.info["spin"] = 1.0  # multiplicity (2S+1)
 
     # Set the calculator
-    atoms.calc = ORBCalculator(pretrained.orb_v3_conservative_omol(), device=device)
+    # Note: If you encounter compilation errors (e.g., Triton issues on clusters),
+    # you can disable compilation by adding compile=False:
+    # orbff = pretrained.orb_v3_conservative_omol(device=device, compile=False)
+    orbff = pretrained.orb_v3_conservative_omol(device=device)
+    atoms.calc = ORBCalculator(orbff, device=device)
 
     # Set the initial velocities
     MaxwellBoltzmannDistribution(atoms, temperature_K=temperature_K)
