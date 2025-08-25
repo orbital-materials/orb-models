@@ -49,8 +49,12 @@ def run_md_simulation(
     atoms.set_cell([cell_size] * 3)
     atoms.set_pbc([True] * 3)
 
+    # Set charge and spin multiplicity for OrbMol models
+    atoms.info["charge"] = 0.0  # total charge
+    atoms.info["spin"] = 1.0  # multiplicity (2S+1)
+
     # Set the calculator
-    atoms.calc = ORBCalculator(pretrained.orb_v3_direct_20_omat(), device=device, compile=False)
+    atoms.calc = ORBCalculator(pretrained.orb_v3_conservative_omol(), device=device)
 
     # Set the initial velocities
     MaxwellBoltzmannDistribution(atoms, temperature_K=temperature_K)
