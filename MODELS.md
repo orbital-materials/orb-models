@@ -7,7 +7,7 @@ We provide several pretrained models that can be used to calculate energies, for
 These models are a continuation of the `orb-v3` series, but are trained on the [Open Molecules 2025 (OMol25)](https://arxiv.org/pdf/2505.08762) dataset—over 100M high-accuracy DFT calculations (ωB97M-V/def2-TZVPD) on diverse molecular systems including metal complexes, biomolecules, and electrolytes.
 
 There are two options:
-* `orb-v3-conserative-omol`
+* `orb-v3-conservative-omol`
 * `orb-v3-direct-omol`
 
 See below for more explanation of this naming convention. Both models have `inf` neighbors, ensuring a continuous PES.
