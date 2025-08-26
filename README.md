@@ -30,8 +30,8 @@ Alternatively, you can use Docker to run orb-models; [see instructions below](#d
 **August 2025**: Release of the OrbMol potentials (blog post forthcoming). 
 
 * Trained on the [Open Molecules 2025 (OMol25)](https://arxiv.org/pdf/2505.08762) dataset—over 100M high-accuracy DFT calculations (ωB97M-V/def2-TZVPD) on diverse molecular systems including metal complexes, biomolecules, and electrolytes.
-* Architecturally similar to the highly-performant Orb-v3 models, but now explicit total charges and spins can be passed as input.  
-* To get started with these models, see: [How to specify total charge and spin for OrbMol](#how-to-specify-total-charge-and-spin-for-orbmol).
+* Architecturally similar to the highly-performant Orb-v3 models, but now explicit total charges and spin multiplicities can be passed as input.  
+* To get started with these models, see: [How to specify total charge and spin multiplicity for OrbMol](#how-to-specify-total-charge-and-spin-multiplicity-for-orbmol).
 
 **April 2025**: Release of the [Orb-v3 set of potentials](https://arxiv.org/abs/2504.06231).
 
@@ -118,9 +118,9 @@ print("Optimized Energy:", atoms.get_potential_energy())
 
 Or you can use it to run MD simulations. The script, an example input xyz file and a Colab notebook demonstration are available in the [examples directory.](./examples) This should work with any input, simply modify the input_file and cell_size parameters. We recommend using constant volume simulations.
 
-#### How to specify total charge and spin for OrbMol
+#### How to specify total charge and spin multiplicity for OrbMol
 
-The OrbMol models *require* total charge and spin to be specified. This can be done by setting them in `atoms.info` dictionary.
+The OrbMol models *require* total charge and spin multiplicity to be specified. This can be done by setting them in `atoms.info` dictionary.
 
 ```python
 import ase
@@ -134,8 +134,9 @@ orbff = pretrained.orb_v3_conservative_omol(
   precision="float32-high",   # or "float32-highest" / "float64
 )
 atoms = molecule("C6H6")
+
 atoms.info["charge"] = 0  # total charge
-atoms.info["spin"] = 1  # total spin
+atoms.info["spin"] = 1  #  spin multiplicity
 graph = atomic_system.ase_atoms_to_atom_graphs(atoms, orbff.system_config, device=device)
 
 result = orbff.predict(graph, split=False)
