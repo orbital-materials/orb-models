@@ -236,8 +236,12 @@ def run(args):
 
     # Instantiate model
     base_model = args.base_model
+    finetune_reference_energies = args.finetune_reference_energies
     model = getattr(pretrained, base_model)(
-        device=device, precision=precision, train=True
+        device=device,
+        precision=precision,
+        train=True,
+        train_reference_energies=finetune_reference_energies,
     )
 
     model_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -396,6 +400,12 @@ def main():
             "orb_v3_direct_20_omat",
             "orb_v2",
         ],
+    )
+    parser.add_argument(
+        "--finetune_reference_energies",
+        default=False,
+        action="store_true",
+        help="Whether to finetune the reference energies.",
     )
     args = parser.parse_args()
     run(args)

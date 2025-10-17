@@ -62,6 +62,7 @@ def load_model(
     precision: str = "float32-high",
     compile: Optional[bool] = None,
     train: bool = False,
+    train_reference_energies: bool = False,
 ) -> Union[DirectForcefieldRegressor, ConservativeForcefieldRegressor]:
     """Load a pretrained model from a local path or a wandb artifact.
 
@@ -75,7 +76,8 @@ def load_model(
             - "float64" means the model will use double precision.
         compile: Whether to torch.compile the model. Defaults to None, which will compile the model
             if the device is not MPS.
-        train: Whether to set the model to training mode and keep parameters trainable.
+        train: Whether to set the model to training mode and keep parameters trainable, except for the reference energies.
+        train_reference_energies: Whether to train the reference energies.
 
     Returns:
         model: The pretrained model
@@ -103,6 +105,12 @@ def load_model(
     if not train:
         for param in model.parameters():
             param.requires_grad = False
+
+    if "energy" in model.heads:
+        if train_reference_energies:
+            model.heads["energy"].reference.linear.weight.requires_grad = True
+        else:
+            model.heads["energy"].reference.linear.weight.requires_grad = False
 
     return model
 
@@ -286,12 +294,12 @@ def orb_v3_direct_architecture(
     }
     if has_stress:
         heads["stress"] = StressHead(
-                latent_dim=latent_dim,
-                num_mlp_layers=head_mlp_depth,
-                mlp_hidden_dim=head_mlp_hidden_dim,
-                node_aggregation="mean",
-                activation=activation,
-            )
+            latent_dim=latent_dim,
+            num_mlp_layers=head_mlp_depth,
+            mlp_hidden_dim=head_mlp_hidden_dim,
+            node_aggregation="mean",
+            activation=activation,
+        )
 
     model = DirectForcefieldRegressor(
         heads=heads,
@@ -332,12 +340,14 @@ def orb_v3_direct_architecture(
 
     return model
 
+
 def orb_v3_conservative_omol(
     weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-v3-conservative-omol-20250820.ckpt",  # noqa: E501
     device: Union[torch.device, str, None] = None,
     precision: str = "float32-high",
     compile: Optional[bool] = None,
     train: bool = False,
+    train_reference_energies: bool = False,
 ) -> ConservativeForcefieldRegressor:
     """Load ORB v3 Conservative with effectively unlimited neighbors, trained on OMol25.
 
@@ -352,13 +362,19 @@ def orb_v3_conservative_omol(
 
     system_config = SystemConfig(radius=6.0, max_num_neighbors=120)
     model = orb_v3_conservative_architecture(
-        device=device, 
-        system_config=system_config, 
+        device=device,
+        system_config=system_config,
         has_charge_spin_cond=True,
         has_stress=False,
     )
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
     )
 
     return model
@@ -370,6 +386,7 @@ def orb_v3_direct_omol(
     precision: str = "float32-high",
     compile: Optional[bool] = None,
     train: bool = False,
+    train_reference_energies: bool = False,
 ) -> DirectForcefieldRegressor:
     """Load ORB v3 Direct with effectively unlimited neighbors, trained on OMol25.
 
@@ -378,13 +395,19 @@ def orb_v3_direct_omol(
     """
     system_config = SystemConfig(radius=6.0, max_num_neighbors=120)
     model = orb_v3_direct_architecture(
-        device=device, 
-        system_config=system_config, 
+        device=device,
+        system_config=system_config,
         has_charge_spin_cond=True,
         has_stress=False,
     )
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
     )
 
     return model
@@ -396,6 +419,7 @@ def orb_v3_conservative_20_omat(
     precision: str = "float32-high",
     compile: Optional[bool] = None,
     train: bool = False,
+    train_reference_energies: bool = False,
 ) -> ConservativeForcefieldRegressor:
     """Load ORB v3 Conservative 20 max neighbors OMAT."""
     if compile is None and train:
@@ -407,7 +431,13 @@ def orb_v3_conservative_20_omat(
     system_config = SystemConfig(radius=6.0, max_num_neighbors=20)
     model = orb_v3_conservative_architecture(device=device, system_config=system_config)
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
     )
 
     return model
@@ -419,6 +449,7 @@ def orb_v3_conservative_inf_omat(
     precision: str = "float32-high",
     compile: Optional[bool] = None,
     train: bool = False,
+    train_reference_energies: bool = False,
 ) -> ConservativeForcefieldRegressor:
     """Load ORB v3 Conservative with effectively unlimited neighbors, trained on OMAT.
 
@@ -434,7 +465,13 @@ def orb_v3_conservative_inf_omat(
     system_config = SystemConfig(radius=6.0, max_num_neighbors=120)
     model = orb_v3_conservative_architecture(device=device, system_config=system_config)
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
     )
 
     return model
@@ -446,12 +483,19 @@ def orb_v3_direct_20_omat(
     precision: str = "float32-high",
     compile: Optional[bool] = None,
     train: bool = False,
+    train_reference_energies: bool = False,
 ) -> DirectForcefieldRegressor:
     """Load ORB v3 Direct 20 max neighbors OMAT."""
     system_config = SystemConfig(radius=6.0, max_num_neighbors=20)
     model = orb_v3_direct_architecture(device=device, system_config=system_config)
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
     )
 
     return model
@@ -463,6 +507,7 @@ def orb_v3_direct_inf_omat(
     precision: str = "float32-high",
     compile: Optional[bool] = None,
     train: bool = False,
+    train_reference_energies: bool = False,
 ) -> DirectForcefieldRegressor:
     """Load ORB v3 Direct with effectively unlimited neighbors, trained on OMAT.
 
@@ -472,7 +517,13 @@ def orb_v3_direct_inf_omat(
     system_config = SystemConfig(radius=6.0, max_num_neighbors=120)
     model = orb_v3_direct_architecture(device=device, system_config=system_config)
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
     )
 
     return model
@@ -484,6 +535,7 @@ def orb_v3_conservative_20_mpa(
     precision: str = "float32-high",
     compile: Optional[bool] = None,
     train: bool = False,
+    train_reference_energies: bool = False,
 ) -> ConservativeForcefieldRegressor:
     """Load ORB v3 Conservative 20 max neighbors MPTraj + Alexandria."""
     if compile is None and train:
@@ -495,7 +547,13 @@ def orb_v3_conservative_20_mpa(
     system_config = SystemConfig(radius=6.0, max_num_neighbors=20)
     model = orb_v3_conservative_architecture(device=device, system_config=system_config)
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
     )
 
     return model
@@ -507,6 +565,7 @@ def orb_v3_conservative_inf_mpa(
     precision: str = "float32-high",
     compile: Optional[bool] = None,
     train: bool = False,
+    train_reference_energies: bool = False,
 ) -> ConservativeForcefieldRegressor:
     """Load ORB v3 Conservative with effectively unlimited neighbors, trained on MPTraj + Alexandria.
 
@@ -522,7 +581,13 @@ def orb_v3_conservative_inf_mpa(
     system_config = SystemConfig(radius=6.0, max_num_neighbors=120)
     model = orb_v3_conservative_architecture(device=device, system_config=system_config)
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
     )
 
     return model
@@ -534,12 +599,19 @@ def orb_v3_direct_20_mpa(
     precision: str = "float32-high",
     compile: Optional[bool] = None,
     train: bool = False,
+    train_reference_energies: bool = False,
 ) -> DirectForcefieldRegressor:
     """Load ORB v3 Direct 20 max neighbors MPTraj + Alexandria."""
     system_config = SystemConfig(radius=6.0, max_num_neighbors=20)
     model = orb_v3_direct_architecture(device=device, system_config=system_config)
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
     )
 
     return model
@@ -551,6 +623,7 @@ def orb_v3_direct_inf_mpa(
     precision: str = "float32-high",
     compile: Optional[bool] = None,
     train: bool = False,
+    train_reference_energies: bool = False,
 ) -> DirectForcefieldRegressor:
     """Load ORB v3 Direct with effectively unlimited neighbors, trained on MPTraj + Alexandria.
 
@@ -560,11 +633,16 @@ def orb_v3_direct_inf_mpa(
     system_config = SystemConfig(radius=6.0, max_num_neighbors=120)
     model = orb_v3_direct_architecture(device=device, system_config=system_config)
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
     )
 
     return model
-
 
 
 def separate_d3_direct_3layer(
@@ -573,12 +651,21 @@ def separate_d3_direct_3layer(
     precision: str = "float32-high",
     compile: Optional[bool] = None,
     train: bool = False,
+    train_reference_energies: bool = False,
 ) -> DirectForcefieldRegressor:
     """Load a separate D3 direct model."""
     system_config = SystemConfig(radius=6.0, max_num_neighbors=120)
-    model = orb_v3_direct_architecture(num_message_passing_steps=3, device=device, system_config=system_config)
+    model = orb_v3_direct_architecture(
+        num_message_passing_steps=3, device=device, system_config=system_config
+    )
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
     )
     return model
 
@@ -589,12 +676,19 @@ def separate_d3_direct_5layer(
     precision: str = "float32-high",
     compile: Optional[bool] = None,
     train: bool = False,
+    train_reference_energies: bool = False,
 ) -> DirectForcefieldRegressor:
     """Load a separate D3 direct model."""
     system_config = SystemConfig(radius=6.0, max_num_neighbors=120)
     model = orb_v3_direct_architecture(device=device, system_config=system_config)
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
     )
     return model
 
@@ -605,12 +699,21 @@ def separate_d4_direct_3layer(
     precision: str = "float32-high",
     compile: Optional[bool] = None,
     train: bool = False,
+    train_reference_energies: bool = False,
 ) -> DirectForcefieldRegressor:
     """Load a separate D4 direct model."""
     system_config = SystemConfig(radius=6.0, max_num_neighbors=120)
-    model = orb_v3_direct_architecture(num_message_passing_steps=3, device=device, system_config=system_config)
+    model = orb_v3_direct_architecture(
+        num_message_passing_steps=3, device=device, system_config=system_config
+    )
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
     )
     return model
 
@@ -621,12 +724,19 @@ def separate_d4_direct_5layer(
     precision: str = "float32-high",
     compile: Optional[bool] = None,
     train: bool = False,
+    train_reference_energies: bool = False,
 ) -> DirectForcefieldRegressor:
     """Load a separate D4 direct model."""
     system_config = SystemConfig(radius=6.0, max_num_neighbors=120)
     model = orb_v3_direct_architecture(device=device, system_config=system_config)
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
     )
     return model
 
@@ -637,12 +747,19 @@ def orb_v2(
     precision: str = "float32-high",
     compile: Optional[bool] = None,
     train: bool = False,
+    train_reference_energies: bool = False,
 ) -> DirectForcefieldRegressor:
     """Load ORB v2 Direct with 20 max neighbors, trained on MPTraj + Alexandria."""
     system_config = SystemConfig(radius=6.0, max_num_neighbors=20)
     model = orb_v2_architecture(device=device, system_config=system_config)
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
     )
 
     return model
@@ -654,12 +771,19 @@ def orb_mptraj_only_v2(
     precision: str = "float32-high",
     compile: Optional[bool] = None,
     train: bool = False,
+    train_reference_energies: bool = False,
 ) -> DirectForcefieldRegressor:
     """Load ORB MPTraj Only v2 Direct with 20 max neighbors, trained on MPTraj."""
     system_config = SystemConfig(radius=6.0, max_num_neighbors=20)
     model = orb_v2_architecture(device=device, system_config=system_config)
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
     )
 
     return model
@@ -707,6 +831,7 @@ def orb_d3_xs_v2(
     precision: str = "float32-high",
     compile: Optional[bool] = None,
     train: bool = False,
+    train_reference_energies: bool = False,
 ) -> DirectForcefieldRegressor:
     """Load ORB D3 xs v2 with 20 max neighbors, trained on MPTraj + Alexandria."""
     system_config = SystemConfig(radius=6.0, max_num_neighbors=20)
@@ -714,7 +839,13 @@ def orb_d3_xs_v2(
         num_message_passing_steps=5, device=device, system_config=system_config
     )
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
     )
 
     return model
