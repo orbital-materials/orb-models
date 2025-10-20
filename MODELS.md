@@ -4,7 +4,7 @@ We provide several pretrained models that can be used to calculate energies, for
 
 ### OrbMol Models
 
-These models are a continuation of the [`orb-v3`](#v3-models) series for non-periodic systems and are trained on the [Open Molecules 2025 (OMol25)](https://arxiv.org/pdf/2505.08762) dataset—over 100M high-accuracy DFT calculations (ωB97M-V/def2-TZVPD) on diverse molecular systems including metal complexes, biomolecules, and electrolytes.
+These models are a continuation of the [`orb-v3`](#v3-models) series trained on the [Open Molecules 2025 (OMol25)](https://arxiv.org/pdf/2505.08762) dataset—over 100M high-accuracy DFT calculations (ωB97M-V/def2-TZVPD) on diverse molecular systems including metal complexes, biomolecules, and electrolytes. Note: The training data does not contain periodic systmems and these models have not been carefully tested on periodic systems. 
 
 There are two options:
 * `orb-v3-conservative-omol`
