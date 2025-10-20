@@ -1,0 +1,11 @@
+{
+  "comment": "Example reference energies file for finetuning with custom references",
+  "H": -13.6,
+  "C": -1030.5,
+  "N": -1400.0,
+  "O": -2000.0,
+  "F": -2500.0,
+  "Na": -300.0,
+  "Cl": -800.0
+}
+
