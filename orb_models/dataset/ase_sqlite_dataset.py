@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union, Any, MutableMapping
 
 import ase
 import ase.db
@@ -23,6 +23,7 @@ class AseSqliteDataset(AtomsDataset):
         path: Local path to read the data from.
         system_config: A config for controlling how an atomic system is represented.
         target_config: A config for regression/classification targets.
+        extra_features: A config for extra features to extract from the atoms object.
         augmentations: A list of augmentation functions to apply to the atoms object.
         dtype: The dtype for floating point tensors in the output.
 
@@ -36,6 +37,7 @@ class AseSqliteDataset(AtomsDataset):
         path: Union[str, Path],
         system_config: atomic_system.SystemConfig,
         target_config: Optional[property_definitions.PropertyConfig] = None,
+        extra_features: Optional[MutableMapping[Any, Any]] = None,
         augmentations: Optional[List[Callable[[ase.Atoms], None]]] = None,
         dtype: Optional[torch.dtype] = None,
     ):
@@ -48,11 +50,10 @@ class AseSqliteDataset(AtomsDataset):
         self.path = path
         self.db = ase.db.connect(str(self.path), serial=True, type="db")
 
-        self.target_config = (
-            target_config
-            if target_config is not None
-            else property_definitions.PropertyConfig()
+        self.feature_config = property_definitions.instantiate_property_config(
+            extra_features
         )
+        self.target_config = target_config or property_definitions.PropertyConfig()
         self.constraints = []  # type: ignore[var-annotated]
 
     def __getitem__(self, idx: int) -> AtomGraphs:
@@ -74,6 +75,7 @@ class AseSqliteDataset(AtomsDataset):
         # This dict may be modified as part of an augmentation e.g.
         # Force and stress targets are transformed when rotating a system.
         atoms.info = {}
+        atoms.info.update(self.feature_config.extract(row, self.name, "features"))
         atoms.info.update(self.target_config.extract(row, self.name, "targets"))
 
         for augmentation in self.augmentations:

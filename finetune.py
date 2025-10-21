@@ -168,6 +168,7 @@ def build_train_loader(
     system_config: atomic_system.SystemConfig,
     augmentation: Optional[bool] = True,
     target_config: Optional[Dict] = None,
+    extra_features: Optional[Dict] = None,
     **kwargs,
 ) -> DataLoader:
     """Builds the train dataloader from a config file.
@@ -177,9 +178,10 @@ def build_train_loader(
         dataset_path: Dataset path.
         num_workers: The number of workers for each dataset.
         batch_size: The batch_size config for each dataset.
+        system_config: The system config.
         augmentation: If rotation augmentation is used.
         target_config: The target config.
-        system_config: The system config.
+        extra_features: The extra features to extract from DB row and store in atoms.info.
 
     Returns:
         The train Dataloader.
@@ -195,6 +197,7 @@ def build_train_loader(
         dataset_path,
         system_config=system_config,
         target_config=target_config,
+        extra_features=extra_features,
         augmentations=aug,
         **kwargs,
     )
@@ -260,12 +263,17 @@ def run(args):
         wandb.define_metric("finetune_step/*", step_metric="step")
 
     graph_targets = ["energy", "stress"] if model.has_stress else ["energy"]
+    if "omol" in base_model:
+        extra_features = {"graph": ["total_charge", "total_spin"]}
+    else:
+        extra_features = None
     loader_args = dict(
         dataset_name=args.dataset,
         dataset_path=args.data_path,
         num_workers=args.num_workers,
         batch_size=args.batch_size,
         target_config={"graph": graph_targets, "node": ["forces"]},
+        extra_features=extra_features,
     )
     train_loader = build_train_loader(
         **loader_args,
@@ -390,10 +398,15 @@ def main():
         type=str,
         help="Base model to finetune.",
         choices=[
+            # Models trained on non-periodic systems (OMol25)
+            "orb_v3_conservative_omol",
+            "orb-v3-direct-omol",
+            # Models trained on periodic systems (OMat24)
             "orb_v3_conservative_inf_omat",
             "orb_v3_conservative_20_omat",
             "orb_v3_direct_inf_omat",
             "orb_v3_direct_20_omat",
+            # Models trained on periodic systems (MPTraj + Alexandria)
             "orb_v2",
         ],
     )
