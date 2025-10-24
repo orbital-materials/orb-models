@@ -198,6 +198,27 @@ def stress_row_fn(row: ase.db.row.AtomsRow, dataset: str):
     return stress
 
 
+def total_charge_row_fn(row: ase.db.row.AtomsRow, dataset: str):
+    """Extract total charge from row.data or row.info."""
+    # Handle both AtomsRow and Atoms objects
+    if hasattr(row, "data") and "charge" in row.data:
+        return get_property_from_row("data.charge", row)
+    elif hasattr(row, "info") and "charge" in row.info:
+        return torch.tensor(row.info["charge"], dtype=torch.float64).unsqueeze(0)
+    return torch.zeros(1, dtype=torch.float64)
+
+
+def total_spin_row_fn(row: ase.db.row.AtomsRow, dataset: str):
+    """Extract total spin from row.data or row.info."""
+    # Handle both AtomsRow and Atoms objects
+    if hasattr(row, "data") and "spin" in row.data:
+        return get_property_from_row("data.spin", row)
+    elif hasattr(row, "info") and "spin" in row.info:
+        return torch.tensor(row.info["spin"], dtype=torch.float64).unsqueeze(0)
+    # default spin multiplicity (2S+1) is 1 when S=0 (no unpaired electrons)
+    return torch.ones(1, dtype=torch.float64)
+
+
 def test_fixture_node_row_fn(row: ase.db.row.AtomsRow, dataset: str):
     """Just return random noise."""
     pos = torch.from_numpy(row.toatoms().positions)
@@ -231,6 +252,20 @@ stress = PropertyDefinition(
     domain="real",
     row_to_property_fn=stress_row_fn,
     # means + stds are learned from scratch
+)
+
+total_charge = PropertyDefinition(
+    name="total_charge",
+    dim=1,  # one value per system
+    domain="real",
+    row_to_property_fn=total_charge_row_fn,
+)
+
+total_spin = PropertyDefinition(
+    name="total_spin",
+    dim=1,  # one value per system
+    domain="real",
+    row_to_property_fn=total_spin_row_fn,
 )
 
 energy_d3_zero = PropertyDefinition(
@@ -287,6 +322,8 @@ PROPERTIES = {
     stress_d3_zero.fullname: stress_d3_zero,
     test_fixture.fullname: test_fixture,
     test_graph_fixture.fullname: test_graph_fixture,
+    total_charge.fullname: total_charge,
+    total_spin.fullname: total_spin,
 }
 
 
