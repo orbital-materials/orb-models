@@ -209,6 +209,31 @@ def test_fixture_graph_row_fn(row: ase.db.row.AtomsRow, dataset: str):
     return torch.randn((1, 1))
 
 
+def total_charge_row_fn(row: ase.db.row.AtomsRow, dataset: str):
+    """Extract total charge from row.data or row.info."""
+    # Handle both AtomsRow and Atoms objects
+    if hasattr(row, "data") and "charge" in row.data:
+        return get_property_from_row("data.charge", row)
+    elif hasattr(row, "info") and "charge" in row.info:
+        return torch.tensor(row.info["charge"], dtype=torch.float64).unsqueeze(0)
+    return torch.zeros(1, dtype=torch.float64)
+
+
+def spin_multiplicity_row_fn(row: ase.db.row.AtomsRow, dataset: str):
+    """Extract spin multiplicity from row.data or row.info.
+    
+    Spin multiplicity is 2S+1 where S is the total spin quantum number.
+    Default is 1 (singlet state, S=0, no unpaired electrons).
+    """
+    # Handle both AtomsRow and Atoms objects
+    if hasattr(row, "data") and "spin" in row.data:
+        return get_property_from_row("data.spin", row)
+    elif hasattr(row, "info") and "spin" in row.info:
+        return torch.tensor(row.info["spin"], dtype=torch.float64).unsqueeze(0)
+    # Default spin multiplicity is 1 (singlet, S=0, no unpaired electrons)
+    return torch.ones(1, dtype=torch.float64)
+
+
 energy = PropertyDefinition(
     name="energy",
     dim=1,
@@ -277,6 +302,20 @@ test_graph_fixture = PropertyDefinition(
     row_to_property_fn=test_fixture_graph_row_fn,
 )
 
+total_charge = PropertyDefinition(
+    name="total_charge",
+    dim=1,  # one value per system
+    domain="real",
+    row_to_property_fn=total_charge_row_fn,
+)
+
+spin_multiplicity = PropertyDefinition(
+    name="spin_multiplicity",
+    dim=1,  # one value per system
+    domain="real",
+    row_to_property_fn=spin_multiplicity_row_fn,
+)
+
 
 PROPERTIES = {
     energy.fullname: energy,
@@ -287,6 +326,8 @@ PROPERTIES = {
     stress_d3_zero.fullname: stress_d3_zero,
     test_fixture.fullname: test_fixture,
     test_graph_fixture.fullname: test_graph_fixture,
+    total_charge.fullname: total_charge,
+    spin_multiplicity.fullname: spin_multiplicity,
 }
 
 

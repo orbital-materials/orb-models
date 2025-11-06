@@ -22,8 +22,6 @@ from orb_models import utils
 from orb_models.dataset import augmentations
 from orb_models.dataset.ase_sqlite_dataset import AseSqliteDataset
 from orb_models.forcefield import atomic_system, base, pretrained, property_definitions
-from orb_models.forcefield.conservative_regressor import ConservativeForcefieldRegressor
-from orb_models.forcefield.direct_regressor import DirectForcefieldRegressor
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -170,6 +168,7 @@ def build_train_loader(
     system_config: atomic_system.SystemConfig,
     augmentation: Optional[bool] = True,
     target_config: Optional[Dict] = None,
+    extra_features: Optional[Dict] = None,
     **kwargs,
 ) -> DataLoader:
     """Builds the train dataloader from a config file.
@@ -179,9 +178,10 @@ def build_train_loader(
         dataset_path: Dataset path.
         num_workers: The number of workers for each dataset.
         batch_size: The batch_size config for each dataset.
+        system_config: The system config.
         augmentation: If rotation augmentation is used.
         target_config: The target config.
-        system_config: The system config.
+        extra_features: The extra features to extract from DB row and store in atoms.info.
 
     Returns:
         The train Dataloader.
@@ -197,6 +197,7 @@ def build_train_loader(
         dataset_path,
         system_config=system_config,
         target_config=target_config,
+        extra_features=extra_features,
         augmentations=aug,
         **kwargs,
     )
@@ -313,47 +314,58 @@ def load_custom_reference_energies(filepath: str) -> torch.Tensor:
     return ref_energies
 
 
-def configure_model(model, args, device):
-    """Configure model with custom loss weights and reference energies."""
-    is_conservative = isinstance(model, ConservativeForcefieldRegressor)
-    is_direct = isinstance(model, DirectForcefieldRegressor)
+def run(args):
+    """Training Loop.
+
+    Args:
+        config (DictConfig): Config for training loop.
+    """
+    device = utils.init_device(device_id=args.device_id)
+    utils.seed_everything(args.random_seed)
+
+    # Setting this is 2x faster on A100 and H100
+    # GPUs and does not appear to hurt training
+    precision = "float32-high"
+
+    # Prepare loss weights if specified
+    loss_weights = {}
+    is_conservative_model = "conservative" in args.base_model
     
-    logging.info(f"Model type: {type(model).__name__}")
-    logging.info(f"  Conservative: {is_conservative}")
-    logging.info(f"  Direct: {is_direct}")
+    if args.energy_loss_weight is not None:
+        loss_weights["energy"] = args.energy_loss_weight
     
-    # Configure loss weights
-    if args.energy_loss_weight is not None or args.forces_loss_weight is not None or args.stress_loss_weight is not None:
+    if args.forces_loss_weight is not None:
+        # Key depends on model type
+        if is_conservative_model:
+            loss_weights["grad_forces"] = args.forces_loss_weight
+        else:  # direct model
+            loss_weights["forces"] = args.forces_loss_weight
+    
+    if args.stress_loss_weight is not None:
+        # Key depends on model type
+        if is_conservative_model:
+            loss_weights["grad_stress"] = args.stress_loss_weight
+        else:  # direct model
+            loss_weights["stress"] = args.stress_loss_weight
+    
+    if loss_weights:
         logging.info("=" * 60)
-        logging.info("Configuring custom loss weights...")
-        
-        # Set energy weight
-        if args.energy_loss_weight is not None:
-            model.loss_weights["energy"] = args.energy_loss_weight
-            logging.info(f"  energy: {args.energy_loss_weight}")
-        
-        # Set forces weight (key depends on model type)
-        if args.forces_loss_weight is not None:
-            if is_conservative:
-                model.loss_weights["grad_forces"] = args.forces_loss_weight
-                logging.info(f"  grad_forces: {args.forces_loss_weight}")
-            elif is_direct:
-                model.loss_weights["forces"] = args.forces_loss_weight
-                logging.info(f"  forces: {args.forces_loss_weight}")
-        
-        # Set stress weight (key depends on model type)
-        if args.stress_loss_weight is not None:
-            if is_conservative:
-                model.loss_weights["grad_stress"] = args.stress_loss_weight
-                logging.info(f"  grad_stress: {args.stress_loss_weight}")
-            elif is_direct and "stress" in model.heads:
-                model.loss_weights["stress"] = args.stress_loss_weight
-                logging.info(f"  stress: {args.stress_loss_weight}")
-        
-        logging.info(f"Final loss_weights: {model.loss_weights}")
+        logging.info("Custom loss weights specified:")
+        for key, val in loss_weights.items():
+            logging.info(f"  {key}: {val}")
         logging.info("=" * 60)
     
-    # Configure reference energies
+    # Instantiate model with configuration
+    base_model = args.base_model
+    model = getattr(pretrained, base_model)(
+        device=device,
+        precision=precision,
+        train=True,
+        train_reference_energies=args.trainable_reference_energies,
+        loss_weights=loss_weights if loss_weights else None,
+    )
+    
+    # Handle custom reference energies if provided
     if args.custom_reference_energies:
         logging.info("=" * 60)
         logging.info(f"Loading custom reference energies from: {args.custom_reference_energies}")
@@ -370,54 +382,18 @@ def configure_model(model, args, device):
             if val != 0:
                 logging.info(f"  Element {z}: {val:.4f} eV")
         
-        # Make trainable if requested
         if args.trainable_reference_energies:
-            logging.info("Making custom reference energies trainable...")
-            model.heads["energy"].reference.linear.weight.requires_grad = True
+            logging.info("Custom reference energies will be trainable during finetuning")
         else:
             logging.info("Custom reference energies are FIXED (not trainable)")
-            model.heads["energy"].reference.linear.weight.requires_grad = False
         logging.info("=" * 60)
-    
     elif args.trainable_reference_energies:
         logging.info("=" * 60)
-        logging.info("Making reference energies trainable (starting from pretrained values)...")
-        model.heads['energy'].reference.linear.weight.requires_grad = True
-        ref_params = model.heads['energy'].reference.linear.weight.numel()
-        logging.info(f"  Added {ref_params} trainable reference energy parameters")
-        
-        # Show some example values
+        logging.info("Reference energies will be trainable (starting from pretrained values)")
         ref_weights = model.heads['energy'].reference.linear.weight.data.squeeze()
-        logging.info(f"  Current H (element 1): {ref_weights[1].item():.2f}")
-        logging.info(f"  Current C (element 6): {ref_weights[6].item():.2f}")
-        logging.info(f"  Current N (element 7): {ref_weights[7].item():.2f}")
-        logging.info(f"  Current O (element 8): {ref_weights[8].item():.2f}")
+        logging.info(f"  Example values - H: {ref_weights[1].item():.2f}, C: {ref_weights[6].item():.2f}, "
+                    f"N: {ref_weights[7].item():.2f}, O: {ref_weights[8].item():.2f} eV")
         logging.info("=" * 60)
-    
-    return model
-
-
-def run(args):
-    """Training Loop.
-
-    Args:
-        config (DictConfig): Config for training loop.
-    """
-    device = utils.init_device(device_id=args.device_id)
-    utils.seed_everything(args.random_seed)
-
-    # Setting this is 2x faster on A100 and H100
-    # GPUs and does not appear to hurt training
-    precision = "float32-high"
-
-    # Instantiate model
-    base_model = args.base_model
-    model = getattr(pretrained, base_model)(
-        device=device, precision=precision, train=True
-    )
-    
-    # Configure model with custom settings
-    model = configure_model(model, args, device)
 
     model_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logging.info(f"Model has {model_params:,} trainable parameters.")
@@ -439,12 +415,17 @@ def run(args):
         wandb.define_metric("finetune_step/*", step_metric="step")
 
     graph_targets = ["energy", "stress"] if model.has_stress else ["energy"]
+    if "omol" in base_model:
+        extra_features = {"graph": ["total_charge", "spin_multiplicity"]}
+    else:
+        extra_features = None
     loader_args = dict(
         dataset_name=args.dataset,
         dataset_path=args.data_path,
         num_workers=args.num_workers,
         batch_size=args.batch_size,
         target_config={"graph": graph_targets, "node": ["forces"]},
+        extra_features=extra_features,
     )
     train_loader = build_train_loader(
         **loader_args,

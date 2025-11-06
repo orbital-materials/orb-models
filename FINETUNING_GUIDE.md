@@ -257,12 +257,51 @@ Lines starting with `#` are treated as comments and ignored.
 The script automatically handles the differences between conservative and direct models:
 
 - **Conservative models** (e.g., `orb_v3_conservative_omol`):
-  - Use `grad_forces` and `grad_stress` keys
+  - Use `grad_forces` and `grad_stress` as **loss-weight keys**
   - Compute forces via automatic differentiation
 
 - **Direct models** (e.g., `orb_v3_direct_omol`):
-  - Use `forces` and `stress` keys
+  - Use `forces` and `stress` as **loss-weight keys**
   - Predict forces directly
+
+When you specify loss weights via command line (e.g., `--forces_loss_weight 10.0`), the script automatically maps this to the correct key (`grad_forces` for conservative models, `forces` for direct models).
+
+## Using the API Directly (Without the Finetuning Script)
+
+If you prefer to write your own finetuning script, you can use the clean API directly:
+
+```python
+from orb_models.forcefield import pretrained
+
+# Load model with custom configuration
+model = pretrained.orb_v3_conservative_omol(
+    device='cuda',
+    precision='float32-high',
+    train=True,
+    train_reference_energies=True,  # Make reference energies trainable
+    loss_weights={
+        'energy': 1.0,
+        'grad_forces': 10.0,      # Use 'grad_forces' for conservative models
+        'grad_stress': 100.0       # Use 'grad_stress' for conservative models
+    }
+)
+
+# For direct models, use 'forces' and 'stress' keys:
+model = pretrained.orb_v3_direct_omol(
+    device='cuda',
+    train=True,
+    loss_weights={
+        'energy': 1.0,
+        'forces': 10.0,    # Use 'forces' for direct models
+        'stress': 100.0    # Use 'stress' for direct models  
+    }
+)
+
+# The model is now ready for training with your custom configuration!
+# All parameters (including reference energies if specified) are properly set.
+```
+
+This approach is more "pythonic" and clearly documents what configuration options are available. It also encapsulates the implementation details, making your code less fragile to internal changes.
 
 ## How It Works
 
@@ -270,7 +309,7 @@ The script automatically handles the differences between conservative and direct
 
 1. **Without custom reference energies**: The model uses the pretrained reference energies from the checkpoint
 2. **With `--custom_reference_energies`**: Your custom values replace the pretrained ones
-3. **With `--trainable_reference_energies`**: Reference energies become learnable parameters that will be optimized during training
+3. **With `--trainable_reference_energies`** (or `train_reference_energies=True` in the API): Reference energies become learnable parameters that will be optimized during training
 
 ### Loading Finetuned Models
 
@@ -280,18 +319,31 @@ When you save a checkpoint after finetuning, the reference energies (whether cus
 import torch
 from orb_models.forcefield import pretrained
 
-# Load model architecture
-model = pretrained.orb_v3_conservative_omol(train=True)
+# Load model architecture (set train=False for inference)
+model = pretrained.orb_v3_conservative_omol(train=False)
 
 # Load your finetuned checkpoint
 model.load_state_dict(torch.load('path/to/finetuned_checkpoint.pt'))
 
-# The custom/trained reference energies are now loaded!
+# The custom/trained reference energies and any modified parameters are now loaded!
 ```
 
-## Example Workflow
+You can also specify loss weights when loading for further finetuning:
 
-### Scenario: Finetuning on ORCA wB97M-V data with different reference scheme
+```python
+# Load for continued finetuning with different loss weights
+model = pretrained.orb_v3_conservative_omol(
+    train=True,
+    loss_weights={'energy': 0.5, 'grad_forces': 20.0}
+)
+model.load_state_dict(torch.load('path/to/finetuned_checkpoint.pt'))
+```
+
+## Example Workflows
+
+### Scenario 1: Using the finetuning script
+
+Finetuning on ORCA wB97M-V data with different reference scheme:
 
 1. Create your reference energies file (`my_refs.json`):
 ```json
@@ -322,6 +374,55 @@ import torch
 model = pretrained.orb_v3_conservative_omol(train=False)
 model.load_state_dict(torch.load('checkpoints/my_finetuned_model.pt'))
 # Reference energies from my_refs.json are now loaded!
+```
+
+### Scenario 2: Writing your own finetuning script with the API
+
+```python
+import torch
+from torch.utils.data import DataLoader
+from orb_models.forcefield import pretrained
+from orb_models.dataset.ase_sqlite_dataset import AseSqliteDataset
+
+# Load model with configuration
+model = pretrained.orb_v3_conservative_omol(
+    device='cuda',
+    train=True,
+    train_reference_energies=False,  # Fixed reference energies
+    loss_weights={
+        'energy': 1.0,
+        'grad_forces': 10.0,
+    }
+)
+
+# Load your data
+dataset = AseSqliteDataset(
+    name='my_dataset',
+    path='my_dataset.db',
+    system_config=model.system_config,
+    target_config={'graph': ['energy'], 'node': ['forces']}
+)
+
+dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
+
+# Set up optimizer
+optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+
+# Training loop
+for epoch in range(50):
+    for batch in dataloader:
+        batch = batch.to('cuda')
+        output = model.loss(batch)
+        loss = output.loss
+        
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+    
+    print(f"Epoch {epoch}, Loss: {loss.item()}")
+
+# Save checkpoint
+torch.save(model.state_dict(), 'my_finetuned_model.pt')
 ```
 
 ## Tips

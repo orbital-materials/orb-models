@@ -20,7 +20,7 @@ def graph_with_charge_spin_batch(graph):
         system_features={
             **graph_with_features.system_features,
             "total_charge": torch.tensor([-1.0, 0.0, 1.0]),  # 3 graphs
-            "total_spin": torch.tensor([0.0, 1.0, 2.0]),     # 3 graphs
+            "spin_multiplicity": torch.tensor([0.0, 1.0, 2.0]),     # 3 graphs
         }
     )
     return graph_with_features
@@ -54,7 +54,7 @@ def graph_with_charge_spin(graph):
     graph_with_features.system_features.update(
         {
             "total_charge": torch.tensor([0.0]),  # Single graph with charge 0
-            "total_spin": torch.tensor([1.0]),  # Single graph with spin 1
+            "spin_multiplicity": torch.tensor([1.0]),  # Single graph with spin 1
         }
     )
     return graph_with_features
@@ -114,7 +114,7 @@ def test_conditioning_affects_output(gns_model_with_conditioner, graph):
     graph1.system_features.update(
         {
             "total_charge": torch.tensor([0.0]),
-            "total_spin": torch.tensor([0.0]),
+            "spin_multiplicity": torch.tensor([0.0]),
         }
     )
 
@@ -122,7 +122,7 @@ def test_conditioning_affects_output(gns_model_with_conditioner, graph):
     graph2.system_features.update(
         {
             "total_charge": torch.tensor([1.0]),
-            "total_spin": torch.tensor([1.0]),
+            "spin_multiplicity": torch.tensor([1.0]),
         }
     )
 

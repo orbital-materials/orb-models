@@ -228,7 +228,7 @@ def _get_charge_and_spin(atoms: ase.Atoms) -> dict:
         assert isinstance(chg, (float, int)), "Charge must be a float or int"
         assert isinstance(spin, (float, int)), "Spin must be a float or int"
         out["total_charge"] = torch.tensor([chg], dtype=torch.get_default_dtype())
-        out["total_spin"] = torch.tensor([spin], dtype=torch.get_default_dtype())
+        out["spin_multiplicity"] = torch.tensor([spin], dtype=torch.get_default_dtype())
 
     return out
     
