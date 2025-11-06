@@ -20,4 +20,4 @@ RUN ln -s \
 
 ## Install Python requirements
 RUN pip install orb-models && \
-    pip install --extra-index-url=https://pypi.nvidia.com "cuml-cu12==25.2.*"
+    pip install "cuml-cu12==25.2.*"
