@@ -298,7 +298,6 @@ model = pretrained.orb_v3_direct_omol(
 )
 
 # The model is now ready for training with your custom configuration!
-# All parameters (including reference energies if specified) are properly set.
 ```
 
 This approach is more "pythonic" and clearly documents what configuration options are available. It also encapsulates the implementation details, making your code less fragile to internal changes.
