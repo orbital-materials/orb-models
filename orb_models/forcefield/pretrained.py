@@ -1,6 +1,6 @@
 # flake8: noqa: E501
 from functools import partial
-from typing import Optional, Union
+from typing import Dict, Optional, Union
 
 import torch
 from cached_path import cached_path
@@ -62,6 +62,8 @@ def load_model(
     precision: str = "float32-high",
     compile: Optional[bool] = None,
     train: bool = False,
+    train_reference_energies: bool = False,
+    loss_weights: Optional[Dict[str, float]] = None,
 ) -> Union[DirectForcefieldRegressor, ConservativeForcefieldRegressor]:
     """Load a pretrained model from a local path or a wandb artifact.
 
@@ -75,7 +77,10 @@ def load_model(
             - "float64" means the model will use double precision.
         compile: Whether to torch.compile the model. Defaults to None, which will compile the model
             if the device is not MPS.
-        train: Whether to set the model to training mode and keep parameters trainable.
+        train: Whether to set the model to training mode and keep parameters trainable (except reference energies).
+        train_reference_energies: Whether to make reference energies trainable during finetuning.
+        loss_weights: Optional dictionary of loss weights to override model defaults.
+            Keys should match the loss terms (e.g., "energy", "grad_forces", "forces", "stress", "grad_stress").
 
     Returns:
         model: The pretrained model
@@ -103,6 +108,18 @@ def load_model(
     if not train:
         for param in model.parameters():
             param.requires_grad = False
+    
+    # Handle reference energy training
+    if hasattr(model, "heads") and "energy" in model.heads:
+        if train_reference_energies:
+            model.heads["energy"].reference.linear.weight.requires_grad = True
+        elif train:
+            # When training but not training reference energies, explicitly freeze them
+            model.heads["energy"].reference.linear.weight.requires_grad = False
+    
+    # Set loss weights if provided
+    if loss_weights is not None and hasattr(model, "loss_weights"):
+        model.loss_weights.update(loss_weights)
 
     return model
 
@@ -338,6 +355,8 @@ def orb_v3_conservative_omol(
     precision: str = "float32-high",
     compile: Optional[bool] = None,
     train: bool = False,
+    train_reference_energies: bool = False,
+    loss_weights: Optional[Dict[str, float]] = None,
 ) -> ConservativeForcefieldRegressor:
     """Load ORB v3 Conservative with effectively unlimited neighbors, trained on OMol25.
 
@@ -358,7 +377,14 @@ def orb_v3_conservative_omol(
         has_stress=False,
     )
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
+        loss_weights=loss_weights,
     )
 
     return model
@@ -370,6 +396,8 @@ def orb_v3_direct_omol(
     precision: str = "float32-high",
     compile: Optional[bool] = None,
     train: bool = False,
+    train_reference_energies: bool = False,
+    loss_weights: Optional[Dict[str, float]] = None,
 ) -> DirectForcefieldRegressor:
     """Load ORB v3 Direct with effectively unlimited neighbors, trained on OMol25.
 
@@ -384,7 +412,14 @@ def orb_v3_direct_omol(
         has_stress=False,
     )
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
+        loss_weights=loss_weights,
     )
 
     return model
@@ -396,6 +431,8 @@ def orb_v3_conservative_20_omat(
     precision: str = "float32-high",
     compile: Optional[bool] = None,
     train: bool = False,
+    train_reference_energies: bool = False,
+    loss_weights: Optional[Dict[str, float]] = None,
 ) -> ConservativeForcefieldRegressor:
     """Load ORB v3 Conservative 20 max neighbors OMAT."""
     if compile is None and train:
@@ -407,7 +444,14 @@ def orb_v3_conservative_20_omat(
     system_config = SystemConfig(radius=6.0, max_num_neighbors=20)
     model = orb_v3_conservative_architecture(device=device, system_config=system_config)
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
+        loss_weights=loss_weights,
     )
 
     return model
@@ -419,6 +463,8 @@ def orb_v3_conservative_inf_omat(
     precision: str = "float32-high",
     compile: Optional[bool] = None,
     train: bool = False,
+    train_reference_energies: bool = False,
+    loss_weights: Optional[Dict[str, float]] = None,
 ) -> ConservativeForcefieldRegressor:
     """Load ORB v3 Conservative with effectively unlimited neighbors, trained on OMAT.
 
@@ -434,7 +480,14 @@ def orb_v3_conservative_inf_omat(
     system_config = SystemConfig(radius=6.0, max_num_neighbors=120)
     model = orb_v3_conservative_architecture(device=device, system_config=system_config)
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
+        loss_weights=loss_weights,
     )
 
     return model
@@ -446,12 +499,21 @@ def orb_v3_direct_20_omat(
     precision: str = "float32-high",
     compile: Optional[bool] = None,
     train: bool = False,
+    train_reference_energies: bool = False,
+    loss_weights: Optional[Dict[str, float]] = None,
 ) -> DirectForcefieldRegressor:
     """Load ORB v3 Direct 20 max neighbors OMAT."""
     system_config = SystemConfig(radius=6.0, max_num_neighbors=20)
     model = orb_v3_direct_architecture(device=device, system_config=system_config)
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
+        loss_weights=loss_weights,
     )
 
     return model
@@ -463,6 +525,8 @@ def orb_v3_direct_inf_omat(
     precision: str = "float32-high",
     compile: Optional[bool] = None,
     train: bool = False,
+    train_reference_energies: bool = False,
+    loss_weights: Optional[Dict[str, float]] = None,
 ) -> DirectForcefieldRegressor:
     """Load ORB v3 Direct with effectively unlimited neighbors, trained on OMAT.
 
@@ -472,7 +536,14 @@ def orb_v3_direct_inf_omat(
     system_config = SystemConfig(radius=6.0, max_num_neighbors=120)
     model = orb_v3_direct_architecture(device=device, system_config=system_config)
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
+        loss_weights=loss_weights,
     )
 
     return model
@@ -637,12 +708,21 @@ def orb_v2(
     precision: str = "float32-high",
     compile: Optional[bool] = None,
     train: bool = False,
+    train_reference_energies: bool = False,
+    loss_weights: Optional[Dict[str, float]] = None,
 ) -> DirectForcefieldRegressor:
     """Load ORB v2 Direct with 20 max neighbors, trained on MPTraj + Alexandria."""
     system_config = SystemConfig(radius=6.0, max_num_neighbors=20)
     model = orb_v2_architecture(device=device, system_config=system_config)
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
+        loss_weights=loss_weights,
     )
 
     return model

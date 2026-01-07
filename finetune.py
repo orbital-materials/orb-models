@@ -1,4 +1,4 @@
-"""Finetuning loop."""
+"""Finetuning loop with custom loss weights and reference energy control."""
 
 import argparse
 import logging
@@ -168,6 +168,7 @@ def build_train_loader(
     system_config: atomic_system.SystemConfig,
     augmentation: Optional[bool] = True,
     target_config: Optional[Dict] = None,
+    extra_features: Optional[Dict] = None,
     **kwargs,
 ) -> DataLoader:
     """Builds the train dataloader from a config file.
@@ -177,9 +178,10 @@ def build_train_loader(
         dataset_path: Dataset path.
         num_workers: The number of workers for each dataset.
         batch_size: The batch_size config for each dataset.
+        system_config: The system config.
         augmentation: If rotation augmentation is used.
         target_config: The target config.
-        system_config: The system config.
+        extra_features: The extra features to extract from DB row and store in atoms.info.
 
     Returns:
         The train Dataloader.
@@ -195,6 +197,7 @@ def build_train_loader(
         dataset_path,
         system_config=system_config,
         target_config=target_config,
+        extra_features=extra_features,
         augmentations=aug,
         **kwargs,
     )
@@ -221,6 +224,96 @@ def build_train_loader(
     return train_loader
 
 
+def load_custom_reference_energies(filepath: str) -> torch.Tensor:
+    """
+    Load custom reference energies from a file.
+    
+    Supports two formats:
+    1. JSON: {"1": -13.6, "6": -1030.5, ...} or {"H": -13.6, "C": -1030.5, ...}
+    2. Text: One line per element: "element_number energy" or "element_symbol energy"
+    
+    Args:
+        filepath: Path to the reference energies file
+        
+    Returns:
+        Tensor of shape [118] with reference energies
+    """
+    import json
+    
+    # Element symbol to atomic number mapping
+    ELEMENT_SYMBOLS = {
+        'H': 1, 'He': 2, 'Li': 3, 'Be': 4, 'B': 5, 'C': 6, 'N': 7, 'O': 8, 'F': 9, 'Ne': 10,
+        'Na': 11, 'Mg': 12, 'Al': 13, 'Si': 14, 'P': 15, 'S': 16, 'Cl': 17, 'Ar': 18,
+        'K': 19, 'Ca': 20, 'Sc': 21, 'Ti': 22, 'V': 23, 'Cr': 24, 'Mn': 25, 'Fe': 26,
+        'Co': 27, 'Ni': 28, 'Cu': 29, 'Zn': 30, 'Ga': 31, 'Ge': 32, 'As': 33, 'Se': 34,
+        'Br': 35, 'Kr': 36, 'Rb': 37, 'Sr': 38, 'Y': 39, 'Zr': 40, 'Nb': 41, 'Mo': 42,
+        'Tc': 43, 'Ru': 44, 'Rh': 45, 'Pd': 46, 'Ag': 47, 'Cd': 48, 'In': 49, 'Sn': 50,
+        'Sb': 51, 'Te': 52, 'I': 53, 'Xe': 54, 'Cs': 55, 'Ba': 56, 'La': 57, 'Ce': 58,
+        'Pr': 59, 'Nd': 60, 'Pm': 61, 'Sm': 62, 'Eu': 63, 'Gd': 64, 'Tb': 65, 'Dy': 66,
+        'Ho': 67, 'Er': 68, 'Tm': 69, 'Yb': 70, 'Lu': 71, 'Hf': 72, 'Ta': 73, 'W': 74,
+        'Re': 75, 'Os': 76, 'Ir': 77, 'Pt': 78, 'Au': 79, 'Hg': 80, 'Tl': 81, 'Pb': 82,
+        'Bi': 83, 'Po': 84, 'At': 85, 'Rn': 86, 'Fr': 87, 'Ra': 88, 'Ac': 89, 'Th': 90,
+        'Pa': 91, 'U': 92, 'Np': 93, 'Pu': 94, 'Am': 95, 'Cm': 96, 'Bk': 97, 'Cf': 98,
+        'Es': 99, 'Fm': 100, 'Md': 101, 'No': 102, 'Lr': 103, 'Rf': 104, 'Db': 105,
+        'Sg': 106, 'Bh': 107, 'Hs': 108, 'Mt': 109, 'Ds': 110, 'Rg': 111, 'Cn': 112,
+        'Nh': 113, 'Fl': 114, 'Mc': 115, 'Lv': 116, 'Ts': 117, 'Og': 118,
+    }
+    
+    ref_energies = torch.zeros(118)
+    
+    # Try to load as JSON first
+    try:
+        with open(filepath, 'r') as f:
+            data = json.load(f)
+        
+        for key, value in data.items():
+            # Try as atomic number first
+            try:
+                z = int(key)
+                if 1 <= z <= 118:
+                    ref_energies[z] = float(value)
+            except ValueError:
+                # Try as element symbol
+                if key in ELEMENT_SYMBOLS:
+                    z = ELEMENT_SYMBOLS[key]
+                    ref_energies[z] = float(value)
+                else:
+                    logging.warning(f"Unknown element symbol or invalid atomic number: {key}")
+        
+        logging.info(f"Loaded reference energies from JSON file: {filepath}")
+        
+    except json.JSONDecodeError:
+        # Try as text file format
+        with open(filepath, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                
+                parts = line.split()
+                if len(parts) != 2:
+                    logging.warning(f"Skipping invalid line: {line}")
+                    continue
+                
+                element, energy = parts
+                try:
+                    # Try as atomic number
+                    z = int(element)
+                    if 1 <= z <= 118:
+                        ref_energies[z] = float(energy)
+                except ValueError:
+                    # Try as element symbol
+                    if element in ELEMENT_SYMBOLS:
+                        z = ELEMENT_SYMBOLS[element]
+                        ref_energies[z] = float(energy)
+                    else:
+                        logging.warning(f"Unknown element: {element}")
+        
+        logging.info(f"Loaded reference energies from text file: {filepath}")
+    
+    return ref_energies
+
+
 def run(args):
     """Training Loop.
 
@@ -234,14 +327,76 @@ def run(args):
     # GPUs and does not appear to hurt training
     precision = "float32-high"
 
-    # Instantiate model
+    # Prepare loss weights if specified
+    loss_weights = {}
+    is_conservative_model = "conservative" in args.base_model
+    
+    if args.energy_loss_weight is not None:
+        loss_weights["energy"] = args.energy_loss_weight
+    
+    if args.forces_loss_weight is not None:
+        # Key depends on model type
+        if is_conservative_model:
+            loss_weights["grad_forces"] = args.forces_loss_weight
+        else:  # direct model
+            loss_weights["forces"] = args.forces_loss_weight
+    
+    if args.stress_loss_weight is not None:
+        # Key depends on model type
+        if is_conservative_model:
+            loss_weights["grad_stress"] = args.stress_loss_weight
+        else:  # direct model
+            loss_weights["stress"] = args.stress_loss_weight
+    
+    if loss_weights:
+        logging.info("=" * 60)
+        logging.info("Custom loss weights specified:")
+        for key, val in loss_weights.items():
+            logging.info(f"  {key}: {val}")
+        logging.info("=" * 60)
+    
+    # Instantiate model with configuration
     base_model = args.base_model
     model = getattr(pretrained, base_model)(
-        device=device, precision=precision, train=True
+        device=device,
+        precision=precision,
+        train=True,
+        train_reference_energies=args.trainable_reference_energies,
+        loss_weights=loss_weights if loss_weights else None,
     )
+    
+    # Handle custom reference energies if provided
+    if args.custom_reference_energies:
+        logging.info("=" * 60)
+        logging.info(f"Loading custom reference energies from: {args.custom_reference_energies}")
+        custom_refs = load_custom_reference_energies(args.custom_reference_energies)
+        custom_refs = custom_refs.to(device)
+        
+        # Set the custom reference energies
+        model.heads["energy"].reference.linear.weight.data = custom_refs.unsqueeze(0)
+        
+        # Log some values for verification
+        logging.info("Custom reference energies set:")
+        for z in [1, 6, 7, 8]:  # H, C, N, O
+            val = custom_refs[z].item()
+            if val != 0:
+                logging.info(f"  Element {z}: {val:.4f} eV")
+        
+        if args.trainable_reference_energies:
+            logging.info("Custom reference energies will be trainable during finetuning")
+        else:
+            logging.info("Custom reference energies are FIXED (not trainable)")
+        logging.info("=" * 60)
+    elif args.trainable_reference_energies:
+        logging.info("=" * 60)
+        logging.info("Reference energies will be trainable (starting from pretrained values)")
+        ref_weights = model.heads['energy'].reference.linear.weight.data.squeeze()
+        logging.info(f"  Example values - H: {ref_weights[1].item():.2f}, C: {ref_weights[6].item():.2f}, "
+                    f"N: {ref_weights[7].item():.2f}, O: {ref_weights[8].item():.2f} eV")
+        logging.info("=" * 60)
 
     model_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    logging.info(f"Model has {model_params} trainable parameters.")
+    logging.info(f"Model has {model_params:,} trainable parameters.")
 
     # Move model to correct device.
     model.to(device=device)
@@ -260,12 +415,17 @@ def run(args):
         wandb.define_metric("finetune_step/*", step_metric="step")
 
     graph_targets = ["energy", "stress"] if model.has_stress else ["energy"]
+    if "omol" in base_model:
+        extra_features = {"graph": ["total_charge", "spin_multiplicity"]}
+    else:
+        extra_features = None
     loader_args = dict(
         dataset_name=args.dataset,
         dataset_path=args.data_path,
         num_workers=args.num_workers,
         batch_size=args.batch_size,
         target_config={"graph": graph_targets, "node": ["forces"]},
+        extra_features=extra_features,
     )
     train_loader = build_train_loader(
         **loader_args,
@@ -309,7 +469,7 @@ def run(args):
 def main():
     """Main."""
     parser = argparse.ArgumentParser(
-        description="Finetune orb model",
+        description="Finetune orb model with custom loss weights and reference energy control",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
@@ -394,12 +554,49 @@ def main():
             "orb_v3_conservative_20_omat",
             "orb_v3_direct_inf_omat",
             "orb_v3_direct_20_omat",
+            "orb_v3_conservative_omol",
+            "orb_v3_direct_omol",
             "orb_v2",
         ],
     )
+    
+    # Loss weight arguments
+    parser.add_argument(
+        "--energy_loss_weight",
+        default=None,
+        type=float,
+        help="Weight for energy loss. If not specified, uses model default (usually 1.0).",
+    )
+    parser.add_argument(
+        "--forces_loss_weight",
+        default=None,
+        type=float,
+        help="Weight for forces loss. Automatically uses 'forces' or 'grad_forces' depending on model type. If not specified, uses model default (usually 1.0).",
+    )
+    parser.add_argument(
+        "--stress_loss_weight",
+        default=None,
+        type=float,
+        help="Weight for stress loss. Automatically uses 'stress' or 'grad_stress' depending on model type. Set to 0 to disable stress training. If not specified, uses model default.",
+    )
+    
+    # Reference energy arguments
+    parser.add_argument(
+        "--trainable_reference_energies",
+        action="store_true",
+        help="Make reference energies trainable. They will be optimized during finetuning to match your dataset's reference energy scheme.",
+    )
+    parser.add_argument(
+        "--custom_reference_energies",
+        default=None,
+        type=str,
+        help="Path to file with custom reference energies. Supports JSON format {'H': -13.6, 'C': -1030.5, ...} or text format 'H -13.6\\nC -1030.5\\n...'. Use with --trainable_reference_energies to make them trainable, or leave that flag off to keep them fixed.",
+    )
+    
     args = parser.parse_args()
     run(args)
 
 
 if __name__ == "__main__":
     main()
+

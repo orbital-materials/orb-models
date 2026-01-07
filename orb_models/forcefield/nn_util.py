@@ -137,11 +137,11 @@ class ChargeSpinConditioner(nn.Module):
         assert (
             batch.system_features is not None
             and "total_charge" in batch.system_features
-            and "total_spin" in batch.system_features
+            and "spin_multiplicity" in batch.system_features
         ), "Batch is missing required system_features."
 
         charges = batch.system_features["total_charge"]
-        spins = batch.system_features["total_spin"]
+        spins = batch.system_features["spin_multiplicity"]
 
         charge_emb = self.charge_embedding(charges)
         spin_emb = self.spin_embedding(spins)
