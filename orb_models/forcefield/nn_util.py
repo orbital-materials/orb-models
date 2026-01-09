@@ -138,7 +138,7 @@ class ChargeSpinConditioner(nn.Module):
             batch.system_features is not None
             and "total_charge" in batch.system_features
             and "spin_multiplicity" in batch.system_features
-        ), "Batch is missing required system_features."
+        ), "Missing required total_charge and spin_multiplicity in system_features."
 
         charges = batch.system_features["total_charge"]
         spins = batch.system_features["spin_multiplicity"]
@@ -154,6 +154,7 @@ class ChargeSpinConditioner(nn.Module):
             edge_embs = combined_emb.repeat_interleave(batch.n_edge, dim=0)
 
         return node_embs, edge_embs
+
 
 class SSP(nn.Softplus):
     """Shifted Softplus activation function.
