@@ -3,7 +3,7 @@
 import argparse
 import logging
 import os
-from typing import Dict, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 import torch
 import tqdm
@@ -12,11 +12,11 @@ from torch.utils.data import BatchSampler, DataLoader, RandomSampler
 
 try:
     import wandb
+
+    WANDB_AVAILABLE = True
 except ImportError:
-    raise ImportError(
-        "wandb is not installed. Please install it with `pip install wandb`."
-    )
-from wandb import wandb_run
+    wandb = None  # type: ignore
+    WANDB_AVAILABLE = False
 
 from orb_models import utils
 from orb_models.dataset import augmentations
@@ -28,8 +28,13 @@ logging.basicConfig(
 )
 
 
-def init_wandb_from_config(dataset: str, job_type: str, entity: str) -> wandb_run.Run:
+def init_wandb_from_config(dataset: str, job_type: str, entity: str) -> Any:
     """Initialise wandb."""
+    if not WANDB_AVAILABLE:
+        raise ImportError(
+            "wandb is not installed. Install with `pip install wandb` to enable logging."
+        )
+
     wandb.init(  # type: ignore
         job_type=job_type,
         dir=os.path.join(os.getcwd(), "wandb"),
@@ -72,7 +77,7 @@ def finetune(
     Returns
         A dictionary of metrics.
     """
-    run: Optional[wandb_run.Run] = wandb.run
+    run: Optional[Any] = wandb.run if WANDB_AVAILABLE else None
 
     if clip_grad is not None:
         hook_handles = utils.gradient_clipping(model, clip_grad)
@@ -227,45 +232,148 @@ def build_train_loader(
 def load_custom_reference_energies(filepath: str) -> torch.Tensor:
     """
     Load custom reference energies from a file.
-    
+
     Supports two formats:
     1. JSON: {"1": -13.6, "6": -1030.5, ...} or {"H": -13.6, "C": -1030.5, ...}
     2. Text: One line per element: "element_number energy" or "element_symbol energy"
-    
+
     Args:
         filepath: Path to the reference energies file
-        
+
     Returns:
         Tensor of shape [118] with reference energies
     """
     import json
-    
+
     # Element symbol to atomic number mapping
     ELEMENT_SYMBOLS = {
-        'H': 1, 'He': 2, 'Li': 3, 'Be': 4, 'B': 5, 'C': 6, 'N': 7, 'O': 8, 'F': 9, 'Ne': 10,
-        'Na': 11, 'Mg': 12, 'Al': 13, 'Si': 14, 'P': 15, 'S': 16, 'Cl': 17, 'Ar': 18,
-        'K': 19, 'Ca': 20, 'Sc': 21, 'Ti': 22, 'V': 23, 'Cr': 24, 'Mn': 25, 'Fe': 26,
-        'Co': 27, 'Ni': 28, 'Cu': 29, 'Zn': 30, 'Ga': 31, 'Ge': 32, 'As': 33, 'Se': 34,
-        'Br': 35, 'Kr': 36, 'Rb': 37, 'Sr': 38, 'Y': 39, 'Zr': 40, 'Nb': 41, 'Mo': 42,
-        'Tc': 43, 'Ru': 44, 'Rh': 45, 'Pd': 46, 'Ag': 47, 'Cd': 48, 'In': 49, 'Sn': 50,
-        'Sb': 51, 'Te': 52, 'I': 53, 'Xe': 54, 'Cs': 55, 'Ba': 56, 'La': 57, 'Ce': 58,
-        'Pr': 59, 'Nd': 60, 'Pm': 61, 'Sm': 62, 'Eu': 63, 'Gd': 64, 'Tb': 65, 'Dy': 66,
-        'Ho': 67, 'Er': 68, 'Tm': 69, 'Yb': 70, 'Lu': 71, 'Hf': 72, 'Ta': 73, 'W': 74,
-        'Re': 75, 'Os': 76, 'Ir': 77, 'Pt': 78, 'Au': 79, 'Hg': 80, 'Tl': 81, 'Pb': 82,
-        'Bi': 83, 'Po': 84, 'At': 85, 'Rn': 86, 'Fr': 87, 'Ra': 88, 'Ac': 89, 'Th': 90,
-        'Pa': 91, 'U': 92, 'Np': 93, 'Pu': 94, 'Am': 95, 'Cm': 96, 'Bk': 97, 'Cf': 98,
-        'Es': 99, 'Fm': 100, 'Md': 101, 'No': 102, 'Lr': 103, 'Rf': 104, 'Db': 105,
-        'Sg': 106, 'Bh': 107, 'Hs': 108, 'Mt': 109, 'Ds': 110, 'Rg': 111, 'Cn': 112,
-        'Nh': 113, 'Fl': 114, 'Mc': 115, 'Lv': 116, 'Ts': 117, 'Og': 118,
+        "H": 1,
+        "He": 2,
+        "Li": 3,
+        "Be": 4,
+        "B": 5,
+        "C": 6,
+        "N": 7,
+        "O": 8,
+        "F": 9,
+        "Ne": 10,
+        "Na": 11,
+        "Mg": 12,
+        "Al": 13,
+        "Si": 14,
+        "P": 15,
+        "S": 16,
+        "Cl": 17,
+        "Ar": 18,
+        "K": 19,
+        "Ca": 20,
+        "Sc": 21,
+        "Ti": 22,
+        "V": 23,
+        "Cr": 24,
+        "Mn": 25,
+        "Fe": 26,
+        "Co": 27,
+        "Ni": 28,
+        "Cu": 29,
+        "Zn": 30,
+        "Ga": 31,
+        "Ge": 32,
+        "As": 33,
+        "Se": 34,
+        "Br": 35,
+        "Kr": 36,
+        "Rb": 37,
+        "Sr": 38,
+        "Y": 39,
+        "Zr": 40,
+        "Nb": 41,
+        "Mo": 42,
+        "Tc": 43,
+        "Ru": 44,
+        "Rh": 45,
+        "Pd": 46,
+        "Ag": 47,
+        "Cd": 48,
+        "In": 49,
+        "Sn": 50,
+        "Sb": 51,
+        "Te": 52,
+        "I": 53,
+        "Xe": 54,
+        "Cs": 55,
+        "Ba": 56,
+        "La": 57,
+        "Ce": 58,
+        "Pr": 59,
+        "Nd": 60,
+        "Pm": 61,
+        "Sm": 62,
+        "Eu": 63,
+        "Gd": 64,
+        "Tb": 65,
+        "Dy": 66,
+        "Ho": 67,
+        "Er": 68,
+        "Tm": 69,
+        "Yb": 70,
+        "Lu": 71,
+        "Hf": 72,
+        "Ta": 73,
+        "W": 74,
+        "Re": 75,
+        "Os": 76,
+        "Ir": 77,
+        "Pt": 78,
+        "Au": 79,
+        "Hg": 80,
+        "Tl": 81,
+        "Pb": 82,
+        "Bi": 83,
+        "Po": 84,
+        "At": 85,
+        "Rn": 86,
+        "Fr": 87,
+        "Ra": 88,
+        "Ac": 89,
+        "Th": 90,
+        "Pa": 91,
+        "U": 92,
+        "Np": 93,
+        "Pu": 94,
+        "Am": 95,
+        "Cm": 96,
+        "Bk": 97,
+        "Cf": 98,
+        "Es": 99,
+        "Fm": 100,
+        "Md": 101,
+        "No": 102,
+        "Lr": 103,
+        "Rf": 104,
+        "Db": 105,
+        "Sg": 106,
+        "Bh": 107,
+        "Hs": 108,
+        "Mt": 109,
+        "Ds": 110,
+        "Rg": 111,
+        "Cn": 112,
+        "Nh": 113,
+        "Fl": 114,
+        "Mc": 115,
+        "Lv": 116,
+        "Ts": 117,
+        "Og": 118,
     }
-    
+
     ref_energies = torch.zeros(118)
-    
+
     # Try to load as JSON first
     try:
-        with open(filepath, 'r') as f:
+        with open(filepath, "r") as f:
             data = json.load(f)
-        
+
         for key, value in data.items():
             # Try as atomic number first
             try:
@@ -278,23 +386,25 @@ def load_custom_reference_energies(filepath: str) -> torch.Tensor:
                     z = ELEMENT_SYMBOLS[key]
                     ref_energies[z] = float(value)
                 else:
-                    logging.warning(f"Unknown element symbol or invalid atomic number: {key}")
-        
+                    logging.warning(
+                        f"Unknown element symbol or invalid atomic number: {key}"
+                    )
+
         logging.info(f"Loaded reference energies from JSON file: {filepath}")
-        
+
     except json.JSONDecodeError:
         # Try as text file format
-        with open(filepath, 'r') as f:
+        with open(filepath, "r") as f:
             for line in f:
                 line = line.strip()
-                if not line or line.startswith('#'):
+                if not line or line.startswith("#"):
                     continue
-                
+
                 parts = line.split()
                 if len(parts) != 2:
                     logging.warning(f"Skipping invalid line: {line}")
                     continue
-                
+
                 element, energy = parts
                 try:
                     # Try as atomic number
@@ -308,9 +418,9 @@ def load_custom_reference_energies(filepath: str) -> torch.Tensor:
                         ref_energies[z] = float(energy)
                     else:
                         logging.warning(f"Unknown element: {element}")
-        
+
         logging.info(f"Loaded reference energies from text file: {filepath}")
-    
+
     return ref_energies
 
 
@@ -330,31 +440,31 @@ def run(args):
     # Prepare loss weights if specified
     loss_weights = {}
     is_conservative_model = "conservative" in args.base_model
-    
+
     if args.energy_loss_weight is not None:
         loss_weights["energy"] = args.energy_loss_weight
-    
+
     if args.forces_loss_weight is not None:
         # Key depends on model type
         if is_conservative_model:
             loss_weights["grad_forces"] = args.forces_loss_weight
         else:  # direct model
             loss_weights["forces"] = args.forces_loss_weight
-    
+
     if args.stress_loss_weight is not None:
         # Key depends on model type
         if is_conservative_model:
             loss_weights["grad_stress"] = args.stress_loss_weight
         else:  # direct model
             loss_weights["stress"] = args.stress_loss_weight
-    
+
     if loss_weights:
         logging.info("=" * 60)
         logging.info("Custom loss weights specified:")
         for key, val in loss_weights.items():
             logging.info(f"  {key}: {val}")
         logging.info("=" * 60)
-    
+
     # Instantiate model with configuration
     base_model = args.base_model
     model = getattr(pretrained, base_model)(
@@ -364,35 +474,43 @@ def run(args):
         train_reference_energies=args.trainable_reference_energies,
         loss_weights=loss_weights if loss_weights else None,
     )
-    
+
     # Handle custom reference energies if provided
     if args.custom_reference_energies:
         logging.info("=" * 60)
-        logging.info(f"Loading custom reference energies from: {args.custom_reference_energies}")
+        logging.info(
+            f"Loading custom reference energies from: {args.custom_reference_energies}"
+        )
         custom_refs = load_custom_reference_energies(args.custom_reference_energies)
         custom_refs = custom_refs.to(device)
-        
+
         # Set the custom reference energies
         model.heads["energy"].reference.linear.weight.data = custom_refs.unsqueeze(0)
-        
+
         # Log some values for verification
         logging.info("Custom reference energies set:")
         for z in [1, 6, 7, 8]:  # H, C, N, O
             val = custom_refs[z].item()
             if val != 0:
                 logging.info(f"  Element {z}: {val:.4f} eV")
-        
+
         if args.trainable_reference_energies:
-            logging.info("Custom reference energies will be trainable during finetuning")
+            logging.info(
+                "Custom reference energies will be trainable during finetuning"
+            )
         else:
             logging.info("Custom reference energies are FIXED (not trainable)")
         logging.info("=" * 60)
     elif args.trainable_reference_energies:
         logging.info("=" * 60)
-        logging.info("Reference energies will be trainable (starting from pretrained values)")
-        ref_weights = model.heads['energy'].reference.linear.weight.data.squeeze()
-        logging.info(f"  Example values - H: {ref_weights[1].item():.2f}, C: {ref_weights[6].item():.2f}, "
-                    f"N: {ref_weights[7].item():.2f}, O: {ref_weights[8].item():.2f} eV")
+        logging.info(
+            "Reference energies will be trainable (starting from pretrained values)"
+        )
+        ref_weights = model.heads["energy"].reference.linear.weight.data.squeeze()
+        logging.info(
+            f"  Example values - H: {ref_weights[1].item():.2f}, C: {ref_weights[6].item():.2f}, "
+            f"N: {ref_weights[7].item():.2f}, O: {ref_weights[8].item():.2f} eV"
+        )
         logging.info("=" * 60)
 
     model_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -406,13 +524,19 @@ def run(args):
     wandb_run = None
     # Logger instantiation/configuration
     if args.wandb:
-        logging.info("Instantiating WandbLogger.")
-        wandb_run = init_wandb_from_config(
-            dataset=args.dataset, job_type="finetuning", entity=args.wandb_entity
-        )
+        if not WANDB_AVAILABLE:
+            raise ImportError(
+                "wandb flag is set but wandb is not installed. "
+                "Install with `pip install wandb` to enable logging."
+            )
+        else:
+            logging.info("Instantiating WandbLogger.")
+            wandb_run = init_wandb_from_config(
+                dataset=args.dataset, job_type="finetuning", entity=args.wandb_entity
+            )
 
-        wandb.define_metric("step")
-        wandb.define_metric("finetune_step/*", step_metric="step")
+            wandb.define_metric("step")
+            wandb.define_metric("finetune_step/*", step_metric="step")
 
     graph_targets = ["energy", "stress"] if model.has_stress else ["energy"]
     if "omol" in base_model:
@@ -480,7 +604,7 @@ def main():
     )
     parser.add_argument(
         "--wandb",
-        default=True,
+        default=False,
         action="store_true",
         help="If the run is logged to Weights and Biases (requires installation).",
     )
@@ -559,7 +683,7 @@ def main():
             "orb_v2",
         ],
     )
-    
+
     # Loss weight arguments
     parser.add_argument(
         "--energy_loss_weight",
@@ -579,7 +703,7 @@ def main():
         type=float,
         help="Weight for stress loss. Automatically uses 'stress' or 'grad_stress' depending on model type. Set to 0 to disable stress training. If not specified, uses model default.",
     )
-    
+
     # Reference energy arguments
     parser.add_argument(
         "--trainable_reference_energies",
@@ -592,11 +716,10 @@ def main():
         type=str,
         help="Path to file with custom reference energies. Supports JSON format {'H': -13.6, 'C': -1030.5, ...} or text format 'H -13.6\\nC -1030.5\\n...'. Use with --trainable_reference_energies to make them trainable, or leave that flag off to keep them fixed.",
     )
-    
+
     args = parser.parse_args()
     run(args)
 
 
 if __name__ == "__main__":
     main()
-
