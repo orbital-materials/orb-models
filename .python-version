@@ -1,0 +1,4 @@
+# Python version, ensures consistent development environment 
+# If the version changes in this file, running `uv sync` or `uv sync --group dev` 
+# will download the relevant Python version
+3.12

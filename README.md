@@ -17,7 +17,7 @@ pip install orb-models
 
 Orb models are expected to work on MacOS and Linux. Windows support is not guaranteed.
 
-For large system (≳5k atoms PBC, or ≳30k atoms non-PBC) simulations we recommend installing [cuML](https://docs.rapids.ai/install/) (requires CUDA), which can significantly reduce graph creation time (2-10x) and improve GPU memory efficiency (2-100x):
+**Note:** Earlier versions of `orb-models` used [cuML](https://github.com/rapidsai/cuml) for fast neighborhood graph creation, however this is being deprecated in favor of [nvalchemiops](https://github.com/NVIDIA/nvalchemi-toolkit-ops). If you still want to use cuML-based methods (e.g. `knn_cuml_rbc`), install with the following:
 ```bash
 pip install "cuml-cu11==25.2.*"  # For cuda versions >=11.4, <11.8
 pip install "cuml-cu12==25.2.*"  # For cuda versions >=12.0, <13.0
@@ -49,6 +49,7 @@ See [MODELS.md](MODELS.md) for a full list of available models along with guidan
 Note: These examples are designed to run on the `main` branch of orb-models. If you are using a pip installed version of `orb-models`, you may want to look at the corresponding [README.md from that tag](https://github.com/orbital-materials/orb-models/tags).
 
 #### Direct usage
+
 ```python
 
 import ase
@@ -116,7 +117,7 @@ dyn.run(fmax=0.01)
 print("Optimized Energy:", atoms.get_potential_energy())
 ```
 
-Or you can use it to run MD simulations. The script, an example input xyz file and a Colab notebook demonstration are available in the [examples directory.](./examples) This should work with any input, simply modify the input_file and cell_size parameters. We recommend using constant volume simulations.
+Or you can use it to run MD simulations. The script, an example input xyz file and a Colab notebook demonstration are available in the [examples directory](./examples). This should work with any input, simply modify the input_file and cell_size parameters. We recommend using constant volume simulations.
 
 #### How to specify total charge and spin multiplicity for OrbMol
 
@@ -179,9 +180,7 @@ plt.xlabel('Confidence Bin')
 plt.ylabel('Atom Index')
 plt.title('Confidence Heatmap')
 plt.show()
-
 ```
-
 
 ### Floating Point Precision
 
@@ -189,21 +188,22 @@ As shown in usage snippets above, we support 3 floating point precision types: `
 
 The default value of `"float32-high"` is recommended for maximal acceleration when using A100 / H100 Nvidia GPUs. However, we have observed some performance loss for high-precision calculations involving second and third order properties of the PES. In these cases, we recommend `"float32-highest"`. 
 
-In stark constrast to other universal forcefields, we have not found any benefit to using `"float64"`.
+In stark contrast to other universal forcefields, we have not found any benefit to using `"float64"`.
 
 ### Finetuning
+
 You can finetune the model using your custom dataset.
 The dataset should be an [ASE sqlite database](https://wiki.fysik.dtu.dk/ase/ase/db/db.html#module-ase.db.core).
 
 **📖 For detailed instructions, including custom loss weights, reference energies, and API usage, see the [Finetuning Guide](./FINETUNING_GUIDE.md).**
 
 Basic usage:
-```python
+```bash
 python finetune.py --dataset=<dataset_name> --data_path=<your_data_path> --base_model=<base_model>
 ```
 Where base_model is an element of `orb_models.forcefield.pretrained.ORB_PRETRAINED_MODELS.keys()`.
 
-After the model is finetuned, checkpoints will, by default, be saved to the ckpts folder in the directory you ran the finetuning script from. You can use the new model and load the checkpoint by:
+After the model is finetuned, checkpoints will, by default, be saved to the `ckpts` folder in the directory you ran the finetuning script from. You can use the new model and load the checkpoint by:
 ```python
 from orb_models.forcefield import pretrained
 
@@ -220,7 +220,7 @@ model = getattr(pretrained, <base_model>)(
 > - The script assumes that your ASE database rows contain **energy, forces, and stress** data. To train on molecular data without stress, you will need to edit the code.
 > - **Early stopping** is not implemented. However, you can use the command line argument `save_every_x_epochs` (default is 5), so "retrospective" early stopping can be applied by selecting a suitable checkpoint.
 > - The **learning rate schedule is hardcoded** to be `torch.optim.lr_scheduler.OneCycleLR` with `pct_start=0.05`. The `max_lr`/`min_lr` will be 10x greater/smaller than the `lr` specified via the command line. To get the best performance, you may wish to try other schedulers.
-> - The defaults of `--num_steps=100` and `--max_epochs=50` are small. This may be suitable for very small finetuning datasets (e.g. 100s of systems), but you will likely want to increase the number of steps for larger datasets (e.g. 1000s of datapoints).
+> - The defaults of `--num_steps=100` and `--max_epochs=50` are small. This may be suitable for very small finetuning datasets (e.g. 100s of systems), but you will likely want to increase the number of steps for larger datasets (e.g. 1,000s of datapoints).
 > - The script only tracks a limited set of metrics (energy/force/stress MAEs) which may be insufficient for some downstream use-cases. For instance, if you wish to finetune a model for Molecular Dynamics simulations, we have found (anecdotally) that models that are just on the cusp of overfitting to force MAEs can be substantially worse for simulations. Ideally, more robust "rollout" metrics would be included in the finetuning training loop. In lieu of this, we recommend more aggressive early-stopping i.e. using models several epochs prior to any sign of overfitting.
 
 
@@ -270,7 +270,7 @@ Preprints describing the models in more detail can be found at:
 
 ### License
 
-ORB models are licensed under the Apache License, Version 2.0. Please see the [LICENSE](LICENSE) file for details.
+Orb models are licensed under the Apache License, Version 2.0. Please see the [LICENSE](LICENSE) file for details.
 
 **If you have an interesting use case or benchmark for an Orb model, please let us know!** We are happy to work with the community to make these models useful for as many applications as possible.
 
