@@ -18,7 +18,7 @@ uv pip install "cuml-cu12==25.2.*"  # For cuda versions >=12.0, <13.0
 The `orb_models` repository uses `pytest` for testing. To run the tests, navigate to the root directory of the package and run the following command:
 
 ```bash
-pytest -n 16 ./tests/
+pytest ./tests/
 ```
 
 ### Publishing

@@ -173,5 +173,6 @@ datasets/
 
 # VS Code
 .devcontainer/
+.vscode/
 
 wandb/
