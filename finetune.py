@@ -460,6 +460,11 @@ def run(args):
         else:  # direct model
             loss_weights["stress"] = args.stress_loss_weight
 
+    if args.equigrad_loss_weight is not None:
+        if not is_conservative_model:
+            raise ValueError("Equigrad loss is only available for conservative models.")
+        loss_weights["rotational_grad"] = args.equigrad_loss_weight
+
     if loss_weights:
         logging.info("=" * 60)
         logging.info("Custom loss weights specified:")
@@ -676,19 +681,25 @@ def main():
         "--energy_loss_weight",
         default=None,
         type=float,
-        help="Weight for energy loss. If not specified, uses model default (usually 1.0).",
+        help="Weight for energy loss. If not specified, defaults to 1.0.",
     )
     parser.add_argument(
         "--forces_loss_weight",
         default=None,
         type=float,
-        help="Weight for forces loss. Automatically uses 'forces' or 'grad_forces' depending on model type. If not specified, uses model default (usually 1.0).",
+        help="Weight for forces loss. Automatically uses 'forces' or 'grad_forces' depending on model type. If not specified, defaults to 1.0.",
     )
     parser.add_argument(
         "--stress_loss_weight",
         default=None,
         type=float,
-        help="Weight for stress loss. Automatically uses 'stress' or 'grad_stress' depending on model type. Set to 0 to disable stress training. If not specified, uses model default.",
+        help="Weight for stress loss. Automatically uses 'stress' or 'grad_stress' depending on model type. Set to 0 to disable stress training. If not specified, defaults to 1.0.",
+    )
+    parser.add_argument(
+        "--equigrad_loss_weight",
+        default=None,
+        type=float,
+        help="Weight for equigrad loss. Only available for conservative models. We've found that equigrad loss should be ≳1000x smaller than the other losses. If not specified, no equigrad is used.",
     )
 
     # Reference energy arguments

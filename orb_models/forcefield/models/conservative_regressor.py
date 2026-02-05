@@ -235,7 +235,7 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
             loss_type=self.forces_loss_type,
             training=self.training,
         )
-        loss = self.loss_weights[self.grad_forces_name] * loss_out.loss
+        loss = self.loss_weights.get(self.grad_forces_name, 1.0) * loss_out.loss
         total_loss += loss
         metrics.update({f"{self.grad_prefix}-{k}": v for k, v in loss_out.log.items()})
         metrics[f"{self.grad_forces_name}_loss"] = loss
@@ -254,7 +254,7 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
                 normalizer=self.grad_stress_normalizer,
                 loss_type=energy_head.loss_type,
             )
-            loss = self.loss_weights[self.grad_stress_name] * loss_out.loss
+            loss = self.loss_weights.get(self.grad_stress_name, 1.0) * loss_out.loss
             loss_out.log[f"{self.grad_stress_name}_loss"] = loss
             total_loss += loss
             metrics.update({f"{self.grad_prefix}-{k}": v for k, v in loss_out.log.items()})

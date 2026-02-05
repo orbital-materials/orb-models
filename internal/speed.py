@@ -223,15 +223,11 @@ def benchmark_orb_forward(
 
     # Featurize atoms
     warmup_batches = [
-        atoms_adapter.from_ase_atoms(atoms, system_config=orb._system_config, device=device).to(
-            device
-        )  # type: ignore
+        atoms_adapter.from_ase_atoms(atoms, device=device).to(device)  # type: ignore
         for atoms in warmup_atoms
     ]
     batches = [
-        atoms_adapter.from_ase_atoms(atoms, system_config=orb._system_config, device=device).to(
-            device
-        )  # type: ignore
+        atoms_adapter.from_ase_atoms(atoms, device=device).to(device)  # type: ignore
         for atoms in atoms_list
     ]
     num_edges = [len(batch.edge_features["vectors"]) for batch in batches]
