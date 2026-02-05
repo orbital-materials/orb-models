@@ -1,5 +1,8 @@
+from typing import cast
+
 import torch
 from ase import units
+from ase.atoms import Atoms
 from ase.io import read, write
 from ase.md import MDLogger
 from ase.md.langevin import Langevin
@@ -46,6 +49,7 @@ def run_md_simulation(
 
     # Read in the system from file and set the cell size and pbc
     atoms = read(input_file)
+    atoms = cast(Atoms, atoms)
     atoms.set_cell([cell_size] * 3)
     atoms.set_pbc([True] * 3)
 

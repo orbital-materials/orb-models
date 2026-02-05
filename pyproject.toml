@@ -37,6 +37,7 @@ CI = "https://github.com/orbital-materials/orb-models/actions"
 [dependency-groups]
 dev = [
     "pytest>=8.3.4,<9",
+    "pytest-xdist>=3.5",
     "ruff>=0.10.0",
     "mypy>=1.13",
     "torch_dftd",

@@ -25,13 +25,20 @@ jobs:
         python-version: ${{ matrix.python-version }}
         cache: pip
         cache-dependency-path: pyproject.toml
+    - name: Set up uv
+      run: |
+        pip install uv
     - name: Install dependencies
-      run: |
-        pip install '.[dev]'
+      run: uv sync --group dev
 
-    - name: Run tests
+    - name: Run linters
       run: |
-        pytest
+        uv run ruff check ./orb_models ./tests ./internal
+        uv run ruff format --check ./orb_models ./tests ./internal
+        uv run mypy ./orb_models ./tests ./internal
+    - name: Run tests
+      run: uv run pytest ./tests -n auto
+
   deploy:
     runs-on: ubuntu-latest
     needs: [test]

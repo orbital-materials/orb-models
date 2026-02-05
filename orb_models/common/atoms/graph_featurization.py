@@ -340,7 +340,7 @@ def compute_supercell_neighbors(
     elif edge_method == "knn_scipy":
         tree_data = supercell_positions.clone().detach().cpu().numpy()
         tree_query = central_cell_positions.clone().detach().cpu().numpy()
-        distance_upper_bound = np.array(radius) + 1e-8
+        distance_upper_bound = float(radius) + 1e-8
         tree = SciKDTree(tree_data, leafsize=100)
         _, supercell_receivers = tree.query(
             x=tree_query,
