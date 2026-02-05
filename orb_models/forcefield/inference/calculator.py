@@ -64,7 +64,11 @@ class ORBCalculator(Calculator):
         self.half_supercell = half_supercell
         self.conservative = _is_conservative(model)
 
-        conditioner = model.model.conditioner  # type: ignore
+        conditioner = (
+            model.xc_model.model.conditioner
+            if isinstance(model, D3SumModel)
+            else model.model.conditioner  # type: ignore
+        )
         self.expects_charge_and_spin = (conditioner is not None) and isinstance(
             conditioner, ChargeSpinConditioner
         )
@@ -107,9 +111,10 @@ class ORBCalculator(Calculator):
     def _update_results(self, out: dict[str, torch.Tensor]):
         """Updates the results dictionary with the computed properties."""
         self.results = {}
-        no_direct_energy_head = "energy" not in self.model.heads  # type: ignore
-        no_direct_force_head = "forces" not in self.model.heads  # type: ignore
-        no_direct_stress_head = "stress" not in self.model.heads  # type: ignore
+        model = self.model.xc_model if isinstance(self.model, D3SumModel) else self.model
+        no_direct_energy_head = "energy" not in model.heads  # type: ignore
+        no_direct_force_head = "forces" not in model.heads  # type: ignore
+        no_direct_stress_head = "stress" not in model.heads  # type: ignore
         for property in self.implemented_properties:
             if property == "free_energy" and no_direct_energy_head:
                 continue
@@ -128,11 +133,11 @@ class ORBCalculator(Calculator):
                 self.results[property] = to_numpy(out[_property])
 
         if self.conservative:
-            if self.model.forces_name in self.results:
-                self.results["direct_forces"] = self.results[self.model.forces_name]
-            self.results["forces"] = self.results[self.model.grad_forces_name]
+            if model.forces_name in self.results:
+                self.results["direct_forces"] = self.results[model.forces_name]
+            self.results["forces"] = self.results[model.grad_forces_name]
 
-            if self.model.has_stress:
-                if self.model.stress_name in self.results:
-                    self.results["direct_stress"] = self.results[self.model.stress_name]
-                self.results["stress"] = self.results[self.model.grad_stress_name]
+            if model.has_stress:
+                if model.stress_name in self.results:
+                    self.results["direct_stress"] = self.results[model.stress_name]
+                self.results["stress"] = self.results[model.grad_stress_name]

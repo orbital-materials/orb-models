@@ -1,6 +1,6 @@
 
 <p align="center">
-  <img src="./logo_color_text.png" alt="Orbital Materials" width="600"/>
+  <img src="./assets/logo_color_text.png" alt="Orbital Materials" width="600"/>
 </p>
 <br/>
 
@@ -118,6 +118,66 @@ print("Optimized Energy:", atoms.get_potential_energy())
 
 Or you can use it to run MD simulations. The script, an example input xyz file and a Colab notebook demonstration are available in the [examples directory](./examples). This should work with any input, simply modify the input_file and cell_size parameters. We recommend using constant volume simulations.
 
+#### Usage with TorchSim
+
+For batched optimisation, we recommend using [TorchSim](https://github.com/TorchSim/torch-sim), e.g.: 
+
+```python
+import ase
+import torch
+import torch_sim as ts
+from ase.build import bulk
+
+from orb_models.forcefield import pretrained
+from orb_models.forcefield.inference.orb_torchsim import OrbTorchSimModel
+
+
+device = "cpu"  # or device="cuda"
+# or choose another model using ORB_PRETRAINED_MODELS[model_name]()
+orbff, atoms_adapter = pretrained.orb_v3_conservative_inf_omat(
+  device=device,
+  precision="float32-high",   # or "float32-highest" / "float64
+)
+
+atoms1 = bulk('Cu', 'fcc', a=3.58, cubic=True)
+atoms2 = bulk('Si', 'diamond', a=5.43, cubic=True)
+atoms_list = [atoms1, atoms2]
+ts_state = ts.io.atoms_to_state(atoms_list, device, dtype=torch.get_default_dtype())
+
+ts_model = OrbTorchSimModel(orbff, atoms_adapter)
+results = ts_model(ts_state)
+results["energy"]
+```
+
+You can use this module for geometry optimisation and MD simulation:
+
+```python
+# Rattle the atoms to get them out of the minimum energy configuration
+atoms1.rattle(0.5)
+atoms2.rattle(0.5)
+atoms_list = [atoms1, atoms2]
+ts_state = ts.io.atoms_to_state(atoms_list, device, dtype=torch.get_default_dtype())
+
+ts_model = OrbTorchSimModel(orbff, atoms_adapter)
+results = ts_model(ts_state)
+print("Rattled energies:", results["energy"])
+
+# Optimise with TorchSim
+relaxed_state = ts.optimize(
+    system=ts_state,
+    convergence_fn=ts.generate_force_convergence_fn(
+        force_tol=0.01,
+        include_cell_forces=False,
+    ),
+    model=ts_model,
+    optimizer=ts.Optimizer["fire"],
+    max_steps=100,
+    steps_between_swaps=10,
+)
+results = ts_model(relaxed_state)
+print("Rattled energies:", results["energy"])
+```
+
 #### How to specify total charge and spin multiplicity for OrbMol
 
 The OrbMol models *require* total charge and spin multiplicity to be specified. This can be done by setting them in `atoms.info` dictionary.
@@ -140,6 +200,56 @@ atoms.info["spin"] = 1  #  spin multiplicity
 graph = atoms_adapter.from_ase_atoms(atoms, device=device)
 
 result = orbff.predict(graph, split=False)
+```
+
+### D3 correction
+
+We provide a D3 dispersion correction module, based on [`nvalchemiops`](https://nvidia.github.io/nvalchemi-toolkit-ops/examples/dispersion/index.html), for improved modeling of van der Waals interactions. To use D3 correction, wrap your model with `D3SumModel`:
+```python
+import ase
+from ase.build import bulk
+
+from orb_models.forcefield import pretrained
+from orb_models.forcefield.inference.calculator import ORBCalculator
+from orb_models.forcefield.inference.d3_model import D3SumModel, AlchemiDFTD3
+
+device = "cpu"  # or device="cuda"
+orbff, atoms_adapter = pretrained.orb_v3_conservative_inf_omat(
+  device=device,
+  precision="float32-high",   # or "float32-highest" / "float64
+)
+orbff_d3 = D3SumModel(orbff, AlchemiDFTD3(functional="PBE", damping="BJ", compile=True))
+
+calc = ORBCalculator(orbff_d3, atoms_adapter=atoms_adapter, device=device)
+atoms = bulk('Cu', 'fcc', a=3.58, cubic=True)
+
+atoms.calc = calc
+atoms.get_potential_energy()
+```
+
+Or with TorchSim:
+```python
+import torch
+import torch_sim as ts
+from ase.build import bulk
+
+from orb_models.forcefield import pretrained
+from orb_models.forcefield.inference.orb_torchsim import OrbTorchSimModel
+from orb_models.forcefield.inference.d3_model import D3SumModel, AlchemiDFTD3
+
+device = "cpu"  # or device="cuda"
+orbff, atoms_adapter = pretrained.orb_v3_conservative_inf_omat(
+  device=device,
+  precision="float32-high",   # or "float32-highest" / "float64
+)
+orbff_d3 = D3SumModel(orbff, AlchemiDFTD3(functional="PBE", damping="BJ", compile=True))
+
+atoms = bulk('Cu', 'fcc', a=3.58, cubic=True)
+ts_state = ts.io.atoms_to_state([atoms], device, dtype=torch.get_default_dtype())
+
+ts_model = OrbTorchSimModel(orbff_d3, atoms_adapter)
+results = ts_model(ts_state)
+results["energy"]
 ```
 
 #### Confidence head (Orb-v3 Models Only)

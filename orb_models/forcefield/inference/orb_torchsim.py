@@ -50,11 +50,10 @@ class OrbTorchSimModel(ModelInterface):
             self.model = self.model.to(dtype=self.dtype)
 
         # Set up implemented properties
-        self.xc_model = model.xc_model if isinstance(model, D3SumModel) else model
         self.implemented_properties = self.model.properties
         if self.conservative:
             self.implemented_properties.extend(["forces"])
-            if self.xc_model.has_stress:
+            if self.model.has_stress:
                 self.implemented_properties.append("stress")
 
         # Set flags for TorchSim
@@ -101,9 +100,10 @@ class OrbTorchSimModel(ModelInterface):
     def _get_results(self, out: dict[str, torch.Tensor]):
         """Parses the results into a final output dictionary."""
         results = {}
-        no_direct_energy_head = "energy" not in self.xc_model.heads  # type: ignore
-        no_direct_force_head = "forces" not in self.xc_model.heads  # type: ignore
-        no_direct_stress_head = "stress" not in self.xc_model.heads  # type: ignore
+        model = self.model.xc_model if isinstance(self.model, D3SumModel) else self.model
+        no_direct_energy_head = "energy" not in model.heads  # type: ignore
+        no_direct_force_head = "forces" not in model.heads  # type: ignore
+        no_direct_stress_head = "stress" not in model.heads  # type: ignore
         for property in self.implemented_properties:
             if property == "free_energy" and no_direct_energy_head:
                 continue
@@ -117,14 +117,14 @@ class OrbTorchSimModel(ModelInterface):
 
         # Rename certain keys for the conservative model
         if self.conservative:
-            if self.xc_model.forces_name in results:
-                results["direct_forces"] = results[self.xc_model.forces_name]
-            results["forces"] = results[self.xc_model.grad_forces_name]
+            if model.forces_name in results:
+                results["direct_forces"] = results[model.forces_name]
+            results["forces"] = results[model.grad_forces_name]
 
-            if self.xc_model.has_stress:
-                if self.xc_model.stress_name in results:
-                    results["direct_stress"] = results[self.xc_model.stress_name]
-                results["stress"] = results[self.xc_model.grad_stress_name]
+            if model.has_stress:
+                if model.stress_name in results:
+                    results["direct_stress"] = results[model.stress_name]
+                results["stress"] = results[model.grad_stress_name]
 
         # Ensure stress has shape [-1, 3, 3]
         if "stress" in results and results["stress"].shape[-1] == 6:
