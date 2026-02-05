@@ -13,10 +13,9 @@
 # limitations under the License.
 
 import pytest
-
 import torch
 
-from orb_models.forcefield import segment_ops
+from orb_models.common.models import segment_ops
 
 
 @pytest.mark.parametrize(
@@ -68,9 +67,7 @@ def test_aggregate_nodes_with_zero_size_last_graph(reduction):
     assert res.shape == (4, 10)
 
 
-@pytest.mark.parametrize(
-    "dtype", [torch.float32, torch.float64, torch.int32, torch.int64]
-)
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64, torch.int32, torch.int64])
 def test_unsorted_segment_sum(dtype):
     data = torch.arange(5)
     data = data.to(dtype=dtype)
@@ -81,9 +78,7 @@ def test_unsorted_segment_sum(dtype):
     assert result.tolist() == [0, 3, 7]
 
 
-@pytest.mark.parametrize(
-    "dtype", [torch.float32, torch.float64, torch.int32, torch.int64]
-)
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64, torch.int32, torch.int64])
 def test_unsorted_segment_sum_2d(dtype):
     # grid of range 0-20, in rows of 4
     data = torch.tensor(
@@ -142,3 +137,28 @@ def test_segment_softmax():
     assert result[0] == 1.0
     assert result[1:3].sum() == 1.0
     assert result[3:].sum() == 1.0
+
+
+def test_split_prediction_node_level():
+    tensor = torch.arange(120).view(12, 10)
+    sizes = torch.tensor([3, 5, 4], dtype=torch.long)
+    result = segment_ops.split_prediction(tensor, sizes)
+
+    assert len(result) == len(sizes)
+    assert sum(t.sum() for t in result) == tensor.sum()
+    for i in range(len(sizes)):
+        assert result[i].shape == (sizes[i], 10)
+    cum_sizes = torch.cat((torch.zeros(1, dtype=torch.long), torch.cumsum(sizes, dim=0)))
+    for i in range(len(sizes)):
+        torch.testing.assert_close(result[i], tensor[cum_sizes[i] : cum_sizes[i + 1]])
+
+
+def test_split_prediction_system_level():
+    tensor = torch.arange(30).view(3, 10)
+    sizes = torch.tensor([3, 5, 4], dtype=torch.long)
+    result = segment_ops.split_prediction(tensor, sizes)
+
+    assert len(result) == len(sizes)
+    assert sum(t.sum() for t in result) == tensor.sum()
+    for i in range(len(sizes)):
+        assert result[i].shape == (1, 10)

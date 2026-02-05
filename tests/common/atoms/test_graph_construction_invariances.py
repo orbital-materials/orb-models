@@ -1,12 +1,12 @@
 import itertools
-import pytest
-from collections import defaultdict
 
-import ase.io
+import ase
 import numpy as np
+import pytest
 import torch
 
-from orb_models.forcefield.atomic_system import ase_atoms_to_atom_graphs, SystemConfig
+from orb_models.forcefield.forcefield_adapter import ForcefieldAtomsAdapter
+from tests.common.atoms.utils import _get_edge_sets
 
 
 def _get_real_system():
@@ -35,37 +35,14 @@ def _get_real_system():
     return atoms
 
 
-def _get_edge_sets(atom_graphs, with_vectors=False, precision=4):
-    edges_with_counts = defaultdict(int)
-    for s, r, vec in zip(
-        atom_graphs.senders,
-        atom_graphs.receivers,
-        atom_graphs.edge_features["vectors"],
-    ):
-        vec_tuple = tuple([round(x.item(), precision) for x in vec])
-        norm = round(vec.norm(dim=-1).item(), precision)
-        if with_vectors:
-            edges_with_counts[(s.item(), r.item(), norm, vec_tuple)] += 1
-        else:
-            edges_with_counts[(s.item(), r.item(), norm)] += 1
-    return dict(edges_with_counts)
-
-
 @pytest.mark.parametrize(
     "edge_method",
     [
-        pytest.param(
-            "knn_brute_force",
-            marks=pytest.mark.xfail(
-                reason="Brute-force knn is currently not translation invariant"
-            ),
-        ),
+        "knn_brute_force",
         pytest.param(
             "knn_cuml_brute",
             marks=[
-                pytest.mark.xfail(
-                    reason="knn_cuml_brute is currently not translation invariant"
-                ),
+                pytest.mark.xfail(reason="knn_cuml_brute is currently not translation invariant"),
                 pytest.mark.skipif(
                     not torch.cuda.is_available(),
                     reason="CUDA is not available for CuML KNN.",
@@ -75,34 +52,25 @@ def _get_edge_sets(atom_graphs, with_vectors=False, precision=4):
         pytest.param(
             "knn_cuml_rbc",
             marks=[
-                pytest.mark.xfail(
-                    reason="knn_cuml_rbc is currently not translation invariant"
-                ),
+                pytest.mark.xfail(reason="knn_cuml_rbc is currently not translation invariant"),
                 pytest.mark.skipif(
                     not torch.cuda.is_available(),
                     reason="CUDA is not available for CuML KNN.",
                 ),
             ],
         ),
-        pytest.param(
-            "knn_scipy",
-            marks=pytest.mark.xfail(reason="Scipy is not translation invariant"),
-        ),
+        "knn_scipy",
+        "knn_alchemi",
     ],
 )
 def test_featurization_is_translation_invariant_with_real_system(edge_method):
-
     original_precision = torch.get_float32_matmul_precision()
     torch.set_float32_matmul_precision("highest")
 
     atoms = _get_real_system()
-    system_config = SystemConfig(
-        radius=6.0,
-        max_num_neighbors=20,
-    )
-    atom_graphs = ase_atoms_to_atom_graphs(
-        atoms, system_config=system_config, edge_method=edge_method
-    )
+
+    adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=120)
+    atom_graphs = adapter.from_ase_atoms(atoms, edge_method=edge_method)
     edges = _get_edge_sets(atom_graphs, with_vectors=True, precision=3)
 
     # Test a grid of translations
@@ -112,12 +80,8 @@ def test_featurization_is_translation_invariant_with_real_system(edge_method):
         # Normalize the shift to be between -1 and 1
         shift = (np.array([x, y, z]) / grid_size) * 2 - 1
         atoms.positions += shift
-        shifted_atom_graphs = ase_atoms_to_atom_graphs(
-            atoms, system_config, edge_method=edge_method
-        )
-        shifted_edges = _get_edge_sets(
-            shifted_atom_graphs, with_vectors=True, precision=3
-        )
+        shifted_atom_graphs = adapter.from_ase_atoms(atoms, edge_method=edge_method)
+        shifted_edges = _get_edge_sets(shifted_atom_graphs, with_vectors=True, precision=3)
         assert edges == shifted_edges
 
     torch.set_float32_matmul_precision(original_precision)
@@ -126,12 +90,8 @@ def test_featurization_is_translation_invariant_with_real_system(edge_method):
 @pytest.mark.parametrize(
     "edge_method",
     [
-        pytest.param(
-            "knn_brute_force",
-            marks=pytest.mark.xfail(
-                reason="Brute-force knn is currently not translation invariant with geometric systems"
-            ),
-        ),
+        "knn_alchemi",
+        "knn_brute_force",
         pytest.param(
             "knn_cuml_brute",
             marks=[
@@ -156,12 +116,7 @@ def test_featurization_is_translation_invariant_with_real_system(edge_method):
                 ),
             ],
         ),
-        pytest.param(
-            "knn_scipy",
-            marks=pytest.mark.xfail(
-                reason="Scipy is not translation invariant with geometric systems"
-            ),
-        ),
+        "knn_scipy",
     ],
 )
 def test_featurization_is_translation_invariant_with_geometric_system(edge_method):
@@ -170,17 +125,12 @@ def test_featurization_is_translation_invariant_with_geometric_system(edge_metho
 
     atoms = ase.Atoms(
         "C" * 5,
-        positions=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0], [0, 0, 1]]),
-        cell=np.eye(3) * 1.01,
+        positions=np.array([[0, 0, 0], [4, 0, 0], [0, 4, 0], [4, 4, 0], [0, 0, 4]]),
+        cell=np.eye(3) * 4.01,
         pbc=True,
     )
-    system_config = SystemConfig(
-        radius=6.0,
-        max_num_neighbors=120,
-    )
-    atom_graphs = ase_atoms_to_atom_graphs(
-        atoms, system_config=system_config, edge_method=edge_method
-    )
+    adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=120)
+    atom_graphs = adapter.from_ase_atoms(atoms, edge_method=edge_method)
     edges = _get_edge_sets(atom_graphs, with_vectors=True, precision=3)
 
     # Test a grid of translations
@@ -190,12 +140,8 @@ def test_featurization_is_translation_invariant_with_geometric_system(edge_metho
         # Normalize the shift to be between -1 and 1
         shift = (np.array([x, y, z]) / grid_size) * 2 - 1
         atoms.positions += shift
-        shifted_atom_graphs = ase_atoms_to_atom_graphs(
-            atoms, system_config, edge_method=edge_method
-        )
-        shifted_edges = _get_edge_sets(
-            shifted_atom_graphs, with_vectors=True, precision=3
-        )
+        shifted_atom_graphs = adapter.from_ase_atoms(atoms, edge_method=edge_method)
+        shifted_edges = _get_edge_sets(shifted_atom_graphs, with_vectors=True, precision=3)
         assert edges == shifted_edges
 
     torch.set_float32_matmul_precision(original_precision)
@@ -206,6 +152,7 @@ def test_featurization_is_translation_invariant_with_geometric_system(edge_metho
     [
         ("knn_brute_force", 120),
         ("knn_scipy", 120),
+        ("knn_alchemi", 120),
         pytest.param(
             "knn_cuml_brute",
             120,
@@ -221,48 +168,6 @@ def test_featurization_is_translation_invariant_with_geometric_system(edge_metho
                 not torch.cuda.is_available(),
                 reason="CUDA is not available for CuML KNN.",
             ),
-        ),
-        pytest.param(
-            "knn_brute_force",
-            20,
-            marks=pytest.mark.xfail(
-                reason="Brute-force knn is currently not perfectly rotation "
-                "invariant due to random selection of equidistant neighbors"
-            ),
-        ),
-        pytest.param(
-            "knn_scipy",
-            20,
-            marks=pytest.mark.xfail(
-                reason="Scipy is not perfectly rotation invariant due to random "
-                "selection of equidistant neighbors"
-            ),
-        ),
-        pytest.param(
-            "knn_cuml_brute",
-            20,
-            marks=[
-                pytest.mark.xfail(
-                    reason="knn_cuml_brute is currently not perfectly rotation invariant"
-                ),
-                pytest.mark.skipif(
-                    not torch.cuda.is_available(),
-                    reason="CUDA is not available for CuML KNN.",
-                ),
-            ],
-        ),
-        pytest.param(
-            "knn_cuml_rbc",
-            20,
-            marks=[
-                pytest.mark.xfail(
-                    reason="knn_cuml_rbc is currently not perfectly rotation invariant"
-                ),
-                pytest.mark.skipif(
-                    not torch.cuda.is_available(),
-                    reason="CUDA is not available for CuML KNN.",
-                ),
-            ],
         ),
     ],
 )
@@ -271,10 +176,8 @@ def test_featurization_is_rotation_invariant(edge_method, max_num_neighbors):
     torch.set_float32_matmul_precision("highest")
 
     atoms = _get_real_system()
-    system_config = SystemConfig(radius=6.0, max_num_neighbors=max_num_neighbors)
-    atom_graphs = ase_atoms_to_atom_graphs(
-        atoms, system_config=system_config, edge_method=edge_method
-    )
+    adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=max_num_neighbors)
+    atom_graphs = adapter.from_ase_atoms(atoms, edge_method=edge_method)
     edges = _get_edge_sets(atom_graphs, with_vectors=False, precision=3)
 
     # Test a grid of rotations
@@ -290,14 +193,8 @@ def test_featurization_is_rotation_invariant(edge_method, max_num_neighbors):
             center=atoms.get_center_of_mass(),
             rotate_cell=True,
         )
-        rotated_atom_graphs = ase_atoms_to_atom_graphs(
-            atoms,
-            system_config=system_config,
-            edge_method=edge_method,
-        )
-        rotated_edges = _get_edge_sets(
-            rotated_atom_graphs, with_vectors=False, precision=3
-        )
+        rotated_atom_graphs = adapter.from_ase_atoms(atoms, edge_method=edge_method)
+        rotated_edges = _get_edge_sets(rotated_atom_graphs, with_vectors=False, precision=3)
         assert edges == rotated_edges
 
         with pytest.raises(AssertionError):

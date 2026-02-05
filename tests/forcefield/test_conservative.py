@@ -1,12 +1,12 @@
+from copy import deepcopy
+
 import pytest
 import torch
-from ase import Atoms, Atom
+from ase import Atom, Atoms
 
-from orb_models.forcefield.conservative_regressor import ConservativeForcefieldRegressor
-from orb_models.forcefield.atomic_system import ase_atoms_to_atom_graphs
-from orb_models.forcefield.atomic_system import SystemConfig
-from orb_models.forcefield.base import batch_graphs
-from copy import deepcopy
+from orb_models.common.atoms.batch.graph_batch import AtomGraphs
+from orb_models.forcefield.forcefield_adapter import ForcefieldAtomsAdapter
+from orb_models.forcefield.models.conservative_regressor import ConservativeForcefieldRegressor
 
 
 @pytest.mark.parametrize("graph_name", ["batch", "single_graph"])
@@ -14,6 +14,8 @@ def test_regressor_forward(request, conservative_regressor, graph_name):
     graph = request.getfixturevalue(graph_name)
     out = conservative_regressor(graph)
     assert "energy" in out
+    assert "forces" in out
+    assert "stress" in out
     assert "grad_forces" in out
     assert "grad_stress" in out
 
@@ -22,9 +24,6 @@ def test_regressor_loss(conservative_regressor, batch):
     out = conservative_regressor.loss(batch)
     out.loss.backward()
 
-    for k in out.log.keys():
-        print(k)
-
     # Check that metrics are computed for both direct and conservative predictions
     assert any("energy" in k for k in out.log)
     assert any("grad-forces" in k for k in out.log)
@@ -32,9 +31,7 @@ def test_regressor_loss(conservative_regressor, batch):
     assert any("rotational_grad" in k for k in out.log)
 
 
-def test_regressor_head_config_raises_error(
-    gns_model, energy_head, force_head, stress_head
-):
+def test_regressor_head_config_raises_error(gns_model, energy_head, force_head, stress_head):
     with pytest.raises(ValueError, match="Loss weights for unknown targets"):
         ConservativeForcefieldRegressor(
             heads={"energy": energy_head, "forces": force_head},
@@ -48,16 +45,6 @@ def test_regressor_head_config_raises_error(
             },
         )
 
-    # check error is raised if grad_forces or grad_stress are not in loss_weights
-    with pytest.raises(
-        ValueError, match="grad_forces and grad_stress must be in loss_weights"
-    ):
-        ConservativeForcefieldRegressor(
-            heads={"energy": energy_head, "forces": force_head, "stress": stress_head},
-            model=gns_model,
-            loss_weights={"energy": 1.0, "forces": 1.0, "stress": 1.0},
-        )
-
 
 def test_conservative_forces_twice_differentiable(batch, conservative_regressor):
     # Make positions require grad
@@ -68,9 +55,9 @@ def test_conservative_forces_twice_differentiable(batch, conservative_regressor)
     energy = out["energy"].sum()
 
     # First backward pass to get forces
-    grad_forces = torch.autograd.grad(
-        energy, batch.node_features["positions"], create_graph=True
-    )[0]
+    grad_forces = torch.autograd.grad(energy, batch.node_features["positions"], create_graph=True)[
+        0
+    ]
 
     # Second backward pass should work (important for training)
     grad_forces.sum().backward()
@@ -83,21 +70,32 @@ def test_regressor_predict(batch, conservative_regressor):
     conservative_regressor.eval()
     inference = conservative_regressor.predict(batch)
     assert "energy" in inference
+    assert "forces" in inference
+    assert "stress" in inference
     assert "grad_forces" in inference
     assert "grad_stress" in inference
+
+
+def test_conservative_model_can_distill(batch, conservative_regressor):
+    conservative_regressor.eval()
+    conservative_regressor.distill_direct_heads = True
+    distill_output = conservative_regressor.loss(batch)
+
+    conservative_regressor.distill_direct_heads = False
+    output = conservative_regressor.loss(batch)
+    assert not torch.allclose(output.loss, distill_output.loss)
 
 
 def test_featurization_differentiability_with_conservative_regressor(
     conservative_regressor,
 ):
-
-    system_config = SystemConfig(radius=6.0, max_num_neighbors=10)
+    adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=10)
     atoms = Atoms([Atom("C", [0, 0, 0]), Atom("H", [1, 1, 1]), Atom("O", [2, 1, 1])])
     atoms2 = Atoms([Atom("C", [-1, 0, -1]), Atom("H", [1, 2, 0]), Atom("O", [1, 3, 1])])
-    atom_graphs = batch_graphs(
+    atom_graphs = AtomGraphs.batch(
         [
-            ase_atoms_to_atom_graphs(atoms, system_config=system_config),
-            ase_atoms_to_atom_graphs(atoms2, system_config=system_config),
+            adapter.from_ase_atoms(atoms),
+            adapter.from_ase_atoms(atoms2),
         ]
     )
     out = conservative_regressor(atom_graphs)
@@ -112,15 +110,17 @@ def test_modules_have_float64_dtypes_for_float64_model(batch, conservative_regre
 
     def check_dtype_hook(module, input, output):
         if isinstance(output, torch.Tensor):
-            assert (
-                output.dtype == torch.float64
-            ), f"Layer {module.__class__.__name__} output dtype is {output.dtype}, expected torch.float64"
+            assert output.dtype == torch.float64, (
+                f"Layer {module.__class__.__name__} output dtype is {output.dtype}, "
+                "expected torch.float64"
+            )
         elif isinstance(output, (tuple, list)):
             for o in output:
                 if isinstance(o, torch.Tensor):
-                    assert (
-                        o.dtype == torch.float64
-                    ), f"Layer {module.__class__.__name__} output dtype is {o.dtype}, expected torch.float64"
+                    assert o.dtype == torch.float64, (
+                        f"Layer {module.__class__.__name__} output dtype is {o.dtype}, "
+                        "expected torch.float64"
+                    )
 
     hooks = []
     for name, module in conservative_regressor.named_modules():
@@ -142,9 +142,9 @@ def test_modules_have_float64_dtypes_for_float64_model(batch, conservative_regre
 
     for key, value in out.items():
         if isinstance(value, torch.Tensor):
-            assert (
-                value.dtype == torch.float64
-            ), f"Output {key} dtype is {value.dtype}, expected torch.float64"
+            assert value.dtype == torch.float64, (
+                f"Output {key} dtype is {value.dtype}, expected torch.float64"
+            )
 
     for hook in hooks:
         hook.remove()
@@ -154,9 +154,7 @@ def test_modules_have_float64_dtypes_for_float64_model(batch, conservative_regre
 def test_regressor_can_torch_compile(conservative_regressor, batch):
     """Tests if the ConservativeForcefieldRegressor.forward is compilable with torch.compile."""
     conservative_regressor.eval()
-    compiled = torch.compile(
-        conservative_regressor, mode="default", dynamic=True, fullgraph=True
-    )
+    compiled = torch.compile(conservative_regressor, mode="default", dynamic=True, fullgraph=True)
     compiled(batch)
 
 

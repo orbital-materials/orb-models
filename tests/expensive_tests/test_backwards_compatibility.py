@@ -1,25 +1,18 @@
-import pytest
 import numpy as np
+import pytest
 import torch
-import random
 from ase.build import bulk, molecule
 from ase.optimize import BFGS
-from orb_models.forcefield import atomic_system, pretrained
-from orb_models.forcefield.calculator import ORBCalculator
 
-
-def set_seed(seed):
-    """Set seed for reproducibility."""
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    random.seed(seed)
+from orb_models.forcefield import pretrained
+from orb_models.forcefield.inference.calculator import ORBCalculator
 
 
 def test_orb_v2_predictions():
     """Test that we haven't changed the predictions of orb-v2."""
-    orb = pretrained.orb_v2()
+    orb, adapter = pretrained.orb_v2()
     atoms = bulk("Cu", "fcc", a=3.58, cubic=True)
-    graph = atomic_system.ase_atoms_to_atom_graphs(atoms, orb.system_config)
+    graph = adapter.from_ase_atoms(atoms)
     result = orb.predict(graph)
     energy = result["energy"][0]
     forces = result["forces"][0]
@@ -29,15 +22,15 @@ def test_orb_v2_predictions():
     stress_gold = np.array(
         [-3.4152e-02, -3.3998e-02, -3.3992e-02, -2.7855e-07, -1.6083e-06, -1.1105e-06]
     )
-    assert np.isclose(energy, energy_gold, atol=1e-4)
+    np.testing.assert_allclose(energy, energy_gold, atol=1e-4)
     np.testing.assert_allclose(forces, forces_gold, atol=1e-5)
     np.testing.assert_allclose(stress, stress_gold, atol=1e-4)
 
 
 def test_orbv2_optimization():
     """Test that we haven't changed the optimization behaviour of orb-v2."""
-    orb = pretrained.orb_v2()
-    calc = ORBCalculator(orb, system_config=orb.system_config, device=torch.device("cpu"))
+    orb, adapter = pretrained.orb_v2()
+    calc = ORBCalculator(orb, adapter, device=torch.device("cpu"))
     atoms = bulk("Cu", "fcc", a=3.58, cubic=True)
     atoms.calc = calc
     atoms.rattle(0.5, seed=42)
@@ -53,9 +46,9 @@ def test_orbv2_optimization():
 
 def test_orb_v3_direct_omat_predictions():
     """Test that we haven't changed the predictions of orb-v3-direct."""
-    orb = pretrained.orb_v3_direct_inf_omat()
+    orb, adapter = pretrained.orb_v3_direct_inf_omat()
     atoms = bulk("Cu", "fcc", a=3.58, cubic=True)
-    graph = atomic_system.ase_atoms_to_atom_graphs(atoms, orb.system_config)
+    graph = adapter.from_ase_atoms(atoms)
     result = orb.predict(graph)
     energy = result["energy"][0]
     forces = result["forces"][0]
@@ -72,8 +65,8 @@ def test_orb_v3_direct_omat_predictions():
 
 def test_orbv3_direct_omat_optimization():
     """Test that we haven't changed the optimization behaviour of orb-v3-direct."""
-    orb = pretrained.orb_v3_direct_inf_omat()
-    calc = ORBCalculator(orb, system_config=orb.system_config, device=torch.device("cpu"))
+    orb, adapter = pretrained.orb_v3_direct_inf_omat()
+    calc = ORBCalculator(orb, adapter, device=torch.device("cpu"))
     atoms = bulk("Cu", "fcc", a=3.58, cubic=True)
     atoms.calc = calc
     atoms.rattle(0.5, seed=42)
@@ -89,9 +82,9 @@ def test_orbv3_direct_omat_optimization():
 
 def test_orb_v3_con_omat_predictions():
     """Test that we haven't changed the predictions of orb-v3-conservative."""
-    orb = pretrained.orb_v3_conservative_inf_omat()
+    orb, adapter = pretrained.orb_v3_conservative_inf_omat()
     atoms = bulk("Cu", "fcc", a=3.58, cubic=True)
-    graph = atomic_system.ase_atoms_to_atom_graphs(atoms, orb.system_config)
+    graph = adapter.from_ase_atoms(atoms)
     result = orb.predict(graph)
     energy = result["energy"][0].detach().numpy()
     forces = result["grad_forces"][0].detach().numpy()
@@ -108,8 +101,8 @@ def test_orb_v3_con_omat_predictions():
 
 def test_orbv3_con_omat_optimization():
     """Test that we haven't changed the optimization behaviour of orb-v3-conservative."""
-    orb = pretrained.orb_v3_conservative_inf_omat()
-    calc = ORBCalculator(orb, system_config=orb.system_config, device=torch.device("cpu"))
+    orb, adapter = pretrained.orb_v3_conservative_inf_omat()
+    calc = ORBCalculator(orb, adapter, device=torch.device("cpu"))
     atoms = bulk("Cu", "fcc", a=3.58, cubic=True)
     atoms.calc = calc
     atoms.rattle(0.5, seed=42)
@@ -125,15 +118,15 @@ def test_orbv3_con_omat_optimization():
 
 def test_orb_v3_con_omol_predictions():
     """Test that we haven't changed the predictions of orb-v3-conservative-omol."""
-    orb = pretrained.orb_v3_conservative_omol()
+    orb, adapter = pretrained.orb_v3_conservative_omol()
     atoms = molecule("C6H6")
     atoms.info["charge"] = 1.0
     atoms.info["spin"] = 0.0
     energy_gold = np.array(-6316.6646)
-    forces_gold = np.array(([0.14257583, -0.2070809, 0.01658938]))
+    forces_gold = np.array([0.14257583, -0.2070809, 0.01658938])
 
     # First: check the model.predict() is correct
-    graph = atomic_system.ase_atoms_to_atom_graphs(atoms, orb.system_config)
+    graph = adapter.from_ase_atoms(atoms)
     result = orb.predict(graph)
     energy = result["energy"][0].detach().numpy()
     forces = result["grad_forces"][0].detach().numpy()
@@ -141,7 +134,7 @@ def test_orb_v3_con_omol_predictions():
     np.testing.assert_allclose(forces, forces_gold, atol=1e-5)
 
     # Second: check the ase calculator interface is correct
-    calc = ORBCalculator(orb, system_config=orb.system_config, device=torch.device("cpu"))
+    calc = ORBCalculator(orb, adapter, device=torch.device("cpu"))
     atoms.calc = calc
     energy = atoms.get_potential_energy()
     forces = atoms.get_forces()[0]
@@ -151,8 +144,8 @@ def test_orb_v3_con_omol_predictions():
 
 def test_orbv3_con_omol_optimization():
     """Test that we haven't changed the optimization behaviour of orb-v3-conservative."""
-    orb = pretrained.orb_v3_conservative_omol()
-    calc = ORBCalculator(orb, system_config=orb.system_config, device=torch.device("cpu"))
+    orb, adapter = pretrained.orb_v3_conservative_omol()
+    calc = ORBCalculator(orb, adapter, device=torch.device("cpu"))
     atoms = molecule("C6H6")
     atoms.calc = calc
     atoms.rattle(0.5, seed=42)
@@ -171,7 +164,5 @@ def test_orbv3_con_omol_optimization():
 
     atoms = molecule("C6H6")
     atoms.calc = calc
-    with pytest.raises(
-        ValueError, match="atoms.info must contain both 'charge' and 'spin'"
-    ):
+    with pytest.raises(ValueError, match="atoms.info must contain both 'charge' and 'spin'"):
         atoms.get_potential_energy()

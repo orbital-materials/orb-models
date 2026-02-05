@@ -1,16 +1,19 @@
+from copy import copy
+
 import ase
+import numpy as np
 import pytest
 import torch
-import numpy as np
 
-from orb_models.forcefield.direct_regressor import DirectForcefieldRegressor
-from orb_models.forcefield.forcefield_heads import EnergyHead, ForceHead, StressHead
-from orb_models.forcefield import base
-from orb_models.forcefield import atomic_system
-from orb_models.forcefield.gns import _KEY
-from orb_models.forcefield.rbf import BesselBasis, ExpNormalSmearing
-from orb_models.forcefield import gns, segment_ops
-from orb_models.forcefield.conservative_regressor import ConservativeForcefieldRegressor
+from orb_models.common.atoms.batch.graph_batch import AtomGraphs
+from orb_models.common.models import gns, segment_ops
+from orb_models.common.models.rbf import BesselBasis, ExpNormalSmearing
+from orb_models.forcefield.forcefield_adapter import ForcefieldAtomsAdapter
+from orb_models.forcefield.models.conservative_regressor import ConservativeForcefieldRegressor
+from orb_models.forcefield.models.direct_regressor import DirectForcefieldRegressor
+from orb_models.forcefield.models.forcefield_heads import EnergyHead, ForceHead, StressHead
+
+_KEY = "feat"
 
 
 def one_hot(x):
@@ -23,10 +26,8 @@ def get_batch_from_ase_with_latents():
     atoms.set_cell([10, 10, 10])
     atoms.set_pbc(True)
 
-    system_config = atomic_system.SystemConfig(radius=6.0, max_num_neighbors=20)
-    atom_graphs = atomic_system.ase_atoms_to_atom_graphs(
-        atoms, system_config=system_config
-    )
+    adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=20)
+    atom_graphs = adapter.from_ase_atoms(atoms)
 
     nodes = len(atoms)
     n_edges = atom_graphs.n_edge[0]
@@ -42,29 +43,28 @@ def get_batch_from_ase_with_latents():
     features += 0.1 * force_targets.repeat_interleave(3, dim=1)
     features += 0.1 * energy_target[0]
 
-    return atom_graphs._replace(
-        node_features={
-            **atom_graphs.node_features,
-            _KEY: features,
-        },
-        edge_features={
-            **atom_graphs.edge_features,
-            _KEY: torch.randn((n_edges, latent_dim)),
-        },
-        system_features={
-            **atom_graphs.system_features,
-            "cell": torch.eye(3).unsqueeze(0),
-        },
-        node_targets={"forces": force_targets},
-        edge_targets={},
-        system_targets={"energy": energy_target, "stress": stress_target},
-    )
+    atom_graphs = copy(atom_graphs)
+    atom_graphs.node_features = {
+        **atom_graphs.node_features,
+        _KEY: features,
+    }
+    atom_graphs.edge_features = {
+        **atom_graphs.edge_features,
+        _KEY: torch.randn((n_edges, latent_dim)),
+    }
+    atom_graphs.system_features = {
+        **atom_graphs.system_features,
+        "cell": torch.eye(3).unsqueeze(0),
+    }
+    atom_graphs.node_targets = {"forces": force_targets}
+    atom_graphs.edge_targets = {}
+    atom_graphs.system_targets = {"energy": energy_target, "stress": stress_target}
+    return atom_graphs
 
 
 class EuclideanNormModel(torch.nn.Module):
-
     def __init__(self, minimum=[-0.5, -2.0, -1.0]):
-        super(EuclideanNormModel, self).__init__()
+        super().__init__()
         self.minimum = torch.tensor(minimum)
         self.heads = torch.nn.ModuleDict(
             {
@@ -79,7 +79,7 @@ class EuclideanNormModel(torch.nn.Module):
             num_message_passing_steps=2,
             num_mlp_layers=1,
             mlp_hidden_dim=16,
-            rbf_transform=BesselBasis(6.0)
+            rbf_transform=BesselBasis(6.0),
         )
         self.has_stress = True
 
@@ -95,7 +95,8 @@ class EuclideanNormModel(torch.nn.Module):
         )
         return energies, neg_grad, stress
 
-    def predict(self, batch):
+    def predict(self, batch, split: bool = False):
+        assert not split, "Split not supported for EuclideanNormModel."
         energy, forces, stress = self.forward(batch)
         return {"energy": energy, "forces": forces, "stress": stress}
 
@@ -108,7 +109,7 @@ class EuclideanNormModel(torch.nn.Module):
 def batch():
     """Simulate a batch that's been processed by a GNS and so has _KEY vars."""
     graph = get_batch_from_ase_with_latents()
-    return base.batch_graphs([graph, graph])
+    return AtomGraphs.batch([graph, graph])
 
 
 @pytest.fixture
@@ -116,7 +117,30 @@ def single_graph():
     return get_batch_from_ase_with_latents()
 
 
+@pytest.fixture(scope="module")
+def forcefield_adapter():
+    return ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=20)
+
+
 @pytest.fixture
+def euclidean_norm():
+    minimum = [-0.5, -2.0, -1.0]
+    return EuclideanNormModel(minimum)
+
+
+@pytest.fixture
+def euclidean_norm_invariant():
+    minimum = [0.0, 0.0, 0.0]
+    return EuclideanNormModel(minimum)
+
+
+@pytest.fixture()
+def mptraj_10_systems_db(shared_fixtures_path):
+    db = ase.db.connect(shared_fixtures_path / "databases" / "10_mptraj_systems.db")
+    return db
+
+
+@pytest.fixture()
 def energy_head():
     return EnergyHead(
         latent_dim=9,
@@ -129,7 +153,7 @@ def energy_head():
     )
 
 
-@pytest.fixture
+@pytest.fixture()
 def force_head():
     return ForceHead(
         latent_dim=9,
@@ -145,9 +169,8 @@ def force_head():
     )
 
 
-@pytest.fixture
+@pytest.fixture()
 def stress_head():
-
     return StressHead(
         latent_dim=9,
         num_mlp_layers=1,
@@ -159,10 +182,10 @@ def stress_head():
     )
 
 
-@pytest.fixture
+@pytest.fixture()
 def gns_model():
     """Instantiates the molecular model."""
-    return gns.MoleculeGNS(
+    m = gns.MoleculeGNS(
         num_node_in_features=118,
         num_node_out_features=3,
         num_edge_in_features=13,
@@ -174,15 +197,18 @@ def gns_model():
         node_feature_names=["feat"],
         rbf_transform=ExpNormalSmearing(num_rbf=10),
     )
+    return m.to(dtype=torch.get_default_dtype())
 
 
 @pytest.fixture
-def conservative_regressor(gns_model, energy_head):
+def conservative_regressor(gns_model, energy_head, force_head, stress_head):
     return ConservativeForcefieldRegressor(
-        heads={"energy": energy_head},
+        heads={"energy": energy_head, "forces": force_head, "stress": stress_head},
         model=gns_model,
         loss_weights={
             "energy": 1.0,
+            "forces": 1.0,
+            "stress": 1.0,
             "grad_forces": 1.0,
             "grad_stress": 1.0,
             "rotational_grad": 1.0,
@@ -191,7 +217,7 @@ def conservative_regressor(gns_model, energy_head):
 
 
 @pytest.fixture
-def graph_regressor(gns_model, energy_head, force_head, stress_head):
+def direct_regressor(gns_model, energy_head, force_head, stress_head):
     return DirectForcefieldRegressor(
         heads={"energy": energy_head, "forces": force_head, "stress": stress_head},
         model=gns_model,
@@ -201,15 +227,3 @@ def graph_regressor(gns_model, energy_head, force_head, stress_head):
             "stress": 1.0,
         },
     )
-
-
-@pytest.fixture
-def euclidean_norm():
-    minimum = [-0.5, -2.0, -1.0]
-    return EuclideanNormModel(minimum)
-
-
-@pytest.fixture
-def euclidean_norm_invariant():
-    minimum = [0.0, 0.0, 0.0]
-    return EuclideanNormModel(minimum)

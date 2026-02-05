@@ -1,0 +1,15 @@
+# Intentionally malformed CIF to test complete parsing failure
+# Both Pymatgen and ASE should fail on this file
+data_malformed
+_cell_length_a       INVALID_NUMBER
+_cell_length_b       10.0
+_cell_length_c       
+_cell_angle_alpha    90.0
+
+This is not valid CIF syntax
+
+loop_
+  _atom_site_label
+  MISSING_COLUMNS_HERE
+C1  0.0  0.0
+

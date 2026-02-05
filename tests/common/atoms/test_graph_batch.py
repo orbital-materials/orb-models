@@ -2,9 +2,7 @@
 import pytest
 import torch
 
-from orb_models.forcefield import base
-from orb_models.forcefield.atomic_system import atom_graphs_to_ase_atoms
-from orb_models.forcefield.base import refeaturize_atomgraphs
+from orb_models.common.atoms.batch.graph_batch import AtomGraphs, refeaturize_atomgraphs
 
 
 def random_graph(nodes, edges):
@@ -14,7 +12,7 @@ def random_graph(nodes, edges):
     edge_features = torch.randn((edges, 12))
     atomic_numbers = torch.arange(0, nodes)
     noise_or_forces = torch.randn_like(positions)
-    return base.AtomGraphs(
+    return AtomGraphs(
         senders=senders,
         receivers=receivers,
         n_node=torch.tensor([nodes]),
@@ -42,7 +40,7 @@ def graph():
     edge_features = torch.linspace(-edges, edges, edges * 12).view(edges, 12)
     atomic_numbers = torch.arange(0, nodes)
     noise_or_forces = positions.clone() * 10.0
-    return base.AtomGraphs(
+    return AtomGraphs(
         senders=senders,
         receivers=receivers,
         n_node=torch.tensor([nodes]),
@@ -50,7 +48,7 @@ def graph():
         node_features=dict(atomic_numbers=atomic_numbers, positions=positions),
         edge_features=dict(feat=edge_features),
         system_features={
-            "cell": torch.eye(3).view(1, 3, 3),
+            "cell": 3 * torch.eye(3).view(1, 3, 3),
             "pbc": torch.tensor([[True, True, True]]),
         },
         node_targets=dict(node_target=noise_or_forces),
@@ -94,22 +92,22 @@ def test_equality():
 @pytest.mark.parametrize("clone", [True, False])
 def test_batching(clone):
     graphs = [graph(), graph()]
-    batched = base.batch_graphs(graphs)
+    batched = AtomGraphs.batch(graphs)
     unbatched = batched.split(clone)
 
     # check that unbatched matches original list
-    for new, orig in zip(unbatched, graphs):
+    for new, orig in zip(unbatched, graphs, strict=False):
         assert new.equals(orig)
 
     # check that batched was unaffected by our call to split_graphs
-    assert batched.equals(base.batch_graphs(graphs))
+    assert batched.equals(AtomGraphs.batch(graphs))
 
 
 @pytest.mark.parametrize("clone", [True, False])
 def test_split_graphs_cloning(clone):
     # check that if we call split_graphs with clone=False,
     # then the returned list of graphs are views not copies
-    batched = base.batch_graphs([graph(), graph()])
+    batched = AtomGraphs.batch([graph(), graph()])
     orig_positions = batched.positions.clone()
 
     unbatched = batched.split(clone=clone)
@@ -123,14 +121,14 @@ def test_split_graphs_cloning(clone):
 
 def test_random_batching():
     graphs = [random_graph(i, i) for i in range(1, 5)]
-    batched = base.batch_graphs(graphs)
+    batched = AtomGraphs.batch(graphs)
 
     res = batched.split()
-    for r, o in zip(res, graphs):
+    for r, o in zip(res, graphs, strict=False):
         assert r.equals(o)
 
     # check that batched was unaffected by our call to split_graphs
-    assert batched.equals(base.batch_graphs(graphs))
+    assert batched.equals(AtomGraphs.batch(graphs))
 
 
 def test_refeaturization_pos_substitution(dataset_and_loader):
@@ -153,22 +151,17 @@ def test_refeaturization_cell_remapping(dataset_and_loader):
     graph = refeaturize_atomgraphs(atoms=datapoint, positions=giant_positions)
     assert torch.all(graph.positions != giant_positions)
 
-    # No cell should mean positions are unchanged
-    new_unit_cell = torch.zeros_like(datapoint.cell)
-    graph = refeaturize_atomgraphs(
-        atoms=datapoint, positions=giant_positions, cell=new_unit_cell
-    )
+    # No pbc should mean positions are unchanged
+    datapoint.pbc = torch.zeros_like(datapoint.pbc, dtype=torch.bool)
+    graph = refeaturize_atomgraphs(atoms=datapoint, positions=giant_positions)
     assert torch.all(graph.positions == giant_positions).item()
-
-    # check refeaturized graph has the new unit cell
-    assert (graph.cell == new_unit_cell).all()
 
 
 def test_volume_atomgraphs(dataset_and_loader):
     dataloader = dataset_and_loader[1]
     batch = next(iter(dataloader))
-    v1 = base.volume_atomgraphs(batch)
-    ase_datapoints = atom_graphs_to_ase_atoms(batch)
+    v1 = batch.volume()
+    ase_datapoints = batch.to_ase_atoms()
     v2 = torch.tensor([a.get_volume() for a in ase_datapoints], dtype=torch.float32)
     assert torch.allclose(v1, v2, atol=1e-3)
 
@@ -184,9 +177,9 @@ def test_refeaturization_is_differentiable():
         atomic_numbers_embedding=atomic_numbers_embedding,
         differentiable=True,
     )
-    vectors, _, _ = graph_.compute_differentiable_edge_vectors()
+    vectors = graph_.edge_features["vectors"]
     loss = vectors.sum() + graph_.atomic_numbers_embedding.sum()
     loss.backward()
     assert graph_.positions.grad is not None
-    assert graph_.atomic_numbers_embedding.grad is not None
     assert not torch.all(graph_.positions.grad == 0.0)
+    assert graph_.atomic_numbers_embedding.grad is not None

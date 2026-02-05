@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from orb_models.forcefield.forcefield_utils import torch_voigt_6_to_full_3x3_stress
+from orb_models.forcefield.models.forcefield_utils import torch_voigt_6_to_full_3x3_stress
 
 
 def test_batch_voigt_conversion():

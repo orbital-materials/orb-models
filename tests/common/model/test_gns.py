@@ -1,17 +1,15 @@
 import pytest
 import torch
 
-from orb_models.forcefield import gns
-from orb_models.forcefield.rbf import ExpNormalSmearing
+from orb_models.common.models import gns
+from orb_models.common.models.rbf import ExpNormalSmearing
 
 
 @pytest.fixture
 def featurized_graph(graph):
     rbf = ExpNormalSmearing(num_rbf=10)
     node_features = {
-        "feat": torch.nn.functional.one_hot(
-            graph.node_features["atomic_numbers"], num_classes=118
-        )
+        "feat": torch.nn.functional.one_hot(graph.node_features["atomic_numbers"], num_classes=118)
         .squeeze()
         .type(torch.float32)
     }
@@ -19,13 +17,12 @@ def featurized_graph(graph):
     rbfs = rbf(lengths)
     unit_vectors = graph.edge_features["vectors"] / lengths.unsqueeze(1)
 
-    graph = graph._replace(
-        node_features=node_features,
-        edge_features={
-            **graph.edge_features,
-            **{"feat": torch.cat([rbfs, unit_vectors], dim=1)},
-        },
-    )
+    graph = graph.clone()
+    graph.node_features = node_features
+    graph.edge_features = {
+        **graph.edge_features,
+        "feat": torch.cat([rbfs, unit_vectors], dim=1),
+    }
     return graph
 
 
@@ -38,12 +35,8 @@ def test_encoder(featurized_graph):
         mlp_hidden_dim=8,
     )
 
-    node_features = torch.cat(
-        [featurized_graph.node_features[k] for k in ["feat"]], dim=-1
-    )
-    edge_features = torch.cat(
-        [featurized_graph.edge_features[k] for k in ["feat"]], dim=-1
-    )
+    node_features = torch.cat([featurized_graph.node_features[k] for k in ["feat"]], dim=-1)
+    edge_features = torch.cat([featurized_graph.edge_features[k] for k in ["feat"]], dim=-1)
     nodes, edges = enc(node_features, edge_features)
 
     assert nodes.shape[-1] == 3
@@ -58,9 +51,7 @@ def test_decoder(featurized_graph):
         mlp_hidden_dim=8,
     )
 
-    node_features = torch.cat(
-        [featurized_graph.node_features[k] for k in ["feat"]], dim=-1
-    )
+    node_features = torch.cat([featurized_graph.node_features[k] for k in ["feat"]], dim=-1)
     pred = decoder(node_features)
 
     assert pred.shape[-1] == 3
@@ -75,12 +66,8 @@ def test_interaction_network(featurized_graph):
         mlp_hidden_dim=8,
     )
 
-    node_features = torch.cat(
-        [featurized_graph.node_features[k] for k in ["feat"]], dim=-1
-    )
-    edge_features = torch.cat(
-        [featurized_graph.edge_features[k] for k in ["feat"]], dim=-1
-    )
+    node_features = torch.cat([featurized_graph.node_features[k] for k in ["feat"]], dim=-1)
+    edge_features = torch.cat([featurized_graph.edge_features[k] for k in ["feat"]], dim=-1)
     nodes, edges = enc(node_features, edge_features)
 
     net = gns.AttentionInteractionNetwork(
@@ -90,30 +77,36 @@ def test_interaction_network(featurized_graph):
     )
 
     cutoff = torch.ones_like(featurized_graph.edge_features["vectors"][:, 0])
-    nodes, edges = net(
-        nodes, edges, featurized_graph.senders, featurized_graph.receivers, cutoff
-    )
+    nodes, edges = net(nodes, edges, featurized_graph.senders, featurized_graph.receivers, cutoff)
 
     assert nodes.shape[-1] == 3
     assert edges.shape[-1] == 3
 
 
 def test_model_parameters_have_grad(graph, gns_model):
-    pred = gns_model.eval()(graph)["pred"]
-    loss = pred.sum()
-    loss.backward()
+    pred = gns_model.eval().loss(graph)
+    pred.loss.sum().backward()
     params = gns_model.state_dict(keep_vars=True)
     for key, param in params.items():
         # Can't assert non zero because of relu
-        if param.grad is not None:
-            assert not torch.all(~param.grad.bool()), f"{key} has no grad"
-        else:
-            print(f"{key} has no grad")
-            raise ValueError(f"{key} has no grad")
+        assert not torch.all(~param.grad.bool())
 
 
 def test_gns_can_torch_compile(gns_model, graph):
     """Tests if the MoleculeGNS.forward is compilable with torch.compile."""
     compiled = torch.compile(gns_model, dynamic=True, mode="default", fullgraph=True)
+
+    compiled(graph)
+
+
+@pytest.mark.xfail(
+    True,
+    reason="The conditioner cannot be compiled ATM due to unsupported repeat_interleave.",
+)
+def test_gns_with_conditioner_can_torch_compile(gns_model_with_conditioner, graph):
+    """Tests if the MoleculeGNS.forward is compilable with torch.compile."""
+    compiled = torch.compile(
+        gns_model_with_conditioner, dynamic=True, mode="default", fullgraph=True
+    )
 
     compiled(graph)

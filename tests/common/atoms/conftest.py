@@ -1,14 +1,16 @@
-from typing import Dict, Tuple, Union
 import ase
+import ase.geometry
+import ase.neighborlist
 import numpy as np
 import pytest
 import torch
+import torch.testing
 
-from orb_models.dataset import ase_sqlite_dataset
-from orb_models.forcefield import atomic_system
-from orb_models.forcefield.property_definitions import PropertyConfig
-from orb_models.forcefield import base, featurization_utilities
-from orb_models.forcefield.featurization_utilities import EdgeCreationMethod
+from orb_models.common.atoms import graph_featurization
+from orb_models.common.atoms.batch.graph_batch import AtomGraphs
+from orb_models.common.dataset import ase_sqlite_dataset
+from orb_models.common.dataset.property_definitions import PropertyConfig
+from orb_models.forcefield.forcefield_adapter import ForcefieldAtomsAdapter
 
 
 def one_hot(x):
@@ -16,16 +18,16 @@ def one_hot(x):
 
 
 @pytest.fixture()
-def dataset_and_loader(fixtures_path):
-    dataset_config = atomic_system.SystemConfig(
+def dataset_and_loader(shared_fixtures_path):
+    dataset_config = ForcefieldAtomsAdapter(
         radius=6.0,
         max_num_neighbors=20,
     )
 
     dataset = ase_sqlite_dataset.AseSqliteDataset(
         name="test_dataset",
-        path=str(fixtures_path / "test_dataset.db"),
-        system_config=dataset_config,
+        path=str(shared_fixtures_path / "databases/test_dataset.db"),
+        atoms_adapter=dataset_config,
         target_config=PropertyConfig(),
     )
 
@@ -33,7 +35,7 @@ def dataset_and_loader(fixtures_path):
         dataset,
         num_workers=0,
         batch_size=5,
-        collate_fn=base.batch_graphs,
+        collate_fn=AtomGraphs.batch,
     )
     return (dataset, loader)
 
@@ -45,7 +47,7 @@ def graph():
     atomic_numbers = torch.arange(0, nodes)
     vectors = torch.randn((edges, 3))
     lengths = vectors.norm(dim=1)
-    return base.AtomGraphs(
+    return AtomGraphs(
         senders=torch.tensor([0, 1, 2, 1, 2, 0]),
         receivers=torch.tensor([1, 0, 1, 2, 0, 2]),
         n_node=torch.tensor([nodes]),
@@ -75,7 +77,7 @@ def graph():
     )
 
 
-def get_zeolites(fixtures_path) -> Dict[str, ase.Atoms]:
+def get_zeolites(fixtures_path) -> dict[str, ase.Atoms]:
     """Function to get a zeolite framework."""
     zeos = {}
     data = torch.load(fixtures_path / "zeo_test.pkl", weights_only=False)
@@ -99,12 +101,12 @@ def get_CO2():
 def compute_pbc_radius_graph_nequip(
     positions: torch.Tensor,
     cell: torch.Tensor,
-    radius: Union[float, torch.Tensor],
+    radius: float | torch.Tensor,
     max_number_neighbors: int = 20,
     self_interaction: bool = False,
     strict_self_interaction: bool = True,
     pbc: bool = False,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     r"""Create neighbor list and neighbor vectors based on radial cutoff.
 
     Adapted from here: https://github.com/mir-group/nequip/blob/main/nequip/data/AtomicData.py#L683.
@@ -204,18 +206,15 @@ def compute_pbc_radius_graph_nequip(
         end_index = unique_counts[sender_node] + start_index
         # If max_number_neighbors is larger than the number of edges, it will keep the original edges unchanged.
         distance_indices = (
-            distances[start_index:end_index].argsort()[:max_number_neighbors]
-            + start_index
+            distances[start_index:end_index].argsort()[:max_number_neighbors] + start_index
         )
         top_k_smallest_indices.append(distance_indices)
         start_index = end_index
-    top_k_smallest_indices = np.concatenate(top_k_smallest_indices)
+    top_k_smallest_indices_array = np.concatenate(top_k_smallest_indices)
     # Get top k edge indices and distance_vector based on top k indices
-    first_idex_top_k = first_idex[top_k_smallest_indices].flatten()
-    second_idex_top_k = second_idex[top_k_smallest_indices].flatten()
-    distance_vector_top_k = torch.Tensor(distance_vector[top_k_smallest_indices]).view(
-        -1, 3
-    )
+    first_idex_top_k = first_idex[top_k_smallest_indices_array].flatten()
+    second_idex_top_k = second_idex[top_k_smallest_indices_array].flatten()
+    distance_vector_top_k = torch.Tensor(distance_vector[top_k_smallest_indices_array]).view(-1, 3)
 
     # Build output:
     edge_index_top_k = torch.vstack(
@@ -234,7 +233,7 @@ def assert_edges_match_nequips(
     positions: torch.Tensor,
     cell: torch.Tensor,
     pbc: torch.Tensor,
-    edge_method: EdgeCreationMethod,
+    edge_method: graph_featurization.EdgeCreationMethod,
     half_supercell: bool = False,
     max_num_neighbors: int = 20,
     max_radius: float = 6.0,
@@ -243,9 +242,9 @@ def assert_edges_match_nequips(
         edge_index,
         edge_vectors,
         _,
-    ) = featurization_utilities.compute_pbc_radius_graph(
+    ) = graph_featurization.compute_pbc_radius_graph(
         positions=positions,
-        # pbc[0] here is because we have added an outer dim for batching,
+        # cell[0] here is because we have added an outer dim for batching,
         # but a bunch of internal stuff assumesthat the pbc is 3x3 exactly.
         cell=cell[0],
         pbc=pbc,
@@ -280,9 +279,7 @@ def assert_edges_match_nequips(
         end_index = unique_counts[sender_node] + start_index
         assert torch.all(
             torch.unique(edge_index[1][start_index:end_index], return_counts=True)[1]
-            == torch.unique(
-                edge_index_nequip[1][start_index:end_index], return_counts=True
-            )[1]
+            == torch.unique(edge_index_nequip[1][start_index:end_index], return_counts=True)[1]
         ), (
             f"Receiver edge indices of edge_index and edge_index_nequip for the start_index: "
             f"{start_index} and end_index: {end_index} are not equal."

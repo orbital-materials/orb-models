@@ -1,12 +1,13 @@
 """Unit tests for charge and spin conditioning functionality."""
 
-import pytest
-import torch
 from copy import deepcopy
 
-from orb_models.forcefield.nn_util import ChargeSpinEmbedding, ChargeSpinConditioner
-from orb_models.forcefield import gns
-from orb_models.forcefield.rbf import ExpNormalSmearing
+import pytest
+import torch
+
+from orb_models.common.models import gns
+from orb_models.common.models.nn_util import ChargeSpinConditioner, ChargeSpinEmbedding
+from orb_models.common.models.rbf import ExpNormalSmearing
 
 
 @pytest.fixture
@@ -14,13 +15,12 @@ def graph_with_charge_spin_batch(graph):
     """Create a batch of graphs with charge and spin system features."""
     graph_with_features = deepcopy(graph)
     # Create 3 identical graphs
-    graph_with_features = graph_with_features._replace(
-        n_node=torch.tensor([10, 10, 10]),  # 3 graphs, 10 nodes each
-        n_edge=torch.tensor([6, 6, 6]),     # 3 graphs, 6 edges each
-        system_features={
-            **graph_with_features.system_features,
+    graph_with_features.n_node = torch.tensor([10, 10, 10])  # 3 graphs, 10 nodes each
+    graph_with_features.n_edge = torch.tensor([6, 6, 6])  # 3 graphs, 6 edges each
+    graph_with_features.system_features.update(
+        {
             "total_charge": torch.tensor([-1.0, 0.0, 1.0]),  # 3 graphs
-            "spin_multiplicity": torch.tensor([0.0, 1.0, 2.0]),     # 3 graphs
+            "spin_multiplicity": torch.tensor([0.0, 1.0, 2.0]),  # 3 graphs
         }
     )
     return graph_with_features
@@ -36,7 +36,7 @@ def gns_model_with_conditioner():
         emits_edge_embs=False,
     )
 
-    return gns.MoleculeGNS(
+    m = gns.MoleculeGNS(
         latent_dim=8,
         num_message_passing_steps=2,
         num_mlp_layers=1,
@@ -45,6 +45,7 @@ def gns_model_with_conditioner():
         conditioning=True,
         conditioner=conditioner,
     )
+    return m.to(dtype=torch.get_default_dtype())
 
 
 @pytest.fixture
@@ -143,10 +144,9 @@ def test_conditioning_gradients(gns_model_with_conditioner, graph_with_charge_sp
     # Some parameters might have zero gradients, which is normal
     has_gradients = False
     for name, param in gns_model_with_conditioner.conditioner.named_parameters():
-        if param.grad is not None:
-            if torch.any(param.grad != 0):
-                has_gradients = True
-                break
+        if param.grad is not None and torch.any(param.grad != 0):
+            has_gradients = True
+            break
 
     # At least some parameters should have non-zero gradients
     assert has_gradients, "No conditioner parameters have non-zero gradients"

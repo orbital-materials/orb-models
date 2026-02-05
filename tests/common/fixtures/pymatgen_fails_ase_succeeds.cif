@@ -1,0 +1,29 @@
+# Synthetic CIF that triggers Pymatgen failure but ASE can handle
+# Tests the ASE fallback mechanism
+# Issue: Multiple atoms at very close positions that Pymatgen strict mode rejects
+data_pymatgen_fails_ase_succeeds
+_cell_length_a       10.0
+_cell_length_b       10.0
+_cell_length_c       10.0
+_cell_angle_alpha    90.0
+_cell_angle_beta     90.0
+_cell_angle_gamma    90.0
+
+_symmetry_space_group_name_H-M    "P 1"
+_symmetry_Int_Tables_number       1
+
+loop_
+  _symmetry_equiv_pos_as_xyz
+  'x, y, z'
+
+loop_
+  _atom_site_type_symbol
+  _atom_site_label
+  _atom_site_fract_x
+  _atom_site_fract_y
+  _atom_site_fract_z
+  _atom_site_occupancy
+C  C1  0.0000  0.0000  0.0000  0.50
+C  C2  0.0001  0.0001  0.0001  0.50
+N  N1  0.5000  0.5000  0.5000  1.00
+
