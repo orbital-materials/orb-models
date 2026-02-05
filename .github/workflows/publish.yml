@@ -33,9 +33,9 @@ jobs:
 
     - name: Run linters
       run: |
-        uv run ruff check ./orb_models ./tests ./internal
-        uv run ruff format --check ./orb_models ./tests ./internal
-        uv run mypy ./orb_models ./tests ./internal
+        uv run ruff check ./orb_models ./tests ./scripts
+        uv run ruff format --check ./orb_models ./tests ./scripts
+        uv run mypy ./orb_models ./tests ./scripts
     - name: Run tests
       run: uv run pytest ./tests -n auto
 

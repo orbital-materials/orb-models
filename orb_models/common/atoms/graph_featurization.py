@@ -769,7 +769,7 @@ def batch_compute_pbc_radius_graph(
     node_batch_index: torch.Tensor,
     max_number_neighbors: torch.Tensor,
     edge_method: EdgeCreationMethod | None = None,
-    half_supercell: bool = False,
+    half_supercell: bool | None = None,
     device: torch.device | str | int | None = None,
     float_dtype: torch.dtype = torch.float32,
 ):
@@ -785,11 +785,11 @@ def batch_compute_pbc_radius_graph(
         node_batch_index (torch.Tensor): An index to map nodes to the batch. Of size len(positions).
         max_number_neighbors (torch.Tensor): The maximum number of neighbors for each particle.
         edge_method (EdgeCreationMethod, optional): The method to use for graph edge construction. Defaults to knn_alchemi.
-        half_supercell (bool): Whether to use half the supercell for graph construction, and then symmetrize.
+        half_supercell (bool, optional): Whether to use half the supercell for graph construction, and then symmetrize.
             This flag does not affect the resulting graph; it is purely an optimization that can double
             throughput and half memory for very large cells (e.g. 10k+ atoms). For smaller systems, it can harm
             performance due to additional computation to enforce max_num_neighbors.
-        device (Optional[Union[torch.device, str, int]], optional): The device to use for computation.
+        device (Union[torch.device, str, int], optional): The device to use for computation.
             Defaults to None, in which case GPU is used if available.
         float_dtype (torch.dtype): The dtype to use for floating point tensors in the graph construction.
 

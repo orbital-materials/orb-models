@@ -7,7 +7,7 @@ RUN apt-get update && \
     apt-get install -y \
         ca-certificates \
         wget \
-        git \   
+        git \
         sudo \
         gcc \
         g++
