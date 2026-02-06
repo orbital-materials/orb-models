@@ -2,12 +2,24 @@ import ase.io
 import numpy as np
 import pytest
 import torch
-import torch_sim as ts
 from ase import Atoms
 
 from orb_models.common.atoms.featurization import rotation_from_generator
 from orb_models.forcefield.forcefield_adapter import ForcefieldAtomsAdapter
 from tests.common.atoms import common_adapter_tests
+
+try:
+    import torch_sim as ts
+
+    _TORCH_SIM_AVAILABLE = True
+except ImportError:
+    ts = None  # type: ignore[assignment]
+    _TORCH_SIM_AVAILABLE = False
+
+requires_torch_sim = pytest.mark.skipif(
+    not _TORCH_SIM_AVAILABLE,
+    reason="torch_sim is required for this test",
+)
 
 
 @pytest.fixture
@@ -181,6 +193,7 @@ def test_forcefield_adapter_requires_both_spin_and_charge():
         adapter.from_ase_atoms(atoms_spin_only)
 
 
+@requires_torch_sim
 def test_forcefield_adapter_parses_spin_and_charge_from_simstate():
     """Test that ForcefieldAtomsAdapter correctly parses spin and charge from SimState."""
     state = ts.SimState(
@@ -202,6 +215,7 @@ def test_forcefield_adapter_parses_spin_and_charge_from_simstate():
     assert graph.system_features["spin_multiplicity"].item() == 2.0
 
 
+@requires_torch_sim
 def test_forcefield_adapter_parses_spin_and_charge_from_batched_simstate():
     """Test that ForcefieldAtomsAdapter correctly parses spin and charge from batched SimState."""
     # Two systems: first has 3 atoms (H2O), second has 2 atoms (H2)

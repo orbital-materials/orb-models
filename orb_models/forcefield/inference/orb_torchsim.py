@@ -1,8 +1,15 @@
+try:
+    import torch_sim as ts
+    from torch_sim.elastic import voigt_6_to_full_3x3_stress
+    from torch_sim.models.interface import ModelInterface
+    from torch_sim.typing import StateDict
+except ImportError as e:
+    raise ImportError(
+        "torch_sim is required for the OrbTorchSimModel interface. "
+        "Install it with: pip install torch-sim-atomistic"
+    ) from e
+
 import torch
-import torch_sim as ts
-from torch_sim.elastic import voigt_6_to_full_3x3_stress
-from torch_sim.models.interface import ModelInterface
-from torch_sim.typing import StateDict
 
 from orb_models.common.atoms.graph_featurization import EdgeCreationMethod
 from orb_models.forcefield.forcefield_adapter import ForcefieldAtomsAdapter

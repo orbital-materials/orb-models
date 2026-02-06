@@ -1,9 +1,21 @@
+from __future__ import annotations
+
 from copy import deepcopy
-from typing import cast, override
+from typing import TYPE_CHECKING, cast, override
 
 import ase
 import torch
-import torch_sim as ts
+
+if TYPE_CHECKING:
+    import torch_sim as ts
+
+try:
+    import torch_sim as ts
+
+    _TORCH_SIM_AVAILABLE = True
+except ImportError:
+    ts = None  # type: ignore[assignment]
+    _TORCH_SIM_AVAILABLE = False
 
 from orb_models.common.atoms import featurization as feat_utils
 from orb_models.common.atoms import graph_featurization as graph_feat
@@ -172,6 +184,8 @@ class ForcefieldAtomsAdapter(AbstractAtomsAdapter):
     ) -> AtomGraphs:
         """Convert a SimState object into AtomGraphs format, ready for use in an ORB model.
 
+        Requires torch_sim to be installed. Install with: pip install torch-sim-atomistic
+
         Args:
             state: SimState object containing atomic positions, cell, and atomic numbers.
             edge_method (EdgeCreationMethod, optional): The method to use for graph edge
@@ -182,6 +196,11 @@ class ForcefieldAtomsAdapter(AbstractAtomsAdapter):
             graph_construction_dtype: The dtype to use for floating point tensors in the
                 graph construction.
         """
+        if not _TORCH_SIM_AVAILABLE:
+            raise ImportError(
+                "torch_sim is required for from_torchsim_state(). "
+                "Install it with: pip install orb-models[torchsim]"
+            )
         output_dtype = torch.get_default_dtype() if output_dtype is None else output_dtype
         graph_construction_dtype = (
             torch.get_default_dtype()
@@ -264,7 +283,7 @@ class ForcefieldAtomsAdapter(AbstractAtomsAdapter):
             max_num_neighbors=max_num_neighbors,  # type: ignore
         ).to(device=device, dtype=output_dtype)
 
-    def is_compatible_with(self, other: "AbstractAtomsAdapter"):
+    def is_compatible_with(self, other: AbstractAtomsAdapter):
         """Check if this AtomsConstructor is compatible with another and print incompatibilities."""
         if not isinstance(other, ForcefieldAtomsAdapter):
             raise ValueError(f"Incompatible AtomsConstructor: {type(self)} != {type(other)}")
@@ -290,7 +309,11 @@ def _get_charge_and_spin(atoms: ase.Atoms | ts.SimState) -> dict[str, torch.Tens
         assert isinstance(spin, (float, int)), "Spin must be a float or int"
         out["total_charge"] = torch.tensor([chg], dtype=torch.get_default_dtype())
         out["spin_multiplicity"] = torch.tensor([spin], dtype=torch.get_default_dtype())
-    elif isinstance(atoms, ts.SimState) and (atoms.charge is not None or atoms.spin is not None):
+    elif (
+        _TORCH_SIM_AVAILABLE
+        and isinstance(atoms, ts.SimState)
+        and (atoms.charge is not None or atoms.spin is not None)
+    ):
         assert atoms.charge is not None and atoms.spin is not None, (
             "Charge and spin must be present together"
         )

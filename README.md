@@ -120,7 +120,7 @@ Or you can use it to run MD simulations. The script, an example input xyz file a
 
 #### Usage with TorchSim
 
-For batched optimisation, we recommend using [TorchSim](https://github.com/TorchSim/torch-sim), e.g.: 
+For batched optimisation, we recommend using [TorchSim](https://github.com/TorchSim/torch-sim). It's an optional dependency that can be installed with `pip install torch-sim-atomistic`. 
 
 ```python
 import ase

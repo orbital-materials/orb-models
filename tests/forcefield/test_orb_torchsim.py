@@ -1,4 +1,7 @@
 import pytest
+
+pytest.importorskip("torch_sim", reason="torch_sim is required for these tests")
+
 import torch
 import torch_sim as ts
 from torch_sim.elastic import full_3x3_to_voigt_6_stress

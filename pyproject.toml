@@ -21,8 +21,10 @@ dependencies = [
     "dm-tree==0.1.8", # Pinned because of https://github.com/google-deepmind/tree/issues/128
     "tqdm>=4.67.1",
     "nvalchemi-toolkit-ops>=0.2.0",
-    "torch-sim-atomistic>=0.5.1",
 ]
+
+[project.optional-dependencies]
+torchsim = ["torch-sim-atomistic>=0.5.1"]
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -41,6 +43,7 @@ dev = [
     "ruff>=0.10.0",
     "mypy>=1.13",
     "torch_dftd",
+    "torch-sim-atomistic>=0.5.1",
 ]
 
 [tool.setuptools.dynamic]
