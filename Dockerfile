@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:2.8.0-cuda12.6-cudnn9-runtime
+FROM pytorch/pytorch:2.10.0-cuda12.6-cudnn9-runtime
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -10,8 +10,11 @@ RUN apt-get update && \
         git \
         sudo \
         gcc \
-        g++
+        g++ \ 
+    # Cleanup
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 ## Install Python requirements
-RUN pip install orb-models && \
-    pip install "cuml-cu12==25.2.*"
+RUN pip install --break-system-packages orb-models && \
+    pip install --break-system-packages "cuml-cu12==25.2.*"
