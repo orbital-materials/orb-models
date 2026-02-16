@@ -218,7 +218,7 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
         energy_head = self.heads[self.energy_name]
         energy_head = cast(EnergyHead, energy_head)
         loss_out = energy_head.loss(energy_pred, batch)
-        loss = self.loss_weights.get(self.energy_name, 1.0) * loss_out.loss
+        loss = self.loss_weights[self.energy_name] * loss_out.loss
         total_loss += loss
         metrics.update(loss_out.log)
         metrics[f"{self.energy_name}_loss"] = loss
@@ -235,7 +235,7 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
             loss_type=self.forces_loss_type,
             training=self.training,
         )
-        loss = self.loss_weights.get(self.grad_forces_name, 1.0) * loss_out.loss
+        loss = self.loss_weights[self.grad_forces_name] * loss_out.loss
         total_loss += loss
         metrics.update({f"{self.grad_prefix}-{k}": v for k, v in loss_out.log.items()})
         metrics[f"{self.grad_forces_name}_loss"] = loss
@@ -254,7 +254,7 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
                 normalizer=self.grad_stress_normalizer,
                 loss_type=energy_head.loss_type,
             )
-            loss = self.loss_weights.get(self.grad_stress_name, 1.0) * loss_out.loss
+            loss = self.loss_weights[self.grad_stress_name] * loss_out.loss
             loss_out.log[f"{self.grad_stress_name}_loss"] = loss
             total_loss += loss
             metrics.update({f"{self.grad_prefix}-{k}": v for k, v in loss_out.log.items()})
@@ -278,7 +278,7 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
                     )
                 else:
                     loss_out = direct_head.loss(direct_pred, batch)
-                loss = self.loss_weights.get(direct_name, 1.0) * loss_out.loss
+                loss = self.loss_weights[direct_name] * loss_out.loss
                 total_loss += loss
                 metrics.update(loss_out.log)
                 metrics[f"{direct_name}_loss"] = loss
@@ -302,7 +302,7 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
             forces_error = torch.abs(raw_grad_forces_pred - raw_forces_target).mean(dim=-1)
             confidence_logits = out["confidence"]
             loss_out = confidence_head.loss(confidence_logits, forces_error, batch)
-            loss = self.loss_weights.get("confidence", 1.0) * loss_out.loss
+            loss = self.loss_weights["confidence"] * loss_out.loss
             total_loss += loss
             metrics.update(loss_out.log)
             metrics["confidence_loss"] = loss

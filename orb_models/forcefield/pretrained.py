@@ -384,6 +384,14 @@ def orb_v3_conservative_omol(
         "Cannot compile a conservative model in training mode."
     )
 
+    # Default to evenly weighted losses
+    loss_weights = {
+        "energy": 1.0,
+        "grad_forces": 1.0,
+        "confidence": 1.0,
+        **(loss_weights or {}),
+    }
+
     atoms_adapter = ForcefieldAtomsAdapter(
         radius=6.0,
         max_num_neighbors=120,
@@ -426,6 +434,14 @@ def orb_v3_direct_omol(
         - model: The loaded model.
         - atoms_adapter: The atoms adapter used during training.
     """
+    # Default to evenly weighted losses
+    loss_weights = {
+        "energy": 1.0,
+        "forces": 1.0,
+        "confidence": 1.0,
+        **(loss_weights or {}),
+    }
+
     atoms_adapter = ForcefieldAtomsAdapter(
         radius=6.0,
         max_num_neighbors=120,
@@ -471,6 +487,15 @@ def orb_v3_conservative_20_omat(
         "Cannot compile a conservative model in training mode."
     )
 
+    # Default to evenly weighted losses
+    loss_weights = {
+        "energy": 1.0,
+        "grad_forces": 1.0,
+        "grad_stress": 1.0,
+        "confidence": 1.0,
+        **(loss_weights or {}),
+    }
+
     atoms_adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=20)
     model = orb_v3_conservative_architecture(device=device)
     model = load_model(
@@ -511,6 +536,15 @@ def orb_v3_conservative_inf_omat(
         "Cannot compile a conservative model in training mode."
     )
 
+    # Default to evenly weighted losses
+    loss_weights = {
+        "energy": 1.0,
+        "grad_forces": 1.0,
+        "grad_stress": 1.0,
+        "confidence": 1.0,
+        **(loss_weights or {}),
+    }
+
     atoms_adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=120)
     model = orb_v3_conservative_architecture(device=device)
     model = load_model(
@@ -542,6 +576,15 @@ def orb_v3_direct_20_omat(
         - model: The loaded model.
         - atoms_adapter: The atoms adapter used during training.
     """
+    # Default to evenly weighted losses
+    loss_weights = {
+        "energy": 1.0,
+        "forces": 1.0,
+        "stress": 1.0,
+        "confidence": 1.0,
+        **(loss_weights or {}),
+    }
+
     atoms_adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=20)
     model = orb_v3_direct_architecture(device=device)
     model = load_model(
@@ -576,6 +619,15 @@ def orb_v3_direct_inf_omat(
         - model: The loaded model.
         - atoms_adapter: The atoms adapter used during training.
     """
+    # Default to evenly weighted losses
+    loss_weights = {
+        "energy": 1.0,
+        "forces": 1.0,
+        "stress": 1.0,
+        "confidence": 1.0,
+        **(loss_weights or {}),
+    }
+
     atoms_adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=120)
     model = orb_v3_direct_architecture(device=device)
     model = load_model(
@@ -598,6 +650,8 @@ def orb_v3_conservative_20_mpa(
     precision: str = "float32-high",
     compile: bool | None = None,
     train: bool = False,
+    train_reference_energies: bool = False,
+    loss_weights: dict[str, float] | None = None,
 ) -> tuple[ConservativeForcefieldRegressor, ForcefieldAtomsAdapter]:
     """Load Orb v3 Conservative 20 max neighbors MPTraj + Alexandria.
 
@@ -611,10 +665,26 @@ def orb_v3_conservative_20_mpa(
         "Cannot compile a conservative model in training mode."
     )
 
+    # Default to evenly weighted losses
+    loss_weights = {
+        "energy": 1.0,
+        "grad_forces": 1.0,
+        "grad_stress": 1.0,
+        "confidence": 1.0,
+        **(loss_weights or {}),
+    }
+
     atoms_adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=20)
     model = orb_v3_conservative_architecture(device=device)
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
+        loss_weights=loss_weights,
     )
 
     return model, atoms_adapter
@@ -626,6 +696,8 @@ def orb_v3_conservative_inf_mpa(
     precision: str = "float32-high",
     compile: bool | None = None,
     train: bool = False,
+    train_reference_energies: bool = False,
+    loss_weights: dict[str, float] | None = None,
 ) -> tuple[ConservativeForcefieldRegressor, ForcefieldAtomsAdapter]:
     """Load Orb v3 Conservative with effectively unlimited neighbors, trained on MPTraj + Alexandria.
 
@@ -642,10 +714,26 @@ def orb_v3_conservative_inf_mpa(
         "Cannot compile a conservative model in training mode."
     )
 
+    # Default to evenly weighted losses
+    loss_weights = {
+        "energy": 1.0,
+        "grad_forces": 1.0,
+        "grad_stress": 1.0,
+        "confidence": 1.0,
+        **(loss_weights or {}),
+    }
+
     atoms_adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=120)
     model = orb_v3_conservative_architecture(device=device)
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
+        loss_weights=loss_weights,
     )
 
     return model, atoms_adapter
@@ -657,6 +745,8 @@ def orb_v3_direct_20_mpa(
     precision: str = "float32-high",
     compile: bool | None = None,
     train: bool = False,
+    train_reference_energies: bool = False,
+    loss_weights: dict[str, float] | None = None,
 ) -> tuple[DirectForcefieldRegressor, ForcefieldAtomsAdapter]:
     """Load Orb v3 Direct 20 max neighbors MPTraj + Alexandria.
 
@@ -664,10 +754,26 @@ def orb_v3_direct_20_mpa(
         - model: The loaded model.
         - atoms_adapter: The atoms adapter used during training.
     """
+    # Default to evenly weighted losses
+    loss_weights = {
+        "energy": 1.0,
+        "forces": 1.0,
+        "stress": 1.0,
+        "confidence": 1.0,
+        **(loss_weights or {}),
+    }
+
     atoms_adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=20)
     model = orb_v3_direct_architecture(device=device)
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
+        loss_weights=loss_weights,
     )
 
     return model, atoms_adapter
@@ -679,6 +785,8 @@ def orb_v3_direct_inf_mpa(
     precision: str = "float32-high",
     compile: bool | None = None,
     train: bool = False,
+    train_reference_energies: bool = False,
+    loss_weights: dict[str, float] | None = None,
 ) -> tuple[DirectForcefieldRegressor, ForcefieldAtomsAdapter]:
     """Load Orb v3 Direct with effectively unlimited neighbors, trained on MPTraj + Alexandria.
 
@@ -689,10 +797,26 @@ def orb_v3_direct_inf_mpa(
         - model: The loaded model.
         - atoms_adapter: The atoms adapter used during training.
     """
+    # Default to evenly weighted losses
+    loss_weights = {
+        "energy": 1.0,
+        "forces": 1.0,
+        "stress": 1.0,
+        "confidence": 1.0,
+        **(loss_weights or {}),
+    }
+
     atoms_adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=120)
     model = orb_v3_direct_architecture(device=device)
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
+        loss_weights=loss_weights,
     )
 
     return model, atoms_adapter
@@ -797,6 +921,14 @@ def orb_v2(
         - model: The loaded model.
         - atoms_adapter: The atoms adapter used during training.
     """
+    # Default to evenly weighted losses
+    loss_weights = {
+        "energy": 1.0,
+        "forces": 1.0,
+        "stress": 1.0,
+        **(loss_weights or {}),
+    }
+
     atoms_adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=20)
     model = orb_v2_architecture(device=device)
     model = load_model(
@@ -819,6 +951,8 @@ def orb_mptraj_only_v2(
     precision: str = "float32-high",
     compile: bool | None = None,
     train: bool = False,
+    train_reference_energies: bool = False,
+    loss_weights: dict[str, float] | None = None,
 ) -> tuple[DirectForcefieldRegressor, ForcefieldAtomsAdapter]:
     """Load Orb MPTraj Only v2 Direct with 20 max neighbors, trained on MPTraj.
 
@@ -826,10 +960,25 @@ def orb_mptraj_only_v2(
         - model: The loaded model.
         - atoms_adapter: The atoms adapter used during training.
     """
+    # Default to evenly weighted losses
+    loss_weights = {
+        "energy": 1.0,
+        "forces": 1.0,
+        "stress": 1.0,
+        **(loss_weights or {}),
+    }
+
     atoms_adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=20)
     model = orb_v2_architecture(device=device)
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
+        loss_weights=loss_weights,
     )
 
     return model, atoms_adapter

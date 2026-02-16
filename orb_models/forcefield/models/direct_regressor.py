@@ -140,7 +140,7 @@ class DirectForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
                 continue
             head = cast(ForcefieldHead, head)
             head_out = head.loss(out[name], batch)
-            weight = self.loss_weights.get(name, 1.0)
+            weight = self.loss_weights[name]
             loss = weight * head_out.loss
             total_loss += loss
             metrics.update(head_out.log)
@@ -163,7 +163,7 @@ class DirectForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
             # Confidence loss
             confidence_logits = out["confidence"]
             head_out = confidence_head.loss(confidence_logits, forces_error, batch)
-            loss = self.loss_weights.get("confidence", 1.0) * head_out.loss
+            loss = self.loss_weights["confidence"] * head_out.loss
             total_loss += loss
             metrics.update(head_out.log)
             metrics["confidence_loss"] = loss
