@@ -490,7 +490,7 @@ def run(args):
         custom_refs = custom_refs.to(device)
 
         # Set the custom reference energies
-        model.heads["energy"].reference.linear.weight.data = custom_refs.unsqueeze(0)
+        model.heads["energy"].reference.linear.weight.data = custom_refs
 
         # Log some values for verification
         logging.info("Custom reference energies set:")
