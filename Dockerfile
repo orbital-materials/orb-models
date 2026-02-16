@@ -16,5 +16,6 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 ## Install Python requirements
+# For details on --break-system-packages, see: https://veronneau.org/python-311-pip-and-breaking-system-packages.html 
 RUN pip install --break-system-packages orb-models && \
     pip install --break-system-packages "cuml-cu12==25.2.*"

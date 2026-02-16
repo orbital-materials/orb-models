@@ -19,15 +19,15 @@ Orb models are expected to work on MacOS and Linux. Windows support is not guara
 
 Alternatively, you can use Docker to run orb-models; [see instructions below](#docker).
 
-> **Note:** Earlier versions (<=0.5.5) of `orb-models` used [cuML](https://github.com/rapidsai/cuml) for fast nearest-neighbor graph creation, however this is being deprecated in favor of [nvalchemiops](https://github.com/NVIDIA/nvalchemi-toolkit-ops) (i.e. `edge_method="knn_alchemi"` in `ORBCalculator`, `OrbTorchSimModel`, or `adapter.from_ase_atoms()`). If you still want to use cuML-based methods (e.g. `knn_cuml_rbc`), install with the following:
-> ```bash
-> pip install "cuml-cu11==25.2.*"  # For cuda versions >=11.4, <11.8
-> pip install "cuml-cu12==25.2.*"  # For cuda versions >=12.0, <13.0
-> ```
-
 ### Updates
 
-**August 2025**: Release of the OrbMol potentials (blog post forthcoming). 
+**February 2026**: Improved GPU-accelerated graph construction with [ALCHEMI Toolkit-Ops](https://github.com/NVIDIA/nvalchemi-toolkit-ops) and batched simulation with [TorchSim](https://github.com/TorchSim/torch-sim):
+
+* Alchemi-based graph construction (GPU-accelerated, up to 12x faster for large single systems, and sub-linear batch scaling delivering >100x graph construction speed-up for large batches of small systems)
+* TorchSim wrapper for batched optimisation and simulation, see [usage with TorchSim](#usage-with-torchsim)
+* Alchemi-based D3 dispersion correction module, see [D3 correction](#d3-correction)
+
+**August 2025**: Release of the [OrbMol potentials](https://www.orbitalindustries.com/posts/orbmol-extending-orb-to-molecular-systems):
 
 * Trained on the [Open Molecules 2025 (OMol25)](https://arxiv.org/pdf/2505.08762) dataset—over 100M high-accuracy DFT calculations (ωB97M-V/def2-TZVPD) on diverse molecular systems including metal complexes, biomolecules, and electrolytes.
 * Architecturally similar to the highly-performant Orb-v3 models, but now explicit total charges and spin multiplicities can be passed as input.  
@@ -35,9 +35,9 @@ Alternatively, you can use Docker to run orb-models; [see instructions below](#d
 
 **April 2025**: Release of the [Orb-v3 set of potentials](https://arxiv.org/abs/2504.06231).
 
-**Oct 2024**: Release of the [Orb-v2 set of potentials](https://arxiv.org/abs/2410.22570). 
+**October 2024**: Release of the [Orb-v2 set of potentials](https://arxiv.org/abs/2410.22570). 
 
-**Sept 2024**: Release of v1 models - state of the art performance on the matbench discovery dataset.
+**September 2024**: Release of v1 models - state of the art performance on the matbench discovery dataset.
 
 
 ### Available models
@@ -298,6 +298,26 @@ As shown in usage snippets above, we support 3 floating point precision types: `
 The default value of `"float32-high"` is recommended for maximal acceleration when using A100 / H100 Nvidia GPUs. However, we have observed some performance loss for high-precision calculations involving second and third order properties of the PES. In these cases, we recommend `"float32-highest"`. 
 
 In stark contrast to other universal forcefields, we have not found any benefit to using `"float64"`.
+
+### Graph construction
+
+From version 0.5.6, `knn_alchemi` is the default and recommended graph construction method. It uses [ALCHEMI Toolkit-Ops](https://github.com/NVIDIA/nvalchemi-toolkit-ops) for fast GPU-accelerated nearest-neighbor search.
+
+Available methods via `edge_method` parameter in `ORBCalculator`, `OrbTorchSimModel`, `atoms_adapter.from_ase_atoms()`, or `atoms_adapter.from_torchsim_state()`:
+
+| Method | Status | Notes |
+|--------|--------|-------|
+| `knn_alchemi` | **Recommended** | Fast on both CPU and GPU, excellent batch scaling |
+| `knn_scipy` | Deprecated | Slightly faster for single-system CPU construction |
+| `knn_brute_force` | Deprecated | Legacy GPU method for small systems |
+| `knn_cuml_rbc` | Deprecated | Legacy GPU method for larger systems |
+| `knn_cuml_brute` | Deprecated | Legacy cuML brute force |
+
+> **Note:** Deprecated methods will be removed in a future release. For [cuML](https://github.com/rapidsai/cuml)-based methods, install cuml:
+> ```bash
+> pip install "cuml-cu11==25.2.*"  # For CUDA 11.4-11.8
+> pip install "cuml-cu12==25.2.*"  # For CUDA 12.x
+> ```
 
 ### Finetuning
 
