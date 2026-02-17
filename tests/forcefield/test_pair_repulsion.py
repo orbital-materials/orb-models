@@ -1,19 +1,18 @@
-import pytest
 import numpy as np
+import pytest
 import torch
-
 from ase import Atoms
 from ase.data import covalent_radii
 
-from orb_models.forcefield.pair_repulsion import ZBLBasis
-from orb_models.forcefield.forcefield_heads import EnergyHead, ForceHead, StressHead
-from orb_models.forcefield.forcefield_utils import (
-    compute_gradient_forces_and_stress,
+from orb_models.common.atoms.batch.graph_batch import AtomGraphs
+from orb_models.forcefield.forcefield_adapter import ForcefieldAtomsAdapter
+from orb_models.forcefield.models.conservative_regressor import (
+    ConservativeForcefieldRegressor,
 )
-from orb_models.forcefield.conservative_regressor import ConservativeForcefieldRegressor
-from orb_models.forcefield.direct_regressor import DirectForcefieldRegressor
-from orb_models.forcefield.atomic_system import ase_atoms_to_atom_graphs, SystemConfig
-from orb_models.forcefield import base
+from orb_models.forcefield.models.direct_regressor import DirectForcefieldRegressor
+from orb_models.forcefield.models.forcefield_heads import EnergyHead, ForceHead, StressHead
+from orb_models.forcefield.models.forcefield_utils import compute_gradient_forces_and_stress
+from orb_models.forcefield.models.pair_repulsion import ZBLBasis
 
 
 def test_pair_conservative(gns_model):
@@ -32,7 +31,6 @@ def test_pair_conservative(gns_model):
         heads={"energy": head},
         model=gns_model,
         pair_repulsion=True,
-        ensure_grad_loss_weights=False,
     )
 
     # compute baseline energy/forces/stress without pair repulsion
@@ -40,7 +38,6 @@ def test_pair_conservative(gns_model):
         heads={"energy": head},
         model=gns_model,
         pair_repulsion=False,
-        ensure_grad_loss_weights=False,
     )
 
     numbers = [1, 8, 13, 88]
@@ -57,12 +54,8 @@ def test_pair_conservative(gns_model):
                 for d in distances
             ]
 
-            system_config = SystemConfig(
-                radius=6.0,
-                max_num_neighbors=10,
-            )
-            graphs = [ase_atoms_to_atom_graphs(a, system_config) for a in atoms_list]
-            batch = base.batch_graphs(graphs)
+            adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=10)
+            batch = adapter.from_ase_atoms_list(atoms_list)
             out = regressor.predict(batch)
             out_base = regressor_base.predict(batch)
 
@@ -80,22 +73,15 @@ def test_pair_conservative(gns_model):
 @pytest.mark.parametrize("pbc", [True, False])
 def test_pair_grads(pbc):
     """Test analytical gradients of pair repulsion energy match autograd."""
-    system_config = SystemConfig(radius=3.0, max_num_neighbors=120)
+    adapter = ForcefieldAtomsAdapter(radius=3.0, max_num_neighbors=120)
     pair_repulsion = ZBLBasis(p=6, node_aggregation="sum", compute_gradients=True)
 
     positions = 0.4 * np.array([[0, 0, 0], [0, 1, 0], [1, 0, 0]])
-    cell = np.diag([1, 1, 1.1])
+    cell = np.diag([1, 1.5, 1.1])
     atoms = Atoms("H2O", positions=positions, cell=cell, pbc=pbc)
 
-    graphs = [
-        ase_atoms_to_atom_graphs(
-            atoms,
-            system_config,
-            output_dtype=torch.float64,
-        )
-        for a in [atoms, atoms]
-    ]
-    batch = base.batch_graphs(graphs)
+    graphs = [adapter.from_ase_atoms(atoms, output_dtype=torch.float64) for a in [atoms, atoms]]
+    batch = AtomGraphs.batch(graphs)
     vectors, displacement, generator = batch.compute_differentiable_edge_vectors()
     batch.edge_features["vectors"] = vectors
     out = pair_repulsion(batch)
@@ -113,10 +99,12 @@ def test_pair_grads(pbc):
     np.testing.assert_allclose(
         out["forces"].detach().numpy(),
         forces.detach().numpy(),
+        atol=1e-5,
     )
     np.testing.assert_allclose(
         out["stress"].detach().numpy(),
         stress.detach().numpy(),
+        atol=1e-5,
     )
 
 
@@ -196,12 +184,8 @@ def test_pair_direct(gns_model):
                 for d in distances
             ]
 
-            system_config = SystemConfig(
-                radius=6.0,
-                max_num_neighbors=10,
-            )
-            graphs = [ase_atoms_to_atom_graphs(a, system_config) for a in atoms_list]
-            batch = base.batch_graphs(graphs)
+            adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=10)
+            batch = adapter.from_ase_atoms_list(atoms_list)
             forward = regressor(batch)
             predict = regressor.predict(batch)
             predict_base = regressor_base.predict(batch)

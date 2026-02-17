@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime
+FROM pytorch/pytorch:2.10.0-cuda12.6-cudnn9-runtime
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -10,14 +10,12 @@ RUN apt-get update && \
         git \
         sudo \
         gcc \
-        g++
-
-# Help Numba find lubcudart.so
-ENV LD_LIBRARY_PATH=/opt/conda/lib/python3.11/site-packages/nvidia/cuda_runtime/lib:$LD_LIBRARY_PATH
-RUN ln -s \
-    /opt/conda/lib/python3.11/site-packages/nvidia/cuda_runtime/lib/libcudart.so.12 \
-    /opt/conda/lib/python3.11/site-packages/nvidia/cuda_runtime/lib/libcudart.so
+        g++ \ 
+    # Cleanup
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 ## Install Python requirements
-RUN pip install orb-models && \
-    pip install "cuml-cu12==25.2.*"
+# For details on --break-system-packages, see: https://veronneau.org/python-311-pip-and-breaking-system-packages.html 
+RUN pip install --break-system-packages orb-models && \
+    pip install --break-system-packages "cuml-cu12==25.2.*"

@@ -1,24 +1,28 @@
 ### Setting up a development environment
 
-The `orb_models` package uses [Poetry](https://python-poetry.org/) for dependency management. To install the package and its dependencies, run the following command:
+The `orb_models` repository uses [uv](https://docs.astral.sh/uv/) for dependency management. To install the package and its dependencies, run the following command:
 
 ```bash
-pip install poetry  # Install Poetry if you don't have it
-poetry install
+pipx install uv  # If you don't have uv, we recommend installing it into an isolated environment with pipx: https://docs.astral.sh/uv/getting-started/installation/#pypi
+uv sync --group dev  # Install orb-models and development packages
 ```
 
-Optionally, also install [cuML](https://docs.rapids.ai/install/) (requires CUDA):
+### Running linters
+
+The `orb_models` repository uses `ruff` for formatting and linting, and `mypy` for type checking. To run the linters, use the following commands:
+
 ```bash
-pip install "cuml-cu11==25.2.*"  # For cuda versions >=11.4, <11.8
-pip install "cuml-cu12==25.2.*"  # For cuda versions >=12.0, <13.0
+ruff format .   # Format code
+ruff check .    # Check for linting errors
+mypy .          # Run type checking
 ```
 
 ### Running tests
 
-The `orb_models` package uses `pytest` for testing. To run the tests, navigate to the root directory of the package and run the following command:
+The `orb_models` repository uses `pytest` for testing. To run the tests, navigate to the root directory of the package and run the following command:
 
 ```bash
-pytest
+pytest -n auto ./tests/
 ```
 
 ### Publishing

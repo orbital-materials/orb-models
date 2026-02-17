@@ -243,9 +243,11 @@ Lines starting with `#` are treated as comments and ignored.
 
 ### Loss Weights
 
-- `--energy_loss_weight`: Weight for energy loss (default: uses model default, usually 1.0)
-- `--forces_loss_weight`: Weight for forces loss (automatically uses correct key for model type)
+- `--energy_loss_weight`: Weight for energy loss (default: 1.0)
+- `--forces_loss_weight`: Weight for forces loss (default: 1.0)
 - `--stress_loss_weight`: Weight for stress loss (set to 0 to disable)
+- `--equigrad_loss_weight`: Weight for the Equigrad loss (turned off by default). Only available for the conservative models.
+  - NOTE: We've found that Equigrad loss should be ≳1000x smaller than the other losses
 
 ### Reference Energies
 
@@ -274,7 +276,7 @@ If you prefer to write your own finetuning script, you can use the clean API dir
 from orb_models.forcefield import pretrained
 
 # Load model with custom configuration
-model = pretrained.orb_v3_conservative_omol(
+model, atoms_adapter = pretrained.orb_v3_conservative_omol(
     device='cuda',
     precision='float32-high',
     train=True,
@@ -287,7 +289,7 @@ model = pretrained.orb_v3_conservative_omol(
 )
 
 # For direct models, use 'forces' and 'stress' keys:
-model = pretrained.orb_v3_direct_omol(
+model, atoms_adapter = pretrained.orb_v3_direct_omol(
     device='cuda',
     train=True,
     loss_weights={
@@ -299,8 +301,6 @@ model = pretrained.orb_v3_direct_omol(
 
 # The model is now ready for training with your custom configuration!
 ```
-
-This approach is more "pythonic" and clearly documents what configuration options are available. It also encapsulates the implementation details, making your code less fragile to internal changes.
 
 ## How It Works
 
@@ -319,7 +319,7 @@ import torch
 from orb_models.forcefield import pretrained
 
 # Load model architecture (set train=False for inference)
-model = pretrained.orb_v3_conservative_omol(train=False)
+model, atoms_adapter = pretrained.orb_v3_conservative_omol(train=False)
 
 # Load your finetuned checkpoint
 model.load_state_dict(torch.load('path/to/finetuned_checkpoint.pt'))
@@ -331,7 +331,7 @@ You can also specify loss weights when loading for further finetuning:
 
 ```python
 # Load for continued finetuning with different loss weights
-model = pretrained.orb_v3_conservative_omol(
+model, atoms_adapter = pretrained.orb_v3_conservative_omol(
     train=True,
     loss_weights={'energy': 0.5, 'grad_forces': 20.0}
 )
@@ -370,7 +370,7 @@ python finetune.py \
 from orb_models.forcefield import pretrained
 import torch
 
-model = pretrained.orb_v3_conservative_omol(train=False)
+model, atoms_adapter = pretrained.orb_v3_conservative_omol(train=False)
 model.load_state_dict(torch.load('checkpoints/my_finetuned_model.pt'))
 # Reference energies from my_refs.json are now loaded!
 ```
@@ -384,7 +384,7 @@ from orb_models.forcefield import pretrained
 from orb_models.dataset.ase_sqlite_dataset import AseSqliteDataset
 
 # Load model with configuration
-model = pretrained.orb_v3_conservative_omol(
+model, atoms_adapter = pretrained.orb_v3_conservative_omol(
     device='cuda',
     train=True,
     train_reference_energies=False,  # Fixed reference energies

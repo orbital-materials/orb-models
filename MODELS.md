@@ -4,7 +4,7 @@ We provide several pretrained models that can be used to calculate energies, for
 
 ### OrbMol Models
 
-These models are a continuation of the [`orb-v3`](#v3-models) series trained on the [Open Molecules 2025 (OMol25)](https://arxiv.org/pdf/2505.08762) dataset—over 100M high-accuracy DFT calculations (ωB97M-V/def2-TZVPD) on diverse molecular systems including metal complexes, biomolecules, and electrolytes. Note: The training data does not contain periodic systmems and these models have not been carefully tested on periodic systems. 
+These models are a continuation of the [`orb-v3`](#v3-models) series trained on the [Open Molecules 2025 (OMol25)](https://arxiv.org/pdf/2505.08762) dataset—over 100M high-accuracy DFT calculations (ωB97M-V/def2-TZVPD) on diverse molecular systems including metal complexes, biomolecules, and electrolytes. Note: The training data does not contain periodic systems and these models have not been carefully tested on periodic systems. 
 
 There are two options:
 * `orb-v3-conservative-omol`
@@ -15,11 +15,11 @@ See below for more explanation of this naming convention. Both models have `inf`
 ### [V3 Models](https://arxiv.org/abs/2504.06231)
 
 V3 models use the following naming convention: ```orb-v3-X-Y-Z``` where:
-- `X`: Model type - `direct` or `conservative`. Conservative models compute forces and stress via backpropagation, which is a physically motivated choice that appears necessary for certain types of simulation such as NVE Molecular dynamics. Conservative models are signficantly slower and use more memory than their direct counterparts.
+- `X`: Model type - `direct` or `conservative`. Conservative models compute forces and stress via backpropagation, which is a physically motivated choice that appears necessary for certain types of simulation such as NVE Molecular dynamics. Conservative models are significantly slower and use more memory than their direct counterparts.
 
-- `Y`: Maximum neighbors per atom: `20` or `inf`. A finite cutoff of `20` induces discontinuties in the PES, which can lead to significant inaccuracies for certain types of highly sensitive calculations (e.g. calculations involving Hessians). However, finite cutoffs reduce the amount of edge processing in the network, reducing latency and memory use.
+- `Y`: Maximum neighbors per atom: `20` or `inf`. A finite cutoff of `20` induces discontinuities in the PES, which can lead to significant inaccuracies for certain types of highly sensitive calculations (e.g. calculations involving Hessians). However, finite cutoffs reduce the amount of edge processing in the network, reducing latency and memory use.
 
-- `Z`: Training dataset - `omat` or `mpa`. Both of these dataset consist of small bulk crystal structures. We find that models trained on such data can generalise reasonably well to non-periodic systems (organic molecules) or partially periodic systems (slabs), but caution is advised in these scenarios.
+- `Z`: Training dataset - `omat` or `mpa`. Both of these datasets consist of small bulk crystal structures. We find that models trained on such data can generalise reasonably well to non-periodic systems (organic molecules) or partially periodic systems (slabs), but caution is advised in these scenarios.
 
 #### Features:
 
@@ -35,7 +35,7 @@ V3 models use the following naming convention: ```orb-v3-X-Y-Z``` where:
 #### Advice / Caveats
 
 - Consider using `orb-v3-conservative-120-omat` for initial testing, specifying `precision='float32-highest'` when loading the model. This is the most computational expensive but accurate configuration. If this level of accuracy meets your needs, then other models and precisions can be investigated to improve speed and system-size scalability.
-- We do not advise using the `-mpa` models unless they are required for compatability with benchmarks (for example, Matbench Discovery). They are generally less performant.
+- We do not advise using the `-mpa` models unless they are required for compatibility with benchmarks (for example, Matbench Discovery). They are generally less performant.
 - Orb-v3 models are **compiled** by default and use Pytorch's dynamic batching, which means that they do not need to recompile as graph sizes change. However, the first call to the model will be slower, as the graph is compiled by torch.
 
 ### [V2 Models](https://arxiv.org/abs/2410.22570)
@@ -53,4 +53,4 @@ V3 models use the following naming convention: ```orb-v3-X-Y-Z``` where:
 
 ### [V1 Models](https://arxiv.org/abs/2410.22570)
 
-Our initial release. These models were state of the art performance on the matbench discovery dataset at time of release, but have since been superceeded and removed.
+Our initial release. These models were state of the art performance on the matbench discovery dataset at time of release, but have since been superseded and removed.

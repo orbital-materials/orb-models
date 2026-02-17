@@ -1,12 +1,11 @@
-import numpy as np
 import ase
+import numpy as np
 
-from orb_models.forcefield.atomic_system import SystemConfig, ase_atoms_to_atom_graphs
-from orb_models.forcefield import base
-from orb_models.forcefield.calculator import ORBCalculator
+from orb_models.common.atoms.batch.graph_batch import AtomGraphs
+from orb_models.forcefield.forcefield_adapter import ForcefieldAtomsAdapter
+from orb_models.forcefield.inference.calculator import ORBCalculator
 
-
-system_config = SystemConfig(radius=6.0, max_num_neighbors=20)
+adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=20)
 
 
 def atoms(unit_cell=False):
@@ -24,13 +23,14 @@ def atoms(unit_cell=False):
 
 def batch(unit_cell=False):
     atoms_list = [atoms(unit_cell), atoms(unit_cell)]
-    graphs = [ase_atoms_to_atom_graphs(a, system_config) for a in atoms_list]
-    return base.batch_graphs(graphs)
+    graphs = [adapter.from_ase_atoms(a) for a in atoms_list]
+    return AtomGraphs.batch(graphs)
 
 
 def test_orb_calculator(euclidean_norm):
     a = atoms()
-    a.calc = ORBCalculator(euclidean_norm, system_config=system_config)  # type: ignore
+    device = "cpu"
+    a.calc = ORBCalculator(euclidean_norm, atoms_adapter=adapter, device=device)
     # energy and forces of random initial position should be non-zero
     assert a.get_potential_energy() > 1e-5
     assert np.any(np.abs(a.get_forces()) > 1e-5)

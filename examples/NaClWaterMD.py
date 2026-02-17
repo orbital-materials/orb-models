@@ -1,12 +1,15 @@
+from typing import cast
+
 import torch
-from ase.io import read, write
-from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
-from ase.md.langevin import Langevin
 from ase import units
+from ase.atoms import Atoms
+from ase.io import read, write
 from ase.md import MDLogger
+from ase.md.langevin import Langevin
+from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 
 from orb_models.forcefield import pretrained
-from orb_models.forcefield.calculator import ORBCalculator
+from orb_models.forcefield.inference.calculator import ORBCalculator
 
 
 def setup_device():
@@ -46,6 +49,7 @@ def run_md_simulation(
 
     # Read in the system from file and set the cell size and pbc
     atoms = read(input_file)
+    atoms = cast(Atoms, atoms)
     atoms.set_cell([cell_size] * 3)
     atoms.set_pbc([True] * 3)
 
@@ -56,9 +60,9 @@ def run_md_simulation(
     # Set the calculator
     # Note: If you encounter compilation errors (e.g., Triton issues on clusters),
     # you can disable compilation by adding compile=False:
-    # orbff = pretrained.orb_v3_conservative_omol(device=device, compile=False)
-    orbff = pretrained.orb_v3_conservative_omol(device=device)
-    atoms.calc = ORBCalculator(orbff, device=device)
+    # orbff, atoms_adapter = pretrained.orb_v3_conservative_omol(device=device, compile=False)
+    orbff, atoms_adapter = pretrained.orb_v3_conservative_omol(device=device)
+    atoms.calc = ORBCalculator(orbff, atoms_adapter=atoms_adapter, device=device)
 
     # Set the initial velocities
     MaxwellBoltzmannDistribution(atoms, temperature_K=temperature_K)
@@ -67,19 +71,12 @@ def run_md_simulation(
     dyn = Langevin(atoms, timestep, temperature_K=temperature_K, friction=friction)
 
     # Define output functions and attach to dynamics
-    dyn.attach(
-        lambda: write("NaClWaterMD.xyz", atoms, append=True), interval=traj_interval
-    )
+    dyn.attach(lambda: write("NaClWaterMD.xyz", atoms, append=True), interval=traj_interval)
     dyn.attach(MDLogger(dyn, atoms, "md_nvt.log"), interval=log_interval)
 
     # Run the dynamics
     dyn.run(steps=total_steps)
 
 
-def main():
-    """Main entry point for the script."""
-    run_md_simulation()
-
-
 if __name__ == "__main__":
-    main()
+    run_md_simulation()

@@ -5,12 +5,13 @@ on: [push, pull_request]
 permissions:
   contents: read
 
+
 jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.12", "3.13", "3.14"]
     steps:
     - uses: actions/checkout@v4
     - name: Update version
@@ -22,10 +23,16 @@ jobs:
         python-version: ${{ matrix.python-version }}
         cache: pip
         cache-dependency-path: pyproject.toml
+    - name: Set up uv
+      run: |
+        pip install uv
     - name: Install dependencies
-      run: |
-        pip install '.[test]'
+      run: uv sync --group dev
 
-    - name: Run tests
+    - name: Run linters
       run: |
-        pytest
+        uv run ruff check ./orb_models ./tests ./scripts
+        uv run ruff format --check ./orb_models ./tests ./scripts
+        uv run mypy ./orb_models ./tests ./scripts
+    - name: Run tests
+      run: uv run pytest ./tests -n auto

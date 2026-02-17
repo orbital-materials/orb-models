@@ -3,8 +3,10 @@
 import argparse
 import logging
 import os
-from typing import Any, Dict, Optional, Union
+from collections.abc import Callable
+from typing import Any
 
+import ase
 import torch
 import tqdm
 from torch.optim.lr_scheduler import _LRScheduler
@@ -18,14 +20,22 @@ except ImportError:
     wandb = None  # type: ignore
     WANDB_AVAILABLE = False
 
-from orb_models import utils
-from orb_models.dataset import augmentations
-from orb_models.dataset.ase_sqlite_dataset import AseSqliteDataset
-from orb_models.forcefield import atomic_system, base, pretrained, property_definitions
+from orb_models.common.atoms.abstract_atoms_adapter import AbstractAtomsAdapter
+from orb_models.common.dataset import augmentations, property_definitions
+from orb_models.common.dataset.ase_sqlite_dataset import AseSqliteDataset
+from orb_models.common.dataset.loaders import worker_init_fn
+from orb_models.common.models.base import ModelMixin
+from orb_models.common.training.metrics import ScalarMetricTracker
+from orb_models.common.training.util import get_optim, init_device
+from orb_models.common.utils import seed_everything
+from orb_models.forcefield import pretrained
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+
+def prefix_keys[T](dict_to_prefix: dict[str, T], prefix: str, sep: str = "/") -> dict[str, T]:
+    """Add a prefix to dictionary keys with a seperator."""
+    return {f"{prefix}{sep}{k}": v for k, v in dict_to_prefix.items()}
 
 
 def init_wandb_from_config(dataset: str, job_type: str, entity: str) -> Any:
@@ -49,12 +59,12 @@ def init_wandb_from_config(dataset: str, job_type: str, entity: str) -> Any:
 
 
 def finetune(
-    model: torch.nn.Module,
+    model: ModelMixin,
     optimizer: torch.optim.Optimizer,
     dataloader: DataLoader,
-    lr_scheduler: Optional[_LRScheduler] = None,
-    num_steps: Optional[int] = None,
-    clip_grad: Optional[float] = None,
+    lr_scheduler: _LRScheduler | None = None,
+    num_steps: int | None = None,
+    clip_grad: float | None = None,
     log_freq: float = 10,
     device: torch.device = torch.device("cpu"),
     epoch: int = 0,
@@ -77,19 +87,16 @@ def finetune(
     Returns
         A dictionary of metrics.
     """
-    run: Optional[Any] = wandb.run if WANDB_AVAILABLE else None
+    run: Any | None = wandb.run if WANDB_AVAILABLE else None
 
-    if clip_grad is not None:
-        hook_handles = utils.gradient_clipping(model, clip_grad)
-
-    metrics = utils.ScalarMetricTracker()
+    metrics = ScalarMetricTracker()
 
     # Set the model to "train" mode.
     model.train()
 
     # Get tqdm for the training batches
     batch_generator = iter(dataloader)
-    num_training_batches: Union[int, float]
+    num_training_batches: int | float
     if num_steps is not None:
         num_training_batches = num_steps
     else:
@@ -133,6 +140,9 @@ def finetune(
             raise ValueError("nan loss encountered")
         loss.backward()
 
+        if clip_grad is not None:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
+
         optimizer.step()
 
         if lr_scheduler is not None:
@@ -153,14 +163,10 @@ def finetune(
                     {"step": step},
                     commit=False,
                 )
-                run.log(utils.prefix_keys(metrics_dict, "finetune_step"), commit=True)
+                run.log(prefix_keys(metrics_dict, "finetune_step"), commit=True)
 
         # Finished a single full step!
         i += 1
-
-    if clip_grad is not None:
-        for h in hook_handles:
-            h.remove()
 
     return metrics.get_metrics()
 
@@ -170,10 +176,9 @@ def build_train_loader(
     dataset_path: str,
     num_workers: int,
     batch_size: int,
-    system_config: atomic_system.SystemConfig,
-    augmentation: Optional[bool] = True,
-    target_config: Optional[Dict] = None,
-    extra_features: Optional[Dict] = None,
+    atoms_adapter: AbstractAtomsAdapter,
+    augmentation: bool | None = True,
+    target_config: dict | None = None,
     **kwargs,
 ) -> DataLoader:
     """Builds the train dataloader from a config file.
@@ -183,7 +188,7 @@ def build_train_loader(
         dataset_path: Dataset path.
         num_workers: The number of workers for each dataset.
         batch_size: The batch_size config for each dataset.
-        system_config: The system config.
+        atoms_adapter: The atoms adapter for converting ase.Atoms to model-specific AbstractAtomBatch instances.
         augmentation: If rotation augmentation is used.
         target_config: The target config.
         extra_features: The extra features to extract from DB row and store in atoms.info.
@@ -192,17 +197,16 @@ def build_train_loader(
         The train Dataloader.
     """
     log_train = "Loading train datasets:\n"
-    aug = []
+    aug: list[Callable[[ase.Atoms], None]] = []
     if augmentation:
         aug = [augmentations.rotate_randomly]
 
-    target_config = property_definitions.instantiate_property_config(target_config)
+    target_property_config = property_definitions.instantiate_property_config(target_config)
     dataset = AseSqliteDataset(
         dataset_name,
         dataset_path,
-        system_config=system_config,
-        target_config=target_config,
-        extra_features=extra_features,
+        atoms_adapter=atoms_adapter,
+        target_config=target_property_config,
         augmentations=aug,
         **kwargs,
     )
@@ -221,8 +225,8 @@ def build_train_loader(
     train_loader: DataLoader = DataLoader(
         dataset,
         num_workers=num_workers,
-        worker_init_fn=utils.worker_init_fn,
-        collate_fn=base.batch_graphs,
+        worker_init_fn=worker_init_fn,
+        collate_fn=atoms_adapter.batch,
         batch_sampler=batch_sampler,
         timeout=10 * 60 if num_workers > 0 else 0,
     )
@@ -371,7 +375,7 @@ def load_custom_reference_energies(filepath: str) -> torch.Tensor:
 
     # Try to load as JSON first
     try:
-        with open(filepath, "r") as f:
+        with open(filepath) as f:
             data = json.load(f)
 
         for key, value in data.items():
@@ -386,15 +390,13 @@ def load_custom_reference_energies(filepath: str) -> torch.Tensor:
                     z = ELEMENT_SYMBOLS[key]
                     ref_energies[z] = float(value)
                 else:
-                    logging.warning(
-                        f"Unknown element symbol or invalid atomic number: {key}"
-                    )
+                    logging.warning(f"Unknown element symbol or invalid atomic number: {key}")
 
         logging.info(f"Loaded reference energies from JSON file: {filepath}")
 
     except json.JSONDecodeError:
         # Try as text file format
-        with open(filepath, "r") as f:
+        with open(filepath) as f:
             for line in f:
                 line = line.strip()
                 if not line or line.startswith("#"):
@@ -430,8 +432,8 @@ def run(args):
     Args:
         config (DictConfig): Config for training loop.
     """
-    device = utils.init_device(device_id=args.device_id)
-    utils.seed_everything(args.random_seed)
+    device = init_device(device_id=args.device_id)
+    seed_everything(args.random_seed)
 
     # Setting this is 2x faster on A100 and H100
     # GPUs and does not appear to hurt training
@@ -458,6 +460,11 @@ def run(args):
         else:  # direct model
             loss_weights["stress"] = args.stress_loss_weight
 
+    if args.equigrad_loss_weight is not None:
+        if not is_conservative_model:
+            raise ValueError("Equigrad loss is only available for conservative models.")
+        loss_weights["rotational_grad"] = args.equigrad_loss_weight
+
     if loss_weights:
         logging.info("=" * 60)
         logging.info("Custom loss weights specified:")
@@ -467,7 +474,7 @@ def run(args):
 
     # Instantiate model with configuration
     base_model = args.base_model
-    model = getattr(pretrained, base_model)(
+    model, atoms_adapter = getattr(pretrained, base_model)(
         device=device,
         precision=precision,
         train=True,
@@ -478,9 +485,7 @@ def run(args):
     # Handle custom reference energies if provided
     if args.custom_reference_energies:
         logging.info("=" * 60)
-        logging.info(
-            f"Loading custom reference energies from: {args.custom_reference_energies}"
-        )
+        logging.info(f"Loading custom reference energies from: {args.custom_reference_energies}")
         custom_refs = load_custom_reference_energies(args.custom_reference_energies)
         custom_refs = custom_refs.to(device)
 
@@ -495,17 +500,13 @@ def run(args):
                 logging.info(f"  Element {z}: {val:.4f} eV")
 
         if args.trainable_reference_energies:
-            logging.info(
-                "Custom reference energies will be trainable during finetuning"
-            )
+            logging.info("Custom reference energies will be trainable during finetuning")
         else:
             logging.info("Custom reference energies are FIXED (not trainable)")
         logging.info("=" * 60)
     elif args.trainable_reference_energies:
         logging.info("=" * 60)
-        logging.info(
-            "Reference energies will be trainable (starting from pretrained values)"
-        )
+        logging.info("Reference energies will be trainable (starting from pretrained values)")
         ref_weights = model.heads["energy"].reference.linear.weight.data.squeeze()
         logging.info(
             f"  Example values - H: {ref_weights[1].item():.2f}, C: {ref_weights[6].item():.2f}, "
@@ -519,7 +520,7 @@ def run(args):
     # Move model to correct device.
     model.to(device=device)
     total_steps = args.max_epochs * args.num_steps
-    optimizer, lr_scheduler = utils.get_optim(args.lr, total_steps, model)
+    optimizer, lr_scheduler = get_optim(args.lr, total_steps, model)
 
     wandb_run = None
     # Logger instantiation/configuration
@@ -539,21 +540,16 @@ def run(args):
             wandb.define_metric("finetune_step/*", step_metric="step")
 
     graph_targets = ["energy", "stress"] if model.has_stress else ["energy"]
-    if "omol" in base_model:
-        extra_features = {"graph": ["total_charge", "spin_multiplicity"]}
-    else:
-        extra_features = None
     loader_args = dict(
         dataset_name=args.dataset,
         dataset_path=args.data_path,
         num_workers=args.num_workers,
         batch_size=args.batch_size,
         target_config={"graph": graph_targets, "node": ["forces"]},
-        extra_features=extra_features,
     )
     train_loader = build_train_loader(
         **loader_args,
-        system_config=model.system_config,
+        atoms_adapter=atoms_adapter,
         augmentation=True,
     )
     logging.info("Starting training!")
@@ -596,9 +592,7 @@ def main():
         description="Finetune orb model with custom loss weights and reference energy control",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument(
-        "--random_seed", default=1234, type=int, help="Random seed for finetuning."
-    )
+    parser.add_argument("--random_seed", default=1234, type=int, help="Random seed for finetuning.")
     parser.add_argument(
         "--device_id", default=0, type=int, help="GPU index to use if GPU is available."
     )
@@ -632,11 +626,9 @@ def main():
         type=int,
         help="Number of cpu workers for the pytorch data loader.",
     )
+    parser.add_argument("--batch_size", default=100, type=int, help="Batch size for finetuning.")
     parser.add_argument(
-        "--batch_size", default=100, type=int, help="Batch size for finetuning."
-    )
-    parser.add_argument(
-        "--gradient_clip_val", default=0.5, type=float, help="Gradient clip value."
+        "--gradient_clip_val", default=0.5, type=float, help="Gradient norm clip value."
     )
     parser.add_argument(
         "--max_epochs",
@@ -689,19 +681,25 @@ def main():
         "--energy_loss_weight",
         default=None,
         type=float,
-        help="Weight for energy loss. If not specified, uses model default (usually 1.0).",
+        help="Weight for energy loss. If not specified, defaults to 1.0.",
     )
     parser.add_argument(
         "--forces_loss_weight",
         default=None,
         type=float,
-        help="Weight for forces loss. Automatically uses 'forces' or 'grad_forces' depending on model type. If not specified, uses model default (usually 1.0).",
+        help="Weight for forces loss. Automatically uses 'forces' or 'grad_forces' depending on model type. If not specified, defaults to 1.0.",
     )
     parser.add_argument(
         "--stress_loss_weight",
         default=None,
         type=float,
-        help="Weight for stress loss. Automatically uses 'stress' or 'grad_stress' depending on model type. Set to 0 to disable stress training. If not specified, uses model default.",
+        help="Weight for stress loss. Automatically uses 'stress' or 'grad_stress' depending on model type. Set to 0 to disable stress training. If not specified, defaults to 1.0.",
+    )
+    parser.add_argument(
+        "--equigrad_loss_weight",
+        default=None,
+        type=float,
+        help="Weight for equigrad loss. Only available for conservative models. We've found that equigrad loss should be ≳1000x smaller than the other losses. If not specified, no equigrad is used.",
     )
 
     # Reference energy arguments
