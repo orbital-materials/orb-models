@@ -2,7 +2,6 @@ try:
     import torch_sim as ts
     from torch_sim.elastic import voigt_6_to_full_3x3_stress
     from torch_sim.models.interface import ModelInterface
-    from torch_sim.typing import StateDict
 except ImportError as e:
     raise ImportError(
         "torch_sim is required for the OrbTorchSimModel interface. "
@@ -67,11 +66,11 @@ class OrbTorchSimModel(ModelInterface):
         self._compute_stress = "stress" in self.implemented_properties
         self._compute_forces = "forces" in self.implemented_properties
 
-    def forward(self, state: ts.SimState | StateDict, **kwargs) -> dict[str, torch.Tensor]:
+    def forward(self, state: ts.SimState, **kwargs) -> dict[str, torch.Tensor]:
         """Perform forward pass to compute energies, forces, and other properties.
 
         Args:
-            state (SimState | StateDict): State object containing positions, cells,
+            state (SimState): State object containing positions, cells,
                 atomic numbers, and other system information. If a dictionary is provided,
                 it will be converted to a SimState.
 
@@ -82,9 +81,6 @@ class OrbTorchSimModel(ModelInterface):
                 - stress (torch.Tensor): Stress tensor with shape [batch_size, 3, 3],
                     if compute_stress is True
         """
-        if isinstance(state, dict):
-            state = ts.SimState(**state, masses=torch.ones_like(state["positions"]))  # type: ignore[misc,arg-type]
-
         if state.device != self._device:
             state = state.to(self._device)
 
