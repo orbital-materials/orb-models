@@ -355,7 +355,7 @@ def orb_v3_conservative_omol(
         device=device, 
         system_config=system_config, 
         has_charge_spin_cond=True,
-        has_stress=False,
+        has_stress=True,
     )
     model = load_model(
         model, weights_path, device, precision=precision, compile=compile, train=train
