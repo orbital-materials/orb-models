@@ -400,7 +400,7 @@ def orb_v3_conservative_omol(
     model = orb_v3_conservative_architecture(
         device=device,
         has_charge_spin_cond=True,
-        has_stress=False,
+        has_stress=True,
     )
     model = load_model(
         model,
