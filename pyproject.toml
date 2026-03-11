@@ -30,6 +30,9 @@ torchsim = ["torch-sim-atomistic>=0.5.1"]
 where = ["."]
 include = ["orb_models*"]
 
+[tool.setuptools.package-data]
+"orb_models" = ["forcefield/inference/dftd3_parameters.pt"]
+
 [project.urls]
 Homepage = "https://github.com/orbital-materials/orb-models"
 Changelog = "https://github.com/orbital-materials/orb-models/releases"
