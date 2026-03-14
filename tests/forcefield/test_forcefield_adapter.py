@@ -193,6 +193,91 @@ def test_forcefield_adapter_requires_both_spin_and_charge():
         adapter.from_ase_atoms(atoms_spin_only)
 
 
+def test_from_ase_atoms_list_parallel_equivalence():
+    """Test that from_ase_atoms_list produces equivalent results to sequential processing."""
+    atoms_list = [
+        Atoms("H2O", positions=np.array([[0, 0, 0], [0, 1, 0], [1, 0, 0]]) + i * 0.1, pbc=True, cell=np.diag([5, 5, 5]))
+        for i in range(4)
+    ]
+    adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=20)
+
+    batch_result = adapter.from_ase_atoms_list(atoms_list)
+    from orb_models.common.atoms.batch.graph_batch import AtomGraphs
+
+    sequential_batch = AtomGraphs.batch([adapter.from_ase_atoms(a) for a in atoms_list])
+
+    assert torch.equal(batch_result.n_node.cpu(), sequential_batch.n_node.cpu())
+    assert torch.equal(batch_result.n_edge.cpu(), sequential_batch.n_edge.cpu())
+    assert torch.allclose(batch_result.positions.cpu(), sequential_batch.positions.cpu(), atol=1e-5)
+    assert torch.equal(
+        batch_result.node_features["atomic_numbers"].cpu(),
+        sequential_batch.node_features["atomic_numbers"].cpu(),
+    )
+    # Edge ordering may differ between batched and sequential, so compare sorted distances
+    for sys_idx in range(len(atoms_list)):
+        start = batch_result.n_edge[:sys_idx].sum().item() if sys_idx > 0 else 0
+        end = start + batch_result.n_edge[sys_idx].item()
+        bd = batch_result.edge_features["vectors"][start:end].cpu().norm(dim=1).sort()[0]
+        sd = sequential_batch.edge_features["vectors"][start:end].cpu().norm(dim=1).sort()[0]
+        assert torch.allclose(bd, sd, atol=1e-4)
+
+
+def test_from_ase_atoms_list_nonperiodic():
+    """Test from_ase_atoms_list with non-periodic systems."""
+    atoms_list = [
+        Atoms("H2", positions=np.array([[0, 0, 0], [0, 0.74, 0]]) + i * 0.1, pbc=False)
+        for i in range(3)
+    ]
+    adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=20)
+    batch = adapter.from_ase_atoms_list(atoms_list)
+
+    assert batch.n_node.tolist() == [2, 2, 2]
+    assert batch.positions.shape == (6, 3)
+
+
+def test_from_ase_atoms_list_single_atom_fallback():
+    """Test that from_ase_atoms_list falls back to from_ase_atoms for a single atom."""
+    atoms = Atoms("H2O", positions=np.array([[0, 0, 0], [0, 1, 0], [1, 0, 0]]), pbc=True, cell=np.diag([5, 5, 5]))
+    adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=20)
+
+    single_result = adapter.from_ase_atoms_list([atoms])
+    direct_result = adapter.from_ase_atoms(atoms)
+
+    assert torch.equal(single_result.n_node.cpu(), direct_result.n_node.cpu())
+    assert torch.allclose(single_result.positions.cpu(), direct_result.positions.cpu(), atol=1e-6)
+
+
+def test_from_ase_atoms_list_empty_raises():
+    """Test that from_ase_atoms_list raises ValueError for an empty list."""
+    adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=20)
+    with pytest.raises(ValueError, match="atoms list must not be empty"):
+        adapter.from_ase_atoms_list([])
+
+
+def test_from_ase_atoms_list_with_charge_and_spin():
+    """Test that from_ase_atoms_list correctly handles charge and spin."""
+    atoms_list = []
+    for i in range(3):
+        a = Atoms("H2O", positions=np.array([[0, 0, 0], [0, 1, 0], [1, 0, 0]]) + i * 0.1, pbc=True, cell=np.diag([5, 5, 5]))
+        a.info["charge"] = float(i)
+        a.info["spin"] = float(i + 1)
+        atoms_list.append(a)
+
+    adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=20)
+    batch = adapter.from_ase_atoms_list(atoms_list)
+
+    assert "total_charge" in batch.system_features
+    assert "spin_multiplicity" in batch.system_features
+    torch.testing.assert_close(
+        batch.system_features["total_charge"].cpu(),
+        torch.tensor([0.0, 1.0, 2.0]),
+    )
+    torch.testing.assert_close(
+        batch.system_features["spin_multiplicity"].cpu(),
+        torch.tensor([1.0, 2.0, 3.0]),
+    )
+
+
 @requires_torch_sim
 def test_forcefield_adapter_parses_spin_and_charge_from_simstate():
     """Test that ForcefieldAtomsAdapter correctly parses spin and charge from SimState."""
