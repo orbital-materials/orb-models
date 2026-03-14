@@ -94,21 +94,11 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
         self.forces_target = PROPERTIES[self.forces_name]
         self.grad_forces_name = f"{self.grad_prefix}_{self.forces_name}"
 
-        # Stress is optional since only periodic systems have it
+        # Stress names are always derived (from level_of_theory); has_stress toggles computation
+        self.stress_name: str = f"stress-{level_of_theory}" if level_of_theory else "stress"
+        self.stress_target: PropertyDefinition = PROPERTIES[self.stress_name]
+        self.grad_stress_name: str = f"{self.grad_prefix}_{self.stress_name}"
         self.has_stress = has_stress
-        if self.has_stress:
-            self.stress_name: str | None = (
-                f"stress-{level_of_theory}" if level_of_theory else "stress"
-            )
-            self.stress_target: PropertyDefinition | None = PROPERTIES[self.stress_name]
-            self.grad_stress_name: str | None = f"{self.grad_prefix}_{self.stress_name}"
-        else:
-            self.stress_name = None
-            self.stress_target = None
-            self.grad_stress_name = None
-        assert self.has_stress == (self.grad_stress_name is not None), (
-            "grad_stress_name must be set if has_stress is True"
-        )
 
         self.grad_rotation_name = "rotational_grad"
 
@@ -116,6 +106,14 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
         for name in heads.keys() - {"energy"}:
             if heads[name] is not None:
                 self.extra_properties.append(heads[name].target.fullname)
+
+    def enable_stress(self) -> None:
+        """Enable stress computation."""
+        self.has_stress = True
+
+    def disable_stress(self) -> None:
+        """Disable stress computation."""
+        self.has_stress = False
 
     @property
     def properties(self):
@@ -126,7 +124,7 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
             self.grad_forces_name,
             self.grad_rotation_name,
         ]
-        if self.grad_stress_name is not None:
+        if self.has_stress:
             props.append(self.grad_stress_name)
         props.extend(self.extra_properties)
         return props
@@ -179,7 +177,7 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
         energy_head = cast(ForcefieldHead, self.heads[self.energy_name])
         out[self.energy_name] = energy_head.denormalize(preds[self.energy_name], batch)
         out[self.grad_forces_name] = preds[self.grad_forces_name]
-        if self.grad_stress_name:
+        if self.has_stress:
             out[self.grad_stress_name] = preds[self.grad_stress_name]
         out[self.grad_rotation_name] = preds[self.grad_rotation_name]
         for name in self.extra_properties:
