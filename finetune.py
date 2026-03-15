@@ -514,6 +514,18 @@ def run(args):
         )
         logging.info("=" * 60)
 
+    # Enable/disable stress based on stress_loss_weight
+    # None = not specified, keep model default; 0 = explicitly disable; >0 = explicitly enable
+    if args.stress_loss_weight is not None:
+        if args.stress_loss_weight > 0:
+            model.enable_stress()
+            logging.info(
+                "Stress training ENABLED (stress_loss_weight=%.4f)", args.stress_loss_weight
+            )
+        elif model.has_stress:
+            model.disable_stress()
+            logging.info("Stress training DISABLED (stress_loss_weight=0.0)")
+
     model_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logging.info(f"Model has {model_params:,} trainable parameters.")
 
