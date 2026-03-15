@@ -197,7 +197,12 @@ def test_forcefield_adapter_requires_both_spin_and_charge():
 def test_from_ase_atoms_list_parallel_equivalence():
     """Test that from_ase_atoms_list produces equivalent results to sequential processing."""
     atoms_list = [
-        Atoms("H2O", positions=np.array([[0, 0, 0], [0, 1, 0], [1, 0, 0]]) + i * 0.1, pbc=True, cell=np.diag([5, 5, 5]))
+        Atoms(
+            "H2O",
+            positions=np.array([[0, 0, 0], [0, 1, 0], [1, 0, 0]]) + i * 0.1,
+            pbc=True,
+            cell=np.diag([5, 5, 5]),
+        )
         for i in range(4)
     ]
     adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=20)
@@ -245,7 +250,12 @@ def test_from_ase_atoms_list_nonperiodic():
 
 def test_from_ase_atoms_list_single_atom_fallback():
     """Test that from_ase_atoms_list falls back to from_ase_atoms for a single atom."""
-    atoms = Atoms("H2O", positions=np.array([[0, 0, 0], [0, 1, 0], [1, 0, 0]]), pbc=True, cell=np.diag([5, 5, 5]))
+    atoms = Atoms(
+        "H2O",
+        positions=np.array([[0, 0, 0], [0, 1, 0], [1, 0, 0]]),
+        pbc=True,
+        cell=np.diag([5, 5, 5]),
+    )
     adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=20)
 
     single_result = adapter.from_ase_atoms_list([atoms])
@@ -259,7 +269,9 @@ def test_from_ase_atoms_list_single_atom_fallback():
     dd = direct_result.edge_features["vectors"].cpu().norm(dim=1).sort()[0]
     assert torch.allclose(sd, dd, atol=1e-5)
     assert torch.equal(single_result.senders.cpu().sort()[0], direct_result.senders.cpu().sort()[0])
-    assert torch.equal(single_result.receivers.cpu().sort()[0], direct_result.receivers.cpu().sort()[0])
+    assert torch.equal(
+        single_result.receivers.cpu().sort()[0], direct_result.receivers.cpu().sort()[0]
+    )
 
 
 def test_from_ase_atoms_list_empty_raises():
@@ -273,7 +285,12 @@ def test_from_ase_atoms_list_with_charge_and_spin():
     """Test that from_ase_atoms_list correctly handles charge and spin."""
     atoms_list = []
     for i in range(3):
-        a = Atoms("H2O", positions=np.array([[0, 0, 0], [0, 1, 0], [1, 0, 0]]) + i * 0.1, pbc=True, cell=np.diag([5, 5, 5]))
+        a = Atoms(
+            "H2O",
+            positions=np.array([[0, 0, 0], [0, 1, 0], [1, 0, 0]]) + i * 0.1,
+            pbc=True,
+            cell=np.diag([5, 5, 5]),
+        )
         a.info["charge"] = float(i)
         a.info["spin"] = float(i + 1)
         atoms_list.append(a)
@@ -295,13 +312,25 @@ def test_from_ase_atoms_list_with_charge_and_spin():
 
 def test_from_ase_atoms_list_mixed_charge_spin_raises():
     """Test that from_ase_atoms_list raises when only some atoms have charge/spin."""
-    atoms_with = Atoms("H2O", positions=np.array([[0, 0, 0], [0, 1, 0], [1, 0, 0]]), pbc=True, cell=np.diag([5, 5, 5]))
+    atoms_with = Atoms(
+        "H2O",
+        positions=np.array([[0, 0, 0], [0, 1, 0], [1, 0, 0]]),
+        pbc=True,
+        cell=np.diag([5, 5, 5]),
+    )
     atoms_with.info["charge"] = 1.0
     atoms_with.info["spin"] = 2.0
-    atoms_without = Atoms("H2O", positions=np.array([[0, 0, 0], [0, 1, 0], [1, 0, 0]]), pbc=True, cell=np.diag([5, 5, 5]))
+    atoms_without = Atoms(
+        "H2O",
+        positions=np.array([[0, 0, 0], [0, 1, 0], [1, 0, 0]]),
+        pbc=True,
+        cell=np.diag([5, 5, 5]),
+    )
 
     adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=20)
-    with pytest.raises(ValueError, match="Either all atoms must have charge and spin, or none of them"):
+    with pytest.raises(
+        ValueError, match="Either all atoms must have charge and spin, or none of them"
+    ):
         adapter.from_ase_atoms_list([atoms_with, atoms_without])
 
 

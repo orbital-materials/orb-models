@@ -288,7 +288,10 @@ class ForcefieldAtomsAdapter(AbstractAtomsAdapter):
         # Concatenate fix_atoms: None if no system has constraints
         if any(f is not None for f in all_fix_atoms):
             fix_atoms = torch.cat(
-                [f if f is not None else torch.zeros(n, dtype=torch.bool) for f, n in zip(all_fix_atoms, n_atoms)],
+                [
+                    f if f is not None else torch.zeros(n, dtype=torch.bool)
+                    for f, n in zip(all_fix_atoms, n_atoms, strict=True)
+                ],
                 dim=0,
             )
         else:
@@ -314,9 +317,7 @@ class ForcefieldAtomsAdapter(AbstractAtomsAdapter):
         has_charge_spin = [bool(cs) for cs in charge_spin_list]
         if any(has_charge_spin):
             if not all(has_charge_spin):
-                raise ValueError(
-                    "Either all atoms must have charge and spin, or none of them."
-                )
+                raise ValueError("Either all atoms must have charge and spin, or none of them.")
             graph_feats["total_charge"] = torch.cat(
                 [cs["total_charge"] for cs in charge_spin_list], dim=0
             )
