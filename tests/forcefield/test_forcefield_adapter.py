@@ -4,6 +4,7 @@ import pytest
 import torch
 from ase import Atoms
 
+from orb_models.common.atoms.batch.graph_batch import AtomGraphs
 from orb_models.common.atoms.featurization import rotation_from_generator
 from orb_models.forcefield.forcefield_adapter import ForcefieldAtomsAdapter
 from tests.common.atoms import common_adapter_tests
@@ -202,7 +203,6 @@ def test_from_ase_atoms_list_parallel_equivalence():
     adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=20)
 
     batch_result = adapter.from_ase_atoms_list(atoms_list)
-    from orb_models.common.atoms.batch.graph_batch import AtomGraphs
 
     sequential_batch = AtomGraphs.batch([adapter.from_ase_atoms(a) for a in atoms_list])
 
@@ -230,9 +230,17 @@ def test_from_ase_atoms_list_nonperiodic():
     ]
     adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=20)
     batch = adapter.from_ase_atoms_list(atoms_list)
+    sequential_batch = AtomGraphs.batch([adapter.from_ase_atoms(a) for a in atoms_list])
 
-    assert batch.n_node.tolist() == [2, 2, 2]
-    assert batch.positions.shape == (6, 3)
+    assert torch.equal(batch.n_node.cpu(), sequential_batch.n_node.cpu())
+    assert torch.equal(batch.n_edge.cpu(), sequential_batch.n_edge.cpu())
+    assert torch.allclose(batch.positions.cpu(), sequential_batch.positions.cpu(), atol=1e-5)
+    for sys_idx in range(len(atoms_list)):
+        start = batch.n_edge[:sys_idx].sum().item() if sys_idx > 0 else 0
+        end = start + batch.n_edge[sys_idx].item()
+        bd = batch.edge_features["vectors"][start:end].cpu().norm(dim=1).sort()[0]
+        sd = sequential_batch.edge_features["vectors"][start:end].cpu().norm(dim=1).sort()[0]
+        assert torch.allclose(bd, sd, atol=1e-4)
 
 
 def test_from_ase_atoms_list_single_atom_fallback():
@@ -244,7 +252,14 @@ def test_from_ase_atoms_list_single_atom_fallback():
     direct_result = adapter.from_ase_atoms(atoms)
 
     assert torch.equal(single_result.n_node.cpu(), direct_result.n_node.cpu())
+    assert torch.equal(single_result.n_edge.cpu(), direct_result.n_edge.cpu())
     assert torch.allclose(single_result.positions.cpu(), direct_result.positions.cpu(), atol=1e-6)
+    # Edge ordering may differ, so compare sorted distances and sorted (sender, receiver) pairs
+    sd = single_result.edge_features["vectors"].cpu().norm(dim=1).sort()[0]
+    dd = direct_result.edge_features["vectors"].cpu().norm(dim=1).sort()[0]
+    assert torch.allclose(sd, dd, atol=1e-5)
+    assert torch.equal(single_result.senders.cpu().sort()[0], direct_result.senders.cpu().sort()[0])
+    assert torch.equal(single_result.receivers.cpu().sort()[0], direct_result.receivers.cpu().sort()[0])
 
 
 def test_from_ase_atoms_list_empty_raises():
@@ -276,6 +291,18 @@ def test_from_ase_atoms_list_with_charge_and_spin():
         batch.system_features["spin_multiplicity"].cpu(),
         torch.tensor([1.0, 2.0, 3.0]),
     )
+
+
+def test_from_ase_atoms_list_mixed_charge_spin_raises():
+    """Test that from_ase_atoms_list raises when only some atoms have charge/spin."""
+    atoms_with = Atoms("H2O", positions=np.array([[0, 0, 0], [0, 1, 0], [1, 0, 0]]), pbc=True, cell=np.diag([5, 5, 5]))
+    atoms_with.info["charge"] = 1.0
+    atoms_with.info["spin"] = 2.0
+    atoms_without = Atoms("H2O", positions=np.array([[0, 0, 0], [0, 1, 0], [1, 0, 0]]), pbc=True, cell=np.diag([5, 5, 5]))
+
+    adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=20)
+    with pytest.raises(ValueError, match="Either all atoms must have charge and spin, or none of them"):
+        adapter.from_ase_atoms_list([atoms_with, atoms_without])
 
 
 @requires_torch_sim

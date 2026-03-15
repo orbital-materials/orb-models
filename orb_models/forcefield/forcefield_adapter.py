@@ -309,28 +309,19 @@ class ForcefieldAtomsAdapter(AbstractAtomsAdapter):
             "cell": cells,
             "pbc": pbcs,
         }
-        # Collect charge and spin from all atoms
-        charges = []
-        spins = []
-        has_charge_spin = False
-        for a in atoms:
-            cs = _get_charge_and_spin(a)
-            if cs:
-                has_charge_spin = True
-                charges.append(cs["total_charge"])
-                spins.append(cs["spin_multiplicity"])
-            else:
-                charges.append(None)
-                spins.append(None)
-
-        if has_charge_spin:
-            default_charge = torch.tensor([0.0], dtype=torch.get_default_dtype())
-            default_spin = torch.tensor([1.0], dtype=torch.get_default_dtype())
+        # Collect charge and spin: all-or-nothing semantics
+        charge_spin_list = [_get_charge_and_spin(a) for a in atoms]
+        has_charge_spin = [bool(cs) for cs in charge_spin_list]
+        if any(has_charge_spin):
+            if not all(has_charge_spin):
+                raise ValueError(
+                    "Either all atoms must have charge and spin, or none of them."
+                )
             graph_feats["total_charge"] = torch.cat(
-                [c if c is not None else default_charge for c in charges], dim=0
+                [cs["total_charge"] for cs in charge_spin_list], dim=0
             )
             graph_feats["spin_multiplicity"] = torch.cat(
-                [s if s is not None else default_spin for s in spins], dim=0
+                [cs["spin_multiplicity"] for cs in charge_spin_list], dim=0
             )
 
         return AtomGraphs(
