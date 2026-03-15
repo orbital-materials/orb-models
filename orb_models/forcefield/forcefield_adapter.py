@@ -116,12 +116,14 @@ class ForcefieldAtomsAdapter(AbstractAtomsAdapter):
             positions = feat_utils.map_to_pbc_cell(positions, cell, pbc)
 
         max_num_neighbors = max_num_neighbors or self.max_num_neighbors
+        assert self.radius is not None, "radius must be set"
+        assert max_num_neighbors is not None, "max_num_neighbors must be set"
         edge_index, edge_vectors, unit_shifts = graph_feat.compute_pbc_radius_graph(
             positions=positions,
             cell=cell,
             pbc=pbc,
-            radius=self.radius,  # type: ignore
-            max_number_neighbors=max_num_neighbors,  # type: ignore
+            radius=self.radius,
+            max_number_neighbors=max_num_neighbors,
             edge_method=edge_method,
             half_supercell=half_supercell,
             float_dtype=graph_construction_dtype,
@@ -168,7 +170,7 @@ class ForcefieldAtomsAdapter(AbstractAtomsAdapter):
             system_targets=deepcopy(graph_targets),
             fix_atoms=feat_utils.ase_fix_atoms_to_tensor(atoms),
             tags=feat_utils.get_ase_tags(atoms),
-            radius=self.radius,  # type: ignore
+            radius=self.radius,
             max_num_neighbors=torch.tensor([max_num_neighbors]),
             system_id=(torch.LongTensor([system_id]) if system_id is not None else system_id),
         ).to(device=device, dtype=output_dtype)
@@ -178,6 +180,7 @@ class ForcefieldAtomsAdapter(AbstractAtomsAdapter):
         self,
         atoms: list[ase.Atoms],
         *,
+        max_num_neighbors: int | None = None,
         edge_method: graph_feat.EdgeCreationMethod | None = None,
         wrap: bool = True,
         device: torch.device | str | None = None,
@@ -191,6 +194,8 @@ class ForcefieldAtomsAdapter(AbstractAtomsAdapter):
 
         Args:
             atoms: List of ase.Atoms objects.
+            max_num_neighbors: Maximum number of neighbors each node can send messages to.
+                If None, will use self.max_num_neighbors.
             edge_method: The method to use for graph edge construction. If None, defaults to knn_alchemi.
             wrap: Whether to wrap atomic positions into the central unit cell.
             device: The device to put the tensors on.
@@ -262,7 +267,10 @@ class ForcefieldAtomsAdapter(AbstractAtomsAdapter):
                 positions=positions, cell=cells, pbc=pbcs, n_node=n_node
             )
 
-        max_num_neighbors = torch.full_like(n_node, fill_value=self.max_num_neighbors)
+        max_num_neighbors = max_num_neighbors or self.max_num_neighbors
+        assert max_num_neighbors is not None, "max_num_neighbors must be set"
+        assert self.radius is not None, "radius must be set"
+        max_num_neighbors_tensor = torch.full_like(n_node, fill_value=max_num_neighbors)
         (
             edge_index,
             edge_vectors,
@@ -273,7 +281,7 @@ class ForcefieldAtomsAdapter(AbstractAtomsAdapter):
             cells=cells,
             pbcs=pbcs,
             radius=torch.tensor([self.radius], device=resolved_device),
-            max_number_neighbors=max_num_neighbors,
+            max_number_neighbors=max_num_neighbors_tensor,
             n_node=n_node,
             node_batch_index=node_batch_index,
             edge_method=edge_method,
@@ -340,13 +348,14 @@ class ForcefieldAtomsAdapter(AbstractAtomsAdapter):
             fix_atoms=fix_atoms,
             tags=tags,
             radius=self.radius,
-            max_num_neighbors=max_num_neighbors,
+            max_num_neighbors=max_num_neighbors_tensor,
         ).to(device=resolved_device, dtype=output_dtype)
 
     def from_torchsim_state(
         self,
         state: ts.SimState,
         *,
+        max_num_neighbors: int | None = None,
         edge_method: graph_feat.EdgeCreationMethod | None = None,
         wrap: bool = True,
         device: torch.device | str | None = None,
@@ -359,6 +368,8 @@ class ForcefieldAtomsAdapter(AbstractAtomsAdapter):
 
         Args:
             state: SimState object containing atomic positions, cell, and atomic numbers.
+            max_num_neighbors: Maximum number of neighbors each node can send messages to.
+                If None, will use self.max_num_neighbors.
             edge_method (EdgeCreationMethod, optional): The method to use for graph edge
                 construction. If None, the edge method is chosen automatically.
             wrap: Whether to wrap atomic positions into the central unit cell.
@@ -397,7 +408,10 @@ class ForcefieldAtomsAdapter(AbstractAtomsAdapter):
                 positions=positions, cell=cell, pbc=pbc, n_node=n_node
             )
 
-        max_num_neighbors = torch.full_like(n_node, fill_value=self.max_num_neighbors)  # type: ignore[arg-type]
+        max_num_neighbors = max_num_neighbors or self.max_num_neighbors
+        assert self.radius is not None, "radius must be set"
+        assert max_num_neighbors is not None, "max_num_neighbors must be set"
+        max_num_neighbors_tensor = torch.full_like(n_node, fill_value=max_num_neighbors)
         (
             edge_index,
             edge_vectors,
@@ -408,7 +422,7 @@ class ForcefieldAtomsAdapter(AbstractAtomsAdapter):
             cells=cell,
             pbcs=pbc,
             radius=torch.tensor([self.radius], device=device),
-            max_number_neighbors=max_num_neighbors,
+            max_number_neighbors=max_num_neighbors_tensor,
             n_node=n_node,
             node_batch_index=node_batch_index,
             edge_method=edge_method,
@@ -450,8 +464,8 @@ class ForcefieldAtomsAdapter(AbstractAtomsAdapter):
             system_id=None,
             fix_atoms=None,
             tags=None,
-            radius=self.radius,  # type: ignore
-            max_num_neighbors=max_num_neighbors,  # type: ignore
+            radius=self.radius,
+            max_num_neighbors=max_num_neighbors_tensor,
         ).to(device=device, dtype=output_dtype)
 
     def is_compatible_with(self, other: AbstractAtomsAdapter):
