@@ -126,7 +126,10 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
         ]
         if self.has_stress:
             props.append(self.grad_stress_name)
-        props.extend(self.extra_properties)
+        for name in self.extra_properties:
+            if not self.has_stress and "stress" in name:
+                continue
+            props.append(name)
         return props
 
     def forward(self, batch: AtomGraphs) -> dict[str, torch.Tensor]:
@@ -240,8 +243,6 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
 
         # Conservative stress (optional)
         if self.has_stress and self.grad_stress_name in out:
-            assert self.stress_name is not None
-            assert self.grad_stress_name is not None
             raw_grad_stress_pred = out[self.grad_stress_name]
             grad_stress_pred = self.grad_stress_normalizer(raw_grad_stress_pred, online=False)
             loss_out = stress_loss_function(
@@ -265,7 +266,6 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
             if self.has_stress and self.grad_stress_name in out
             else []
         ):
-            assert grad_name is not None
             direct_name = grad_name.replace(self.grad_prefix + "_", "")
             if direct_name in self.extra_properties:
                 direct_head = cast(ForcefieldHead, self.heads[direct_name])

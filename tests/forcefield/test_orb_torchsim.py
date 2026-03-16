@@ -70,3 +70,49 @@ def test_orb_torchsim_interface(edge_method, conservative_regressor, mptraj_10_s
             atol=1e-5,
             equal_nan=True,
         )
+
+
+class TestOrbTorchSimStressToggle:
+    """Test that enable_stress/disable_stress controls stress in OrbTorchSimModel results."""
+
+    def test_conservative_stress_disabled(self, conservative_regressor, mptraj_10_systems_db):
+        conservative_regressor.disable_stress()
+        atoms_list = [mptraj_10_systems_db.get_atoms(1)]
+        adapter = ForcefieldAtomsAdapter(6.0, 120)
+        sim_state = ts.io.atoms_to_state(atoms_list, "cpu", torch.get_default_dtype())
+        sim_model = OrbTorchSimModel(conservative_regressor, adapter)
+        results = sim_model(sim_state)
+        assert "stress" not in results
+        assert "forces" in results
+
+    def test_conservative_stress_enabled(self, conservative_regressor, mptraj_10_systems_db):
+        conservative_regressor.disable_stress()
+        conservative_regressor.enable_stress()
+        atoms_list = [mptraj_10_systems_db.get_atoms(1)]
+        adapter = ForcefieldAtomsAdapter(6.0, 120)
+        sim_state = ts.io.atoms_to_state(atoms_list, "cpu", torch.get_default_dtype())
+        sim_model = OrbTorchSimModel(conservative_regressor, adapter)
+        results = sim_model(sim_state)
+        assert "stress" in results
+        assert "forces" in results
+
+    def test_direct_stress_disabled(self, direct_regressor, mptraj_10_systems_db):
+        direct_regressor.disable_stress()
+        atoms_list = [mptraj_10_systems_db.get_atoms(1)]
+        adapter = ForcefieldAtomsAdapter(6.0, 120)
+        sim_state = ts.io.atoms_to_state(atoms_list, "cpu", torch.get_default_dtype())
+        sim_model = OrbTorchSimModel(direct_regressor, adapter)
+        results = sim_model(sim_state)
+        assert "stress" not in results
+        assert "forces" in results
+
+    def test_direct_stress_enabled(self, direct_regressor, mptraj_10_systems_db):
+        direct_regressor.disable_stress()
+        direct_regressor.enable_stress()
+        atoms_list = [mptraj_10_systems_db.get_atoms(1)]
+        adapter = ForcefieldAtomsAdapter(6.0, 120)
+        sim_state = ts.io.atoms_to_state(atoms_list, "cpu", torch.get_default_dtype())
+        sim_model = OrbTorchSimModel(direct_regressor, adapter)
+        results = sim_model(sim_state)
+        assert "stress" in results
+        assert "forces" in results
