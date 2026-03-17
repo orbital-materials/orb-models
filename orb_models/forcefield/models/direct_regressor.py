@@ -57,6 +57,7 @@ class DirectForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
         _validate_heads_and_loss_weights(heads, loss_weights)
 
         self.heads = torch.nn.ModuleDict(heads)
+        self._stress_disabled = False
         self.loss_weights = loss_weights
         self.model_requires_grad = model_requires_grad
         self.cutoff_layers = cutoff_layers
@@ -82,20 +83,34 @@ class DirectForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
 
     @property
     def has_stress(self) -> bool:
-        """Check if the model has stress prediction."""
-        return "stress" in self.heads
+        """Check if the model has stress prediction and it is enabled."""
+        return "stress" in self.heads and not self._stress_disabled
+
+    def enable_stress(self) -> None:
+        """Enable stress computation."""
+        if "stress" not in self.heads:
+            raise ValueError("Cannot enable stress: no stress head exists.")
+        self._stress_disabled = False
+
+    def disable_stress(self) -> None:
+        """Disable stress computation."""
+        self._stress_disabled = True
 
     def forward(self, batch: AtomGraphs) -> dict[str, torch.Tensor | dict[str, torch.Tensor]]:
         """Forward pass of DirectForcefieldRegressor."""
         out = self.model(batch)
         node_features = out["node_features"]
         for name, head in self.heads.items():
+            if self._stress_disabled and "stress" in name:
+                continue
             res = head(node_features, batch)
             out[name] = res
 
         if self.pair_repulsion:
             out_pair_repulsion = self.pair_repulsion_fn(batch)
             for name, head in self.heads.items():
+                if self._stress_disabled and "stress" in name:
+                    continue
                 raw_repulsion = self._get_raw_repulsion(name, out_pair_repulsion)
                 if raw_repulsion is not None:
                     head = cast(ForcefieldHead, head)
@@ -109,11 +124,15 @@ class DirectForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
         node_features = out["node_features"]
         output = {}
         for name, head in self.heads.items():
+            if self._stress_disabled and "stress" in name:
+                continue
             output[name] = cast(ForcefieldHead | ConfidenceHead, head).predict(node_features, batch)
 
         if self.pair_repulsion:
             out_pair_repulsion = self.pair_repulsion_fn(batch)
             for name, head in self.heads.items():
+                if self._stress_disabled and "stress" in name:
+                    continue
                 raw_repulsion = self._get_raw_repulsion(name, out_pair_repulsion)
                 if raw_repulsion is not None:
                     output[name] = output[name] + raw_repulsion
@@ -137,6 +156,8 @@ class DirectForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
 
         for name, head in self.heads.items():
             if name == "confidence":
+                continue
+            if self._stress_disabled and "stress" in name:
                 continue
             head = cast(ForcefieldHead, head)
             head_out = head.loss(out[name], batch)
@@ -191,6 +212,8 @@ class DirectForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
     def properties(self):
         """List of names of predicted properties."""
         heads = list(self.heads.keys())
+        if self._stress_disabled:
+            heads = [head for head in heads if "stress" not in head]
         if "energy" in heads:
             heads.append("free_energy")
         return heads
