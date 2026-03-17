@@ -3,7 +3,7 @@ from pathlib import Path
 
 import scipy.constants
 import torch
-from nvalchemiops.interactions.dispersion.dftd3 import D3Parameters, dftd3
+from nvalchemiops.torch.interactions.dispersion import D3Parameters, dftd3
 
 from orb_models.common.atoms.batch.graph_batch import AtomGraphs
 from orb_models.common.atoms.graph_featurization import _compute_neighbor_list_with_fallback

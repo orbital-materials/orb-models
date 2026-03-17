@@ -5,9 +5,9 @@ from typing import Literal
 
 import numpy as np
 import torch
-from nvalchemiops.neighborlist import estimate_max_neighbors
-from nvalchemiops.neighborlist import neighbor_list as nva_neighbor_list
-from nvalchemiops.neighborlist.neighbor_utils import get_neighbor_list_from_neighbor_matrix
+from nvalchemiops.neighbors.neighbor_utils import estimate_max_neighbors
+from nvalchemiops.torch.neighbors import neighbor_list as nva_neighbor_list
+from nvalchemiops.torch.neighbors.neighbor_utils import get_neighbor_list_from_neighbor_matrix
 from scipy.spatial import KDTree as SciKDTree
 
 try:
