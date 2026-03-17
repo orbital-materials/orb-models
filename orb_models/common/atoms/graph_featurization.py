@@ -748,6 +748,7 @@ def _compute_neighbor_list_with_fallback(
             batch_ptr=batch_ptr,
             fill_value=fill_value,
             max_neighbors=max_num_neighbors_alchemi,
+            wrap_positions=False,  # we handle wrapping externally
         )
         if max_num_neighbors_alchemi >= num_neighbors.max().item():
             return neighbor_matrix, num_neighbors, neighbor_shift_matrix
