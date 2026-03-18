@@ -732,4 +732,8 @@ def main():
 
 
 if __name__ == "__main__":
+    import multiprocessing
+
+    # Spawn workers instead of fork to prevent inherited CUDA contexts causing Warp errors.
+    multiprocessing.set_start_method("spawn", force=True)
     main()

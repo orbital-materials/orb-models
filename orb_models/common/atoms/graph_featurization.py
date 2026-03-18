@@ -5,9 +5,9 @@ from typing import Literal
 
 import numpy as np
 import torch
-from nvalchemiops.neighborlist import estimate_max_neighbors
-from nvalchemiops.neighborlist import neighbor_list as nva_neighbor_list
-from nvalchemiops.neighborlist.neighbor_utils import get_neighbor_list_from_neighbor_matrix
+from nvalchemiops.neighbors.neighbor_utils import estimate_max_neighbors
+from nvalchemiops.torch.neighbors import neighbor_list as nva_neighbor_list
+from nvalchemiops.torch.neighbors.neighbor_utils import get_neighbor_list_from_neighbor_matrix
 from scipy.spatial import KDTree as SciKDTree
 
 try:
@@ -748,6 +748,7 @@ def _compute_neighbor_list_with_fallback(
             batch_ptr=batch_ptr,
             fill_value=fill_value,
             max_neighbors=max_num_neighbors_alchemi,
+            wrap_positions=False,  # we handle wrapping externally
         )
         if max_num_neighbors_alchemi >= num_neighbors.max().item():
             return neighbor_matrix, num_neighbors, neighbor_shift_matrix
