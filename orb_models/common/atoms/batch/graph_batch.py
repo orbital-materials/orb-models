@@ -79,7 +79,7 @@ class AtomGraphs(AbstractAtomBatch):
         # repeat_interleave, e.g. tensor[node_batch_index] instead of tensor.repeat_interleave(n_node)
         self.node_batch_index = torch.arange(
             self.n_node.shape[0], dtype=torch.int64, device=self.n_node.device
-        ).repeat_interleave(self.n_node)
+        ).repeat_interleave(self.n_node, output_size=self.positions.shape[0])
 
     def split(self: _T, clone=True) -> list["AtomGraphs"]:
         """Splits batched AtomGraphs into constituent system AtomGraphs.
@@ -218,11 +218,12 @@ class AtomGraphs(AbstractAtomBatch):
         TODO: we could cache these indices.
         """
         positions = self.node_features["positions"]
-        graph_indices = torch.zeros(len(positions), device=positions.device, dtype=torch.int)
+        n_atoms = positions.shape[0]
+        graph_indices = torch.zeros(n_atoms, device=positions.device, dtype=torch.int)
         cumsums = torch.cumsum(self.n_node, dim=0)
         graph_indices[:] = torch.searchsorted(
             cumsums,
-            torch.arange(len(positions), device=positions.device),
+            torch.arange(n_atoms, device=positions.device),
             right=True,
         )
         return graph_indices  # (natoms,)
@@ -234,9 +235,10 @@ class AtomGraphs(AbstractAtomBatch):
         """
         graph_indices = torch.zeros_like(self.senders)  # (nedges,)
         cumsums = torch.cumsum(self.n_edge, dim=0)  # (ngraphs,)
+        n_edges = self.senders.shape[0]
         graph_indices[:] = torch.searchsorted(
             cumsums,
-            torch.arange(len(self.senders), device=self.senders.device),
+            torch.arange(n_edges, device=self.senders.device),
             right=True,
         )
         return graph_indices  # (nedges,)
