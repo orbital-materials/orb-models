@@ -1180,8 +1180,7 @@ def orbmol_v2_architecture(
 
 
 def orbmol_v2(
-    # TODO: confirm s11doh8x checkpoint URL once it is uploaded to S3.
-    weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orbmol-v2-s11doh8x.ckpt",  # noqa: E501
+    weights_path: str = "https://huggingface.co/orbital-materials/orbmol-v2/resolve/main/orbmol-v2-s11doh8x-20260507.ckpt",  # noqa: E501
     device: torch.device | str | None = None,
     precision: str = "float32-high",
     compile: bool | None = None,
@@ -1190,8 +1189,8 @@ def orbmol_v2(
     """Load OrbMol-v2 with learnable electrostatics (charges, spins, Coulomb).
 
     Public release is the s11doh8x wandb run, trained on OMol25 (ωB97M-V/def2-TZVPD).
-    The checkpoint at `weights_path` must be a flat state_dict with EMA shadow params
-    already applied — produce one from the wandb training artifact via
+    The checkpoint at `weights_path` is a flat state_dict with EMA shadow params already
+    applied — produced from the wandb training artifact via
     `core/scripts/misc/export_model.py` (the same tool used for all other public orb-models).
     """
     if compile is None and train:
