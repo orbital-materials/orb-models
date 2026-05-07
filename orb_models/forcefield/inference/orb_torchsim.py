@@ -116,7 +116,7 @@ class OrbTorchSimModel(ModelInterface):
                 continue
             _property = "energy" if property == "free_energy" else property
 
-            results[property] = torch.atleast_1d(out[_property].squeeze())
+            results[property] = torch.atleast_1d(out[_property])
 
         # Rename certain keys for the conservative model
         if self.conservative:
