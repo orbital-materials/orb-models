@@ -24,7 +24,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-torchsim = ["torch-sim-atomistic>=0.5.1"]
+torchsim = ["torch-sim-atomistic>=0.6.0"]
 
 [tool.setuptools.packages.find]
 where = ["."]
