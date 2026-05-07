@@ -11,8 +11,17 @@ from orb_models.common.models.graph_regressor import _validate_heads_and_loss_we
 from orb_models.common.models.load import load_regressor_state_dict
 from orb_models.common.models.nn_util import ScalarNormalizer
 from orb_models.common.models.segment_ops import split_prediction
-from orb_models.forcefield.models.forcefield_heads import ConfidenceHead, EnergyHead, ForcefieldHead
-from orb_models.forcefield.models.forcefield_utils import compute_gradient_forces_and_stress
+from orb_models.forcefield.models.coulomb_module import CoulombModule
+from orb_models.forcefield.models.forcefield_heads import (
+    ChargeConditionedEnergyHead,
+    ConfidenceHead,
+    EnergyHead,
+    ForcefieldHead,
+)
+from orb_models.forcefield.models.forcefield_utils import (
+    compute_gradient_forces_and_stress,
+    torch_full_3x3_to_voigt_6_stress,
+)
 from orb_models.forcefield.models.loss import forces_loss_function, stress_loss_function
 from orb_models.forcefield.models.pair_repulsion import ZBLBasis
 
@@ -52,6 +61,7 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
         forces_loss_type: Literal["mae", "mse", "huber_0.01", "condhuber_0.01"] = "condhuber_0.01",
         pair_repulsion: bool = False,
         has_stress: bool = True,
+        coulomb_module: CoulombModule | None = None,
         **kwargs,
     ):
         super().__init__()
@@ -84,7 +94,13 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
 
         self.pair_repulsion = pair_repulsion
         if self.pair_repulsion:
-            self.pair_repulsion_fn = ZBLBasis(p=6, compute_gradients=False)
+            self.pair_repulsion_fn = ZBLBasis(p=6, compute_gradients=False, node_aggregation="sum")
+
+        self.coulomb_module = coulomb_module
+        if self.coulomb_module is not None:
+            assert "latent_charges" in self.heads, (
+                "CoulombModule requires a 'latent_charges' head in heads"
+            )
 
         # Target names
         self.energy_name = heads["energy"].target.fullname
@@ -103,7 +119,7 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
         self.grad_rotation_name = "rotational_grad"
 
         self.extra_properties = []
-        for name in heads.keys() - {"energy"}:
+        for name in heads.keys() - {"energy", "latent_charges", "latent_spins"}:
             if heads[name] is not None:
                 self.extra_properties.append(heads[name].target.fullname)
 
@@ -145,13 +161,52 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
         out = self.model(batch)
         node_features = out["node_features"]
 
+        # Predict per-atom charges/spins BEFORE energy head so they can
+        # be used as conditioning features (ChargeConditionedEnergyHead) and by CoulombModule.
+        latent_charges = None
+        if "latent_charges" in self.heads:
+            latent_charges = self.heads["latent_charges"](node_features, batch)
+        latent_spins = None
+        if "latent_spins" in self.heads:
+            latent_spins = self.heads["latent_spins"](node_features, batch)
+
         energy_head = self.heads[self.energy_name]
-        energy_head = cast(ForcefieldHead, energy_head)
-        base_energy = energy_head(node_features, batch)
-        raw_energy = energy_head.denormalize(base_energy, batch)
-        if self.pair_repulsion:
-            raw_energy += self.pair_repulsion_fn(batch)["energy"]
-        out[self.energy_name] = energy_head.normalize(raw_energy, batch, online=False)
+        is_charge_conditioned = isinstance(energy_head, ChargeConditionedEnergyHead)
+        if is_charge_conditioned:
+            # ChargeConditionedEnergyHead.forward returns physical interaction energy directly.
+            assert latent_charges is not None, (
+                "ChargeConditionedEnergyHead requires a 'latent_charges' head"
+            )
+            raw_energy = energy_head(
+                node_features,
+                batch,
+                per_atom_charges=latent_charges,
+                per_atom_spins=latent_spins,
+            )
+            if self.pair_repulsion:
+                raw_energy = raw_energy + self.pair_repulsion_fn(batch)["energy"]
+        else:
+            energy_head = cast(ForcefieldHead, energy_head)
+            base_energy = energy_head(node_features, batch)
+            raw_energy = energy_head.denormalize(base_energy, batch)
+            if self.pair_repulsion:
+                raw_energy = raw_energy + self.pair_repulsion_fn(batch)["energy"]
+
+        # Long-range Coulomb (predicted charges only — spins not used).
+        coulomb_explicit_forces = None
+        coulomb_explicit_virial = None
+        if self.coulomb_module is not None:
+            assert latent_charges is not None, "CoulombModule requires a LatentChargeHead"
+            coulomb_energy, coulomb_explicit_forces, coulomb_explicit_virial = self.coulomb_module(
+                latent_charges, batch
+            )
+            raw_energy = raw_energy + coulomb_energy
+
+        # Store final energy in `out` (interaction-units for ChargeConditioned, normalized otherwise).
+        if is_charge_conditioned:
+            out[self.energy_name] = raw_energy
+        else:
+            out[self.energy_name] = energy_head.normalize(raw_energy, batch, online=False)
 
         forces, stress, rotational_grad = compute_gradient_forces_and_stress(
             energy=raw_energy,
@@ -162,6 +217,24 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
             compute_stress=self.has_stress,
             generator=batch.system_features["generator"],
         )
+
+        # Add explicit/spatial Coulomb force/stress corrections (see CoulombModule docstring).
+        if self.coulomb_module is not None:
+            assert coulomb_explicit_forces is not None
+            assert coulomb_explicit_virial is not None
+            forces = forces + coulomb_explicit_forces
+            if self.has_stress:
+                assert stress is not None
+                cell_3d = batch.system_features["cell"].view(-1, 3, 3)
+                volume = torch.linalg.det(cell_3d).abs()
+                coulomb_stress_3x3 = -coulomb_explicit_virial / volume.view(-1, 1, 1)
+                coulomb_stress_3x3 = torch.where(
+                    torch.abs(coulomb_stress_3x3) < 1e10,
+                    coulomb_stress_3x3,
+                    torch.zeros_like(coulomb_stress_3x3),
+                )
+                stress = stress + torch_full_3x3_to_voigt_6_stress(coulomb_stress_3x3)
+
         out[self.grad_forces_name] = forces  # eV / A
         if self.has_stress:
             out[self.grad_stress_name] = stress  # eV / A^3
@@ -172,13 +245,33 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
 
         return out
 
-    def predict(self, batch: AtomGraphs, split: bool = False) -> dict[str, torch.Tensor]:
-        """Predict energy, forces, and stress."""
+    def predict(
+        self,
+        batch: AtomGraphs,
+        split: bool = False,
+        fp64_energy: bool = True,
+    ) -> dict[str, torch.Tensor]:
+        """Predict energy, forces, and stress.
+
+        Args:
+            batch: Input batch.
+            split: If True, split predictions per graph.
+            fp64_energy: If True (default), return absolute energy in fp64; required to
+                preserve kJ/mol resolution since reference energies can be ~1e4-1e5 eV.
+                Only applies when the energy head is a ChargeConditionedEnergyHead.
+        """
         preds = self(batch)
 
         out = {}
-        energy_head = cast(ForcefieldHead, self.heads[self.energy_name])
-        out[self.energy_name] = energy_head.denormalize(preds[self.energy_name], batch)
+        energy_head = self.heads[self.energy_name]
+        if isinstance(energy_head, ChargeConditionedEnergyHead):
+            # preds[energy_name] is interaction energy in physical units; add reference.
+            out[self.energy_name] = energy_head.absolute_energy(
+                preds[self.energy_name], batch, fp64=fp64_energy
+            )
+        else:
+            energy_head = cast(ForcefieldHead, energy_head)
+            out[self.energy_name] = energy_head.denormalize(preds[self.energy_name], batch)
         out[self.grad_forces_name] = preds[self.grad_forces_name]
         if self.has_stress:
             out[self.grad_stress_name] = preds[self.grad_stress_name]

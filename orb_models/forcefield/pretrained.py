@@ -14,12 +14,16 @@ from orb_models.common.torch_utils import get_device
 from orb_models.common.training.util import set_torch_precision
 from orb_models.forcefield.forcefield_adapter import ForcefieldAtomsAdapter
 from orb_models.forcefield.models.conservative_regressor import ConservativeForcefieldRegressor
+from orb_models.forcefield.models.coulomb_module import CoulombModule
 from orb_models.forcefield.models.direct_regressor import DirectForcefieldRegressor
 from orb_models.forcefield.models.forcefield_heads import (
+    ChargeConditionedEnergyHead,
     ConfidenceHead,
     EnergyHead,
     ForcefieldHead,
     ForceHead,
+    LatentChargeHead,
+    LatentSpinHead,
     StressHead,
 )
 
@@ -1097,7 +1101,119 @@ def orb_v1_mptraj_only(
     _deprecated_model("orb-mptraj-only-v1")
 
 
+def orbmol_v2_architecture(
+    latent_dim: int = 256,
+    base_mlp_hidden_dim: int = 1024,
+    base_mlp_depth: int = 2,
+    head_mlp_hidden_dim: int = 256,
+    head_mlp_depth: int = 1,
+    num_message_passing_steps: int = 5,
+    activation: str = "silu",
+    device: torch.device | str | None = None,
+) -> ConservativeForcefieldRegressor:
+    """The OrbMol-v2 architecture with learnable electrostatics.
+
+    Mirrors the s11doh8x training config from orb-meta libs/core. The Coulomb
+    module uses defaults (no erf damping) and the LatentChargeHead enforces total charge.
+    """
+    conditioner = ChargeSpinConditioner(latent_dim)
+    coulomb = CoulombModule()
+
+    model = ConservativeForcefieldRegressor(
+        heads={
+            "energy": ChargeConditionedEnergyHead(
+                latent_dim=latent_dim,
+                num_mlp_layers=head_mlp_depth,
+                mlp_hidden_dim=head_mlp_hidden_dim,
+                predict_atom_avg=True,
+                activation=activation,
+                reference_energy="omol25-hof-lin",
+                use_spins=True,
+            ),
+            "confidence": ConfidenceHead(
+                latent_dim=latent_dim,
+                num_mlp_layers=head_mlp_depth,
+                mlp_hidden_dim=head_mlp_hidden_dim,
+                activation=activation,
+            ),
+            "latent_charges": LatentChargeHead(
+                latent_dim=latent_dim,
+                num_mlp_layers=2,
+                mlp_hidden_dim=128,
+                enforce_total_charge=True,
+                activation=activation,
+            ),
+            "latent_spins": LatentSpinHead(
+                latent_dim=latent_dim,
+                num_mlp_layers=2,
+                mlp_hidden_dim=128,
+                activation=activation,
+            ),
+        },
+        model=MoleculeGNS(
+            latent_dim=latent_dim,
+            num_message_passing_steps=num_message_passing_steps,
+            num_mlp_layers=base_mlp_depth,
+            mlp_hidden_dim=base_mlp_hidden_dim,
+            rbf_transform=BesselBasis(r_max=6.0, num_bases=8),
+            angular_transform=SphericalHarmonics(lmax=3, normalize=True, normalization="component"),
+            outer_product_with_cutoff=True,
+            use_embedding=True,
+            interaction_params={"distance_cutoff": True, "attention_gate": "sigmoid"},
+            node_feature_names=["feat"],
+            edge_feature_names=["feat"],
+            conditioner=conditioner,
+            activation=activation,
+            mlp_norm="rms_norm",
+        ),
+        pair_repulsion=True,
+        has_stress=False,
+        coulomb_module=coulomb,
+    )
+    device = get_device(device)
+    if device is not None and device != torch.device("cpu"):
+        model.cuda(device)
+    else:
+        model = model.cpu()
+    return model
+
+
+def orbmol_v2(
+    # TODO: confirm s11doh8x checkpoint URL once it is uploaded to S3.
+    weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orbmol-v2-s11doh8x.ckpt",  # noqa: E501
+    device: torch.device | str | None = None,
+    precision: str = "float32-high",
+    compile: bool | None = None,
+    train: bool = False,
+) -> tuple[ConservativeForcefieldRegressor, ForcefieldAtomsAdapter]:
+    """Load OrbMol-v2 with learnable electrostatics (charges, spins, Coulomb).
+
+    Public release is the s11doh8x wandb run, trained on OMol25 (ωB97M-V/def2-TZVPD).
+    The checkpoint at `weights_path` must be a flat state_dict with EMA shadow params
+    already applied — see scripts/convert_orbmol_v2_ckpt.py to convert from a raw
+    wandb-format checkpoint (which contains state_dict, optimizer, ema, etc.).
+    """
+    if compile is None and train:
+        compile = False
+    assert not (train and _should_compile(device, compile)), (
+        "Cannot compile a conservative model in training mode."
+    )
+
+    atoms_adapter = ForcefieldAtomsAdapter(
+        radius=6.0,
+        max_num_neighbors=120,
+        extra_features={"graph": ["total_charge", "spin_multiplicity"]},
+    )
+    model = orbmol_v2_architecture(device=device)
+    model = load_model(
+        model, weights_path, device, precision=precision, compile=compile, train=train
+    )
+    return model, atoms_adapter
+
+
 ORB_PRETRAINED_MODELS = {
+    # orbmol-v2 (learnable electrostatics)
+    "orbmol-v2": orbmol_v2,
     # orb-v3 omol models
     "orb-v3-conservative-omol": orb_v3_conservative_omol,
     "orb-v3-direct-omol": orb_v3_direct_omol,

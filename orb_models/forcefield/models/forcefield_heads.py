@@ -175,6 +175,22 @@ class EnergyHead(ForcefieldHead):
         pred = self(node_features, batch)
         return self.denormalize(pred, batch)
 
+    def absolute_energy(
+        self,
+        interaction_energy: torch.Tensor,
+        batch: AtomGraphs,
+        fp64: bool = True,
+    ) -> torch.Tensor:
+        """Combine interaction energy (physical units, no reference) with reference.
+
+        When reference energies are large (~1e4-1e5 eV for OMol), fp32 step size at
+        that scale destroys kJ/mol resolution, so `fp64=True` is the default.
+        """
+        ref = self.reference(batch.atomic_numbers, batch.n_node)
+        if fp64:
+            return interaction_energy.double() + ref.double()
+        return interaction_energy + ref.to(interaction_energy.dtype)
+
     def loss(
         self,
         pred: torch.Tensor,
@@ -614,3 +630,219 @@ class ConfidenceHead(torch.nn.Module):
         }
 
         return base.ModelOutput(loss=loss, log=metrics)
+
+
+class ChargeConditionedEnergyHead(EnergyHead):
+    """Energy head that conditions on per-atom charges (and optionally spins).
+
+    Unlike EnergyHead, this module applies the MLP per-atom and then aggregates,
+    rather than aggregating node features first. This preserves size-consistency:
+    for two non-interacting subsystems A and B (separated by more than the GNN
+    cutoff), E(A ∪ B) == E(A) + E(B).
+
+    Requires a latent_charges head (and optionally latent_spins) on the regressor to provide charges.
+    """
+
+    def __init__(
+        self,
+        latent_dim: int,
+        num_mlp_layers: int,
+        mlp_hidden_dim: int,
+        use_spins: bool = False,
+        predict_atom_avg: bool = True,
+        level_of_theory: str | None = None,
+        loss_type: Literal["mae", "mse", "huber_0.01"] = "huber_0.01",
+        dropout: float | None = None,
+        checkpoint: str | None = None,
+        online_normalisation: bool = True,
+        activation: str = "ssp",
+        reference_energy: str | None = None,
+    ):
+        """Initialize ChargeConditionedEnergyHead.
+
+        Args:
+            latent_dim: Dimensionality of the incoming latent vector from the base model.
+            num_mlp_layers: Number of MLP layers.
+            mlp_hidden_dim: MLP hidden size.
+            use_spins: If True, also condition on per-atom spins.
+            predict_atom_avg: Accepted for Hydra config compatibility but ignored.
+                Always uses per-atom energy (MLP per atom, then sum-pool).
+            level_of_theory: The method used to compute the gold energies.
+            loss_type: The type of loss to use.
+            dropout: The level of dropout to apply.
+            checkpoint: Whether to use checkpointing.
+            online_normalisation: Whether to update the normalisation statistics online.
+            activation: The activation function to use.
+            reference_energy: The reference energy to use.
+        """
+        assert predict_atom_avg, "predict_atom_avg must be True for ChargeConditionedEnergyHead"
+        # Extra features for charges and spins (1 + int(use_spins))
+        super().__init__(
+            latent_dim=latent_dim + 1 + int(use_spins),
+            num_mlp_layers=num_mlp_layers,
+            mlp_hidden_dim=mlp_hidden_dim,
+            level_of_theory=level_of_theory,
+            predict_atom_avg=True,
+            loss_type=loss_type,
+            dropout=dropout,
+            checkpoint=checkpoint,
+            online_normalisation=online_normalisation,
+            activation=activation,
+            reference_energy=reference_energy,
+        )
+        self._use_spins = use_spins
+
+    def forward(  # type: ignore[override]
+        self,
+        node_features: torch.Tensor,
+        batch: AtomGraphs,
+        per_atom_charges: torch.Tensor,
+        per_atom_spins: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Return interaction energy in physical units, conditioned on per-atom charges/spins.
+
+        Applies the MLP per-atom (with charges/spins as extra features),
+        denormalizes each atom's contribution, then sums over atoms per
+        system. Sum-pooling preserves size-consistency:
+        E(A ∪ B) = E(A) + E(B) for non-interacting subsystems.
+
+        Shape: (n_graphs,).
+        """
+        features = torch.cat([node_features, per_atom_charges], dim=-1)
+        if self._use_spins:
+            assert per_atom_spins is not None, "per_atom_spins required when use_spins=True"
+            features = torch.cat([features, per_atom_spins], dim=-1)
+        per_atom_mlp = self.mlp(features).squeeze(-1)
+        per_atom_interaction_energy = self.normalizer.inverse(per_atom_mlp)
+        return segment_ops.aggregate_nodes(
+            per_atom_interaction_energy, batch.n_node, reduction="sum"
+        )
+
+    def predict(  # type: ignore[override]
+        self,
+        node_features: torch.Tensor,
+        batch: AtomGraphs,
+        per_atom_charges: torch.Tensor,
+        per_atom_spins: torch.Tensor | None = None,
+        *,
+        fp64: bool = True,
+    ) -> torch.Tensor:
+        """Predict absolute energy = interaction energy + reference energy.
+
+        When reference energies are large (~1e4-1e5 eV for OMol), fp32 step size at that scale
+        destroys kJ/mol resolution, so `fp64=True` is the default.
+        """
+        interaction_energy = self.forward(node_features, batch, per_atom_charges, per_atom_spins)
+        ref = self.reference(batch.atomic_numbers, batch.n_node)
+        if fp64:
+            return interaction_energy.double() + ref.double()
+        return interaction_energy + ref.to(interaction_energy.dtype)
+
+
+class LatentChargeHead(torch.nn.Module):
+    """Predicts per-atom latent charges from node features.
+
+    Charges are learned purely from energy/force supervision.
+    Optionally enforces charge neutrality (sum to zero or total_charge).
+    """
+
+    def __init__(
+        self,
+        latent_dim: int,
+        num_mlp_layers: int = 1,
+        mlp_hidden_dim: int = 128,
+        enforce_total_charge: bool = True,
+        activation: str = "ssp",
+        charge_scale: float = 1.0,
+    ):
+        super().__init__()
+        self.latent_dim = latent_dim
+        self.enforce_total_charge = enforce_total_charge
+        self.charge_scale = charge_scale
+
+        self.mlp = build_mlp(
+            input_size=latent_dim,
+            hidden_layer_sizes=[mlp_hidden_dim] * (num_mlp_layers - 1),
+            output_size=1,
+            activation=activation,
+        )
+
+    def forward(self, node_features: torch.Tensor, batch: AtomGraphs) -> torch.Tensor:
+        """Predict per-atom charges.
+
+        Args:
+            node_features: (n_atoms, latent_dim)
+            batch: AtomGraphs with batch indices
+
+        Returns:
+            latent_charges: (n_atoms, 1)
+        """
+        charges = self.mlp(node_features)
+
+        if self.enforce_total_charge:
+            # Center charges to zero mean per system
+            mean_charges = segment_ops.aggregate_nodes(charges, batch.n_node, reduction="mean")
+            charges = charges - mean_charges[batch.node_batch_index]
+
+            # If total_charge is available, shift charges to match it
+            if batch.system_features is not None and "total_charge" in batch.system_features:
+                total_charge = batch.system_features["total_charge"].to(dtype=charges.dtype)
+                charge_shift = total_charge / batch.n_node.to(dtype=charges.dtype)
+                charges = charges + charge_shift.unsqueeze(-1)[batch.node_batch_index]
+
+        charges = charges * self.charge_scale
+
+        return charges
+
+
+class LatentSpinHead(torch.nn.Module):
+    """Predicts per-atom latent spins for energy conditioning from node features.
+
+    Spins are learned purely from energy/force supervision.
+    Constraint: per-atom spins sum to 2S (= spin_multiplicity - 1).
+    """
+
+    def __init__(
+        self,
+        latent_dim: int,
+        num_mlp_layers: int = 1,
+        mlp_hidden_dim: int = 128,
+        enforce_spin_constraint: bool = True,
+        activation: str = "ssp",
+    ):
+        super().__init__()
+        self.latent_dim = latent_dim
+        self.enforce_spin_constraint = enforce_spin_constraint
+
+        self.mlp = build_mlp(
+            input_size=latent_dim,
+            hidden_layer_sizes=[mlp_hidden_dim] * (num_mlp_layers - 1),
+            output_size=1,
+            activation=activation,
+        )
+
+    def forward(self, node_features: torch.Tensor, batch: AtomGraphs) -> torch.Tensor:
+        """Predict per-atom spins.
+
+        Args:
+            node_features: (n_atoms, latent_dim)
+            batch: AtomGraphs with batch indices
+
+        Returns:
+            latent_spins: (n_atoms, 1)
+        """
+        spins = self.mlp(node_features)
+
+        if self.enforce_spin_constraint:
+            # Center spins to zero mean per system
+            mean_spins = segment_ops.aggregate_nodes(spins, batch.n_node, reduction="mean")
+            spins = spins - mean_spins[batch.node_batch_index]
+
+            # Shift spins so they sum to 2S = spin_multiplicity - 1 per system
+            if batch.system_features is not None and "spin_multiplicity" in batch.system_features:
+                spin_multiplicity = batch.system_features["spin_multiplicity"].to(dtype=spins.dtype)
+                total_spin = spin_multiplicity - 1  # 2S = multiplicity - 1
+                spin_shift = total_spin / batch.n_node.to(dtype=spins.dtype)
+                spins = spins + spin_shift.unsqueeze(-1)[batch.node_batch_index]
+
+        return spins
