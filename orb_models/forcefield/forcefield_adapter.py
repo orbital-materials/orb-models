@@ -497,6 +497,7 @@ def _get_charge_and_spin(atoms: ase.Atoms | ts.SimState) -> dict[str, torch.Tens
     elif (
         _TORCH_SIM_AVAILABLE
         and isinstance(atoms, ts.SimState)
+        and (atoms.has_extras("charge") or atoms.has_extras("spin"))
         and (atoms.charge is not None or atoms.spin is not None)
     ):
         assert atoms.charge is not None and atoms.spin is not None, (
