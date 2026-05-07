@@ -27,6 +27,12 @@ Alternatively, you can use Docker to run orb-models; [see instructions below](#d
 * TorchSim wrapper for batched optimisation and simulation, see [usage with TorchSim](#usage-with-torchsim)
 * Alchemi-based D3 dispersion correction module, see [D3 correction](#d3-correction)
 
+**May 2026**: Release of OrbMol-v2 — extends the OrbMol architecture with learnable per-atom electrostatics:
+
+* New `LatentChargeHead` and `LatentSpinHead` predict per-atom charges and spins (constrained to sum to the system total charge / 2S = `spin_multiplicity − 1`), and a `CoulombModule` adds long-range Coulomb energy on top of the GNN — bare 1/r direct sum for non-periodic systems, Particle Mesh Ewald via `nvalchemiops` for periodic.
+* The energy head (`ChargeConditionedEnergyHead`) is conditioned on the predicted charges and spins per atom.
+* Trained on OMol25 (ωB97M-V/def2-TZVPD); load with `pretrained.orbmol_v2(device="cuda")`.
+
 **August 2025**: Release of the [OrbMol potentials](https://www.orbitalindustries.com/posts/orbmol-extending-orb-to-molecular-systems):
 
 * Trained on the [Open Molecules 2025 (OMol25)](https://arxiv.org/pdf/2505.08762) dataset—over 100M high-accuracy DFT calculations (ωB97M-V/def2-TZVPD) on diverse molecular systems including metal complexes, biomolecules, and electrolytes.

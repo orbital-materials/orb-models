@@ -21,9 +21,13 @@ class CoulombModule(torch.nn.Module):
     Charge-equilibration forces and virial are obtained via autograd through the energy.
     Spatial forces and virial are zero for non-periodic systems (autograd handles them).
 
-    Non-periodic — erf-damped direct Coulomb sum (fully differentiable):
+    Non-periodic — direct Coulomb sum (fully differentiable):
 
-        E = k/2 Σ_{i≠j} q_i q_j erf(r_ij / σ√2) / r_ij
+        E = k/2 Σ_{i≠j} q_i q_j / r_ij
+
+    With `direct_coulomb_erf_damping_sigma` set, the pair term is multiplied by
+    erf(r_ij / σ√2) for short-range damping; with the default `None`, the sum is
+    bare 1/r.
 
     Periodic — Particle Mesh Ewald via nvalchemiops (explicit forces/virial,
     surrogate energy for charge gradients):
@@ -34,7 +38,7 @@ class CoulombModule(torch.nn.Module):
         E_self        = Σ_i (α / √(2π)) q_i²
         E_background  = (π / 2α²V) Q_total²
 
-    where k = COULOMB_CONSTANT ≈ 14.33 eV·Å/e² (absorbed into scaled charges
+    where k = COULOMB_CONSTANT ≈ 14.40 eV·Å/e² (absorbed into scaled charges
     for the nvalchemiops call, which computes unitless q_i q_j / r).
     """
 
@@ -85,7 +89,7 @@ class CoulombModule(torch.nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Compute per-system electrostatic energy, forces, and virial.
 
-        For non-periodic systems we using direct Coulomb sum, for periodic systems we use Particle Mesh Ewald.
+        For non-periodic systems we use the direct Coulomb sum; for periodic systems we use Particle Mesh Ewald.
 
         Args:
             latent_charges: (n_atoms, 1) predicted charges (must require grad).
@@ -167,8 +171,10 @@ class CoulombModule(torch.nn.Module):
         n_node: torch.Tensor,
         n_systems: int,
     ) -> torch.Tensor:
-        """Vectorized direct Coulomb sum (fully connected, erf-damped) for non-periodic systems.
+        """Vectorized direct Coulomb sum (fully connected) for non-periodic systems.
 
+        Bare 1/r when `direct_coulomb_erf_damping_sigma` is None (default);
+        erf-damped at the given sigma otherwise.
         Scales as O(N²) in total atoms N (all N(N−1) pairs are computed and stored).
         """
         # Create fully connected senders and receivers (no self-loops)

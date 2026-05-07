@@ -619,10 +619,8 @@ class ConfidenceHead(torch.nn.Module):
 class ChargeConditionedEnergyHead(EnergyHead):
     """Energy head that conditions on per-atom charges (and optionally spins).
 
-    Unlike EnergyHead, this module applies the MLP per-atom and then aggregates,
-    rather than aggregating node features first. This preserves size-consistency:
-    for two non-interacting subsystems A and B (separated by more than the GNN
-    cutoff), E(A ∪ B) == E(A) + E(B).
+    Unlike EnergyHead, this module applies the MLP per-atom and then sum-pools,
+    rather than aggregating node features first.
 
     Requires a latent_charges head (and optionally latent_spins) on the regressor to provide charges.
     """
@@ -686,9 +684,7 @@ class ChargeConditionedEnergyHead(EnergyHead):
         """Return interaction energy in physical units, conditioned on per-atom charges/spins.
 
         Applies the MLP per-atom (with charges/spins as extra features),
-        denormalizes each atom's contribution, then sums over atoms per
-        system. Sum-pooling preserves size-consistency:
-        E(A ∪ B) = E(A) + E(B) for non-interacting subsystems.
+        denormalizes each atom's contribution, then sum-pools to a per-system value.
 
         Shape: (n_graphs,).
         """
