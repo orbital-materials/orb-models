@@ -1113,8 +1113,8 @@ def orbmol_v2_architecture(
 ) -> ConservativeForcefieldRegressor:
     """The OrbMol-v2 architecture with learnable electrostatics.
 
-    Mirrors the s11doh8x training config from orb-meta libs/core. The Coulomb
-    module uses defaults (no erf damping) and the LatentChargeHead enforces total charge.
+    The Coulomb module uses defaults (no erf damping for non-periodic systems);
+    the LatentChargeHead enforces total charge.
     """
     conditioner = ChargeSpinConditioner(latent_dim)
     coulomb = CoulombModule()
@@ -1188,10 +1188,8 @@ def orbmol_v2(
 ) -> tuple[ConservativeForcefieldRegressor, ForcefieldAtomsAdapter]:
     """Load OrbMol-v2 with learnable electrostatics (charges, spins, Coulomb).
 
-    Public release is the s11doh8x wandb run, trained on OMol25 (ωB97M-V/def2-TZVPD).
-    The checkpoint at `weights_path` is a flat state_dict with EMA shadow params already
-    applied — produced from the wandb training artifact via
-    `core/scripts/misc/export_model.py` (the same tool used for all other public orb-models).
+    Trained on OMol25 (ωB97M-V/def2-TZVPD). The checkpoint at `weights_path` is a
+    flat state_dict with EMA shadow params already applied.
     """
     if compile is None and train:
         compile = False

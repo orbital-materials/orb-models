@@ -2,10 +2,6 @@
 
 Downloads ~100 MB on first run (cached_path caches it). Disabled by default to keep
 the unit-test suite fast — set ORB_RUN_NETWORK_TESTS=1 to enable.
-
-Gold values match orb-meta libs/core tests for s11doh8x:v199 with EMA applied,
-CPU fp32, atol=1e-5 on energies/forces/stress (see test_backwards_compatibility.py
-in orb-meta).
 """
 
 import os
@@ -15,7 +11,8 @@ import pytest
 import torch
 from ase.build import bulk, molecule
 
-# Gold values from orb-meta libs/core/tests/expensive_tests/test_backwards_compatibility.py
+# Reference values for the released OrbMol-v2 checkpoint, CPU fp32.
+# atol=1e-5 on energy / forces / stress.
 H2O_ENERGY_GOLD = np.array(-2079.86339)
 H2O_FORCES_0_GOLD = np.array([-1.0472e-04, 2.5031e-04, -4.8726e-01])
 CU_ENERGY_GOLD = np.array(-178549.38604)

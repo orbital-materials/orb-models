@@ -11,14 +11,6 @@ from orb_models.common.atoms.batch.graph_batch import AtomGraphs
 from orb_models.common.atoms.graph_featurization import _compute_neighbor_list_with_fallback
 from orb_models.common.models.segment_ops import aggregate_nodes, segment_sum
 
-# TODO (vaidas): Remove this comment once we have models trained with the new value.
-# norm_factor = 1/(2*epsilon_0) = 90.0474 with epsilon_0 = 5.55263e-3 e^2/(eV*A).
-# The effective Coulomb constant is norm_factor / (2*pi) ≈ 14.3315 eV·Å/e².
-# The true physical value is 14.3996 eV·Å/e² — ~0.47% low. We keep this value
-# for backward compatibility: trained models learned charges that absorb this
-# constant, so changing it would break existing checkpoints.
-# NORM_FACTOR = 90.0474
-# COULOMB_CONSTANT = NORM_FACTOR / (2.0 * math.pi)  # ~14.3315 eV*A/e^2
 COULOMB_CONSTANT = 14.3996  # eV*A/e^2
 
 
@@ -82,7 +74,6 @@ class CoulombModule(torch.nn.Module):
         self.pme_accuracy = pme_accuracy
         self.pme_spline_order = pme_spline_order
 
-        # TODO (vaidas): We should store coulomb_constant in a *persistent* buffer instead.
         self.register_buffer("coulomb_constant", torch.tensor(coulomb_constant), persistent=False)
 
     def forward(
@@ -168,8 +159,6 @@ class CoulombModule(torch.nn.Module):
 
         return energy, explicit_forces, explicit_virial
 
-    # TODO (Vaidas): Replace with nvalchemiops coulomb_energy(): https://nvidia.github.io/nvalchemi-toolkit-ops/modules/torch/electrostatics.html#nvalchemiops.torch.interactions.electrostatics.coulomb_energy
-    # The nvalchemiops implementation currently does not support double differentiation. So we should swap after this is fixed.
     def _direct_coulomb(
         self,
         charges: torch.Tensor,
