@@ -126,6 +126,8 @@ def load_model(
 
     # Freeze the parameters
     if not train:
+        model.prepare_for_inference()
+        model = model.eval()
         for param in model.parameters():
             param.requires_grad = False
 
@@ -212,30 +214,64 @@ def orb_v3_conservative_architecture(
     activation: str = "silu",
     has_charge_spin_cond: bool = False,
     has_stress: bool = True,
+    has_electrostatics: bool = False,
     device: torch.device | str | None = None,
 ) -> ConservativeForcefieldRegressor:
-    """The orb-v3 conservative architecture."""
-    if has_charge_spin_cond:
+    """The orb-v3 conservative architecture.
+
+    When has_electrostatics is True, the energy head is replaced with a
+    ChargeConditionedEnergyHead, latent charge/spin heads are added, and a
+    CoulombModule provides long-range electrostatics.
+    """
+    if has_charge_spin_cond or has_electrostatics:
         conditioner = ChargeSpinConditioner(latent_dim)
     else:
         conditioner = None
 
+    if has_electrostatics:
+        energy_head: EnergyHead = ChargeConditionedEnergyHead(
+            latent_dim=latent_dim,
+            num_mlp_layers=head_mlp_depth,
+            mlp_hidden_dim=head_mlp_hidden_dim,
+            predict_atom_avg=True,
+            activation=activation,
+            use_spins=True,
+        )
+    else:
+        energy_head = EnergyHead(
+            latent_dim=latent_dim,
+            num_mlp_layers=head_mlp_depth,
+            mlp_hidden_dim=head_mlp_hidden_dim,
+            predict_atom_avg=True,
+            activation=activation,
+        )
+
+    heads: dict[str, ForcefieldHead | ConfidenceHead] = {
+        "energy": energy_head,
+        "confidence": ConfidenceHead(
+            latent_dim=latent_dim,
+            num_mlp_layers=head_mlp_depth,
+            mlp_hidden_dim=head_mlp_hidden_dim,
+            activation=activation,
+        ),
+    }
+    if has_electrostatics:
+        heads["latent_charges"] = LatentChargeHead(  # type: ignore[assignment]
+            latent_dim=latent_dim,
+            num_mlp_layers=2,
+            mlp_hidden_dim=128,
+            enforce_total_charge=True,
+            activation=activation,
+        )
+        heads["latent_spins"] = LatentSpinHead(  # type: ignore[assignment]
+            latent_dim=latent_dim,
+            num_mlp_layers=2,
+            mlp_hidden_dim=128,
+            activation=activation,
+        )
+
     model = ConservativeForcefieldRegressor(
-        heads={
-            "energy": EnergyHead(
-                latent_dim=latent_dim,
-                num_mlp_layers=head_mlp_depth,
-                mlp_hidden_dim=head_mlp_hidden_dim,
-                predict_atom_avg=True,
-                activation=activation,
-            ),
-            "confidence": ConfidenceHead(
-                latent_dim=latent_dim,
-                num_mlp_layers=head_mlp_depth,
-                mlp_hidden_dim=head_mlp_hidden_dim,
-                activation=activation,
-            ),
-        },
+        heads=heads,
         model=MoleculeGNS(
             latent_dim=latent_dim,
             num_message_passing_steps=num_message_passing_steps,
@@ -265,6 +301,7 @@ def orb_v3_conservative_architecture(
         ensure_grad_loss_weights=False,
         pair_repulsion=True,
         has_stress=has_stress,
+        coulomb_module=CoulombModule() if has_electrostatics else None,
     )
     device = get_device(device)
     if device is not None and device != torch.device("cpu"):
@@ -364,6 +401,40 @@ def orb_v3_direct_architecture(
     return model
 
 
+def orbmol_v2(
+    weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orbmol-v2-s11doh8x-20260507.ckpt",
+    device: torch.device | str | None = None,
+    precision: str = "float32-high",
+    compile: bool | None = None,
+    train: bool = False,
+) -> tuple[ConservativeForcefieldRegressor, ForcefieldAtomsAdapter]:
+    """Load OrbMol-v2 with learnable electrostatics (charges, spins, Coulomb).
+
+    Trained on OMol25 and OPoly26 (ωB97M-V/def2-TZVPD).
+    """
+    if compile is None and train:
+        compile = False
+    assert not (train and _should_compile(device, compile)), (
+        "Cannot compile a conservative model in training mode."
+    )
+
+    atoms_adapter = ForcefieldAtomsAdapter(
+        radius=6.0,
+        max_num_neighbors=120,
+        extra_features={"graph": ["total_charge", "spin_multiplicity"]},
+    )
+    model = orb_v3_conservative_architecture(
+        has_charge_spin_cond=True,
+        has_stress=False,
+        has_electrostatics=True,
+        device=device,
+    )
+    model = load_model(
+        model, weights_path, device, precision=precision, compile=compile, train=train
+    )
+    return model, atoms_adapter
+
+
 def orb_v3_conservative_omol(
     weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orb-v3-conservative-omol-20250820.ckpt",  # noqa: E501
     device: torch.device | str | None = None,
@@ -416,6 +487,9 @@ def orb_v3_conservative_omol(
         train_reference_energies=train_reference_energies,
         loss_weights=loss_weights,
     )
+    # BC: old orb-v3 conservative models were (incorrectly) trained with mean-aggregation ZBL.
+    # New code only uses sum-aggregation. So we need to set the node_aggregation to mean here, for the old models to work.
+    model.pair_repulsion_fn.node_aggregation = "mean"
 
     return model, atoms_adapter
 
@@ -512,6 +586,9 @@ def orb_v3_conservative_20_omat(
         train_reference_energies=train_reference_energies,
         loss_weights=loss_weights,
     )
+    # BC: old orb-v3 conservative models were (incorrectly) trained with mean-aggregation ZBL.
+    # New code only uses sum-aggregation. So we need to set the node_aggregation to mean here, for the old models to work.
+    model.pair_repulsion_fn.node_aggregation = "mean"
 
     return model, atoms_adapter
 
@@ -561,6 +638,9 @@ def orb_v3_conservative_inf_omat(
         train_reference_energies=train_reference_energies,
         loss_weights=loss_weights,
     )
+    # BC: old orb-v3 conservative models were (incorrectly) trained with mean-aggregation ZBL.
+    # New code only uses sum-aggregation. So we need to set the node_aggregation to mean here, for the old models to work.
+    model.pair_repulsion_fn.node_aggregation = "mean"
 
     return model, atoms_adapter
 
@@ -690,6 +770,9 @@ def orb_v3_conservative_20_mpa(
         train_reference_energies=train_reference_energies,
         loss_weights=loss_weights,
     )
+    # BC: old orb-v3 conservative models were (incorrectly) trained with mean-aggregation ZBL.
+    # New code only uses sum-aggregation. So we need to set the node_aggregation to mean here, for the old models to work.
+    model.pair_repulsion_fn.node_aggregation = "mean"
 
     return model, atoms_adapter
 
@@ -739,6 +822,9 @@ def orb_v3_conservative_inf_mpa(
         train_reference_energies=train_reference_energies,
         loss_weights=loss_weights,
     )
+    # BC: old orb-v3 conservative models were (incorrectly) trained with mean-aggregation ZBL.
+    # New code only uses sum-aggregation. So we need to set the node_aggregation to mean here, for the old models to work.
+    model.pair_repulsion_fn.node_aggregation = "mean"
 
     return model, atoms_adapter
 
@@ -1101,120 +1187,20 @@ def orb_v1_mptraj_only(
     _deprecated_model("orb-mptraj-only-v1")
 
 
-def orbmol_v2_architecture(
-    latent_dim: int = 256,
-    base_mlp_hidden_dim: int = 1024,
-    base_mlp_depth: int = 2,
-    head_mlp_hidden_dim: int = 256,
-    head_mlp_depth: int = 1,
-    num_message_passing_steps: int = 5,
-    activation: str = "silu",
-    device: torch.device | str | None = None,
-) -> ConservativeForcefieldRegressor:
-    """The OrbMol-v2 architecture with learnable electrostatics.
-
-    The Coulomb module uses defaults (no erf damping for non-periodic systems);
-    the LatentChargeHead enforces total charge.
-    """
-    conditioner = ChargeSpinConditioner(latent_dim)
-    coulomb = CoulombModule()
-
-    model = ConservativeForcefieldRegressor(
-        heads={
-            "energy": ChargeConditionedEnergyHead(
-                latent_dim=latent_dim,
-                num_mlp_layers=head_mlp_depth,
-                mlp_hidden_dim=head_mlp_hidden_dim,
-                predict_atom_avg=True,
-                activation=activation,
-                reference_energy="omol25-hof-lin",
-                use_spins=True,
-            ),
-            "confidence": ConfidenceHead(
-                latent_dim=latent_dim,
-                num_mlp_layers=head_mlp_depth,
-                mlp_hidden_dim=head_mlp_hidden_dim,
-                activation=activation,
-            ),
-            "latent_charges": LatentChargeHead(
-                latent_dim=latent_dim,
-                num_mlp_layers=2,
-                mlp_hidden_dim=128,
-                enforce_total_charge=True,
-                activation=activation,
-            ),
-            "latent_spins": LatentSpinHead(
-                latent_dim=latent_dim,
-                num_mlp_layers=2,
-                mlp_hidden_dim=128,
-                activation=activation,
-            ),
-        },
-        model=MoleculeGNS(
-            latent_dim=latent_dim,
-            num_message_passing_steps=num_message_passing_steps,
-            num_mlp_layers=base_mlp_depth,
-            mlp_hidden_dim=base_mlp_hidden_dim,
-            rbf_transform=BesselBasis(r_max=6.0, num_bases=8),
-            angular_transform=SphericalHarmonics(lmax=3, normalize=True, normalization="component"),
-            outer_product_with_cutoff=True,
-            use_embedding=True,
-            interaction_params={"distance_cutoff": True, "attention_gate": "sigmoid"},
-            node_feature_names=["feat"],
-            edge_feature_names=["feat"],
-            conditioner=conditioner,
-            activation=activation,
-            mlp_norm="rms_norm",
-        ),
-        pair_repulsion=True,
-        pair_repulsion_node_aggregation="sum",
-        has_stress=False,
-        coulomb_module=coulomb,
-    )
-    device = get_device(device)
-    if device is not None and device != torch.device("cpu"):
-        model.cuda(device)
-    else:
-        model = model.cpu()
-    return model
-
-
-def orbmol_v2(
-    weights_path: str = "https://huggingface.co/orbital-materials/orbmol-v2/resolve/main/orbmol-v2-s11doh8x-20260507.ckpt",  # noqa: E501
-    device: torch.device | str | None = None,
-    precision: str = "float32-high",
-    compile: bool | None = None,
-    train: bool = False,
-) -> tuple[ConservativeForcefieldRegressor, ForcefieldAtomsAdapter]:
-    """Load OrbMol-v2 with learnable electrostatics (charges, spins, Coulomb).
-
-    Trained on OMol25 (ωB97M-V/def2-TZVPD). The checkpoint at `weights_path` is a
-    flat state_dict with EMA shadow params already applied.
-    """
-    if compile is None and train:
-        compile = False
-    assert not (train and _should_compile(device, compile)), (
-        "Cannot compile a conservative model in training mode."
-    )
-
-    atoms_adapter = ForcefieldAtomsAdapter(
-        radius=6.0,
-        max_num_neighbors=120,
-        extra_features={"graph": ["total_charge", "spin_multiplicity"]},
-    )
-    model = orbmol_v2_architecture(device=device)
-    model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
-    )
-    return model, atoms_adapter
+# Define an alias for orbmol-v1 models
+orbmol_v1_conservative = orb_v3_conservative_omol
+orbmol_v1_direct = orb_v3_direct_omol
 
 
 ORB_PRETRAINED_MODELS = {
     # orbmol-v2 (learnable electrostatics)
     "orbmol-v2": orbmol_v2,
-    # orb-v3 omol models
+    # orbmol-v1 models
     "orb-v3-conservative-omol": orb_v3_conservative_omol,
     "orb-v3-direct-omol": orb_v3_direct_omol,
+    # orbmol-v1 model aliases
+    "orbmol-v1-conservative": orbmol_v1_conservative,
+    "orbmol-v1-direct": orbmol_v1_direct,
     # most performant orb-v3 omat models
     "orb-v3-conservative-20-omat": orb_v3_conservative_20_omat,
     "orb-v3-conservative-inf-omat": orb_v3_conservative_inf_omat,

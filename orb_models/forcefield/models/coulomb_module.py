@@ -21,13 +21,9 @@ class CoulombModule(torch.nn.Module):
     Charge-equilibration forces and virial are obtained via autograd through the energy.
     Spatial forces and virial are zero for non-periodic systems (autograd handles them).
 
-    Non-periodic — direct Coulomb sum (fully differentiable):
+    Non-periodic — erf-damped direct Coulomb sum (fully differentiable):
 
-        E = k/2 Σ_{i≠j} q_i q_j / r_ij
-
-    With `direct_coulomb_erf_damping_sigma` set, the pair term is multiplied by
-    erf(r_ij / σ√2) for short-range damping; with the default `None`, the sum is
-    bare 1/r.
+        E = k/2 Σ_{i≠j} q_i q_j erf(r_ij / σ√2) / r_ij
 
     Periodic — Particle Mesh Ewald via nvalchemiops (explicit forces/virial,
     surrogate energy for charge gradients):
@@ -38,47 +34,25 @@ class CoulombModule(torch.nn.Module):
         E_self        = Σ_i (α / √(2π)) q_i²
         E_background  = (π / 2α²V) Q_total²
 
-    where k = COULOMB_CONSTANT ≈ 14.40 eV·Å/e² (absorbed into scaled charges
+    where k = COULOMB_CONSTANT = 14.3996 eV·Å/e² (absorbed into scaled charges
     for the nvalchemiops call, which computes unitless q_i q_j / r).
     """
 
     coulomb_constant: torch.Tensor
 
-    _deprecated_kwargs: list[str] = [
-        "use_pme",
-        "direct_coulomb_erf_damping_sigma",
-        "accuracy",
-        "spline_order",
-    ]
-
     def __init__(
         self,
         direct_coulomb_erf_damping_sigma: float | None = None,
-        coulomb_constant: float = COULOMB_CONSTANT,
         pme_accuracy: float = 1e-6,
         pme_spline_order: int = 4,
-        **kwargs,
     ):
         super().__init__()
-        # For BC
-        if "sigma" in kwargs:
-            direct_coulomb_erf_damping_sigma = kwargs.pop("sigma")
-        if "accuracy" in kwargs:
-            pme_accuracy = kwargs.pop("accuracy")
-        if "spline_order" in kwargs:
-            pme_spline_order = kwargs.pop("spline_order")
-        for kwarg in kwargs:
-            if kwarg not in self._deprecated_kwargs:
-                raise ValueError(
-                    f"Unknown kwargs: {kwarg}, expected only backward compatible kwargs "
-                    f"from {self._deprecated_kwargs}"
-                )
 
         self.direct_coulomb_erf_damping_sigma = direct_coulomb_erf_damping_sigma
         self.pme_accuracy = pme_accuracy
         self.pme_spline_order = pme_spline_order
 
-        self.register_buffer("coulomb_constant", torch.tensor(coulomb_constant), persistent=False)
+        self.register_buffer("coulomb_constant", torch.tensor(COULOMB_CONSTANT), persistent=True)
 
     def forward(
         self,
@@ -171,10 +145,8 @@ class CoulombModule(torch.nn.Module):
         n_node: torch.Tensor,
         n_systems: int,
     ) -> torch.Tensor:
-        """Vectorized direct Coulomb sum (fully connected) for non-periodic systems.
+        """Vectorized direct Coulomb sum (fully connected, optionally erf-damped) for non-periodic systems.
 
-        Bare 1/r when `direct_coulomb_erf_damping_sigma` is None (default);
-        erf-damped at the given sigma otherwise.
         Scales as O(N²) in total atoms N (all N(N−1) pairs are computed and stored).
         """
         # Create fully connected senders and receivers (no self-loops)

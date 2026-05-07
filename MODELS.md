@@ -7,8 +7,8 @@ We provide several pretrained models that can be used to calculate energies, for
 These models are a continuation of the [`orb-v3`](#v3-models) series trained on the [Open Molecules 2025 (OMol25)](https://arxiv.org/pdf/2505.08762) dataset—over 100M high-accuracy DFT calculations (ωB97M-V/def2-TZVPD) on diverse molecular systems including metal complexes, biomolecules, and electrolytes. Note: The training data does not contain periodic systems and these models have not been carefully tested on periodic systems. 
 
 There are two options:
-* `orb-v3-conservative-omol`
-* `orb-v3-direct-omol`
+* `orbmol-v1-conservative`
+* `orbmol-v1-direct`
 
 See below for more explanation of this naming convention. Both models have `inf` neighbors, ensuring a continuous PES.
 
@@ -18,7 +18,7 @@ See below for more explanation of this naming convention. Both models have `inf`
 
 OrbMol-v2 extends the OrbMol architecture with **learnable per-atom electrostatics**: a `LatentChargeHead` predicts per-atom partial charges (constrained to sum to the system total charge), a `LatentSpinHead` predicts per-atom spins (constrained to sum to 2S = `spin_multiplicity − 1`), and a `CoulombModule` adds a long-range Coulomb energy on top of the GNN — direct bare-1/r Coulomb sum for non-periodic systems, Particle Mesh Ewald via `nvalchemiops` for periodic systems. The energy head (`ChargeConditionedEnergyHead`) is conditioned on the predicted charges and spins per-atom.
 
-Trained on OMol25 (ωB97M-V/def2-TZVPD); supports both periodic and non-periodic systems. Stress is enabled via `model.enable_stress()` if needed.
+Trained on OMol25 and OPoly26 (ωB97M-V/def2-TZVPD); supports both periodic and non-periodic systems. Stress is enabled via `model.enable_stress()` if needed.
 
 ```python
 from orb_models.forcefield.pretrained import orbmol_v2

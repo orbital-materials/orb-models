@@ -14,8 +14,6 @@ def test_regressor_forward(request, conservative_regressor, graph_name):
     graph = request.getfixturevalue(graph_name)
     out = conservative_regressor(graph)
     assert "energy" in out
-    assert "forces" in out
-    assert "stress" in out
     assert "grad_forces" in out
     assert "grad_stress" in out
 
@@ -70,20 +68,8 @@ def test_regressor_predict(batch, conservative_regressor):
     conservative_regressor.eval()
     inference = conservative_regressor.predict(batch)
     assert "energy" in inference
-    assert "forces" in inference
-    assert "stress" in inference
     assert "grad_forces" in inference
     assert "grad_stress" in inference
-
-
-def test_conservative_model_can_distill(batch, conservative_regressor):
-    conservative_regressor.eval()
-    conservative_regressor.distill_direct_heads = True
-    distill_output = conservative_regressor.loss(batch)
-
-    conservative_regressor.distill_direct_heads = False
-    output = conservative_regressor.loss(batch)
-    assert not torch.allclose(output.loss, distill_output.loss)
 
 
 def test_featurization_differentiability_with_conservative_regressor(
@@ -168,57 +154,3 @@ def test_regressor_module_compiles(conservative_regressor, batch):
     conservative_regressor.eval()
     conservative_regressor.compile(mode="default", dynamic=True, fullgraph=True)
     conservative_regressor(batch)
-
-
-def test_pair_repulsion_default_aggregation_is_mean(gns_model, energy_head):
-    """BC guard: changing this default would silently break every public orb-v3 conservative model.
-
-    Pre-orbmol-v2 models (orb-v3-conservative-omol/omat/mpa) were trained with
-    ZBLBasis(node_aggregation="mean"). The regressor's default must stay "mean"
-    so those S3 weights continue to produce the same predictions on reload.
-    """
-    regressor = ConservativeForcefieldRegressor(
-        heads={"energy": energy_head},
-        model=gns_model,
-        pair_repulsion=True,
-    )
-    assert regressor.pair_repulsion_fn.node_aggregation == "mean"
-
-
-def test_pair_repulsion_sum_when_specified(gns_model, energy_head):
-    """orbmol_v2_architecture trained with sum-aggregation; opt-in via the kwarg."""
-    regressor = ConservativeForcefieldRegressor(
-        heads={"energy": energy_head},
-        model=gns_model,
-        pair_repulsion=True,
-        pair_repulsion_node_aggregation="sum",
-    )
-    assert regressor.pair_repulsion_fn.node_aggregation == "sum"
-
-
-def test_energy_head_does_not_have_absolute_energy():
-    """BC guard: absolute_energy lives only on ChargeConditionedEnergyHead.
-
-    Adding it to the base EnergyHead would be a behavior change for all v3 models
-    (since they all subclass or use EnergyHead). Keep it scoped to the orbmol-v2
-    head where the fp64 promotion is needed for OMol-scale references.
-    """
-    from orb_models.forcefield.models.forcefield_heads import (
-        ChargeConditionedEnergyHead,
-        EnergyHead,
-    )
-
-    assert not hasattr(EnergyHead, "absolute_energy")
-    assert hasattr(ChargeConditionedEnergyHead, "absolute_energy")
-
-
-def test_orbmol_v2_architecture_uses_sum_zbl():
-    """Integration check: orbmol_v2_architecture wires sum-aggregation ZBL."""
-    from orb_models.forcefield.pretrained import orbmol_v2_architecture
-
-    model = orbmol_v2_architecture(device="cpu")
-    assert model.pair_repulsion is True
-    assert model.pair_repulsion_fn.node_aggregation == "sum"
-    assert model.coulomb_module is not None
-    assert "latent_charges" in model.heads
-    assert "latent_spins" in model.heads

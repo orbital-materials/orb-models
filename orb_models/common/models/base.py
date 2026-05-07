@@ -36,6 +36,9 @@ class ModelMixin[T: AbstractAtomBatch](torch.nn.Module):
         """Encodes to latents before message passing."""
         raise NotImplementedError()
 
+    def prepare_for_inference(self) -> None:
+        """Hook called before inference. Override to enable inference-only features."""
+
 
 class RegressorModelMixin[T: AbstractAtomBatch](ModelMixin[T]):
     """Model Mixin for our regression models."""

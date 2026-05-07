@@ -12,7 +12,7 @@ from orb_models.forcefield.models.forcefield_utils import (
 
 
 def stress_loss_function(
-    pred: torch.Tensor,
+    raw_pred: torch.Tensor,
     raw_target: torch.Tensor,
     raw_gold_target: torch.Tensor,
     name: str,
@@ -20,24 +20,24 @@ def stress_loss_function(
     loss_type: Literal["mae", "mse", "huber_0.01"] = "huber_0.01",
 ):
     """Stress loss and metrics."""
-    pred = pred.squeeze(-1)
+    raw_pred = raw_pred.squeeze(-1)
     raw_target = raw_target.squeeze(-1)
-    assert pred.shape == raw_target.shape, f"{pred.shape} != {raw_target.shape}"
+    assert raw_pred.shape == raw_target.shape, f"{raw_pred.shape} != {raw_target.shape}"
 
-    target = normalizer(raw_target)
+    target = normalizer(raw_target, online=None)
+    pred = normalizer(raw_pred, online=False)
     loss = mean_error(pred, target, loss_type)
-    raw_pred = normalizer.inverse(pred)
     metrics = {
         f"{name}_loss": loss,
-        f"{name}_mae_raw": torch.abs(raw_pred - raw_gold_target).mean(),
-        f"{name}_mse_raw": ((raw_pred - raw_gold_target) ** 2).mean(),
+        f"{name}_mae_raw": torch.abs(raw_pred - raw_gold_target.squeeze(-1)).mean(),
+        f"{name}_mse_raw": ((raw_pred - raw_gold_target.squeeze(-1)) ** 2).mean(),
     }
 
     return base.ModelOutput(loss=loss, log=metrics)
 
 
 def forces_loss_function(
-    pred: torch.Tensor,
+    raw_pred: torch.Tensor,
     raw_target: torch.Tensor,
     raw_gold_target: torch.Tensor,
     name: str,
@@ -48,14 +48,15 @@ def forces_loss_function(
     training: bool = True,
 ):
     """Compute forces loss and metrics."""
-    pred = pred.squeeze(-1)
+    raw_pred = raw_pred.squeeze(-1)
     raw_target = raw_target.squeeze(-1)
 
     # remove before applying normalizer
-    pred, raw_target, batch_n_node = remove_fixed_atoms(
-        pred, raw_target, n_node, fix_atoms, training
+    raw_pred, raw_target, batch_n_node = remove_fixed_atoms(
+        raw_pred, raw_target, n_node, fix_atoms, training
     )
-    target = normalizer(raw_target)
+    target = normalizer(raw_target, online=None)
+    pred = normalizer(raw_pred, online=False)
     assert pred.shape == target.shape, f"{pred.shape} != {target.shape}"
 
     if loss_type.startswith("condhuber"):
@@ -63,8 +64,6 @@ def forces_loss_function(
         loss = _conditional_huber_force_loss(pred, target, huber_delta)
     else:
         loss = mean_error(pred, target, loss_type, batch_n_node)  # type: ignore
-
-    raw_pred = normalizer.inverse(pred)
 
     metrics = force_metrics(raw_pred, raw_gold_target.squeeze(-1), batch_n_node, name)
     metrics[f"{name}_loss"] = loss

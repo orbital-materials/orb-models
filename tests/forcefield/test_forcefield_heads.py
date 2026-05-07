@@ -64,7 +64,7 @@ def test_energy_head_initialization(energy_head):
 def test_energy_head_forward(energy_head, batch):
     node_features = batch.node_features[_KEY]
     output = energy_head.forward(node_features, batch)
-    assert output.shape == (batch.n_node.shape[0], 1)
+    assert output.shape == (batch.n_node.shape[0],)
 
 
 def test_energy_head_can_predict(energy_head, batch):
@@ -84,6 +84,33 @@ def test_energy_head_loss(energy_head, batch):
     assert torch.isfinite(model_output.loss)
     assert "energy_loss" in model_output.log
     assert "energy_mae_raw" in model_output.log
+
+
+def test_energy_head_absolute_energy_preserves_kjmol_at_scale(energy_head, batch):
+    """absolute_energy preserves sub-kJ/mol interaction energy against a large reference.
+
+    Reference energies can reach ~1e5 eV for Omol. Naive fp32 add of `interaction_energy + reference`
+    rounds sub-kJ/mol interaction energies away. The fp64 upcast inside absolute_energy preserves them.
+    """
+    sub_kjmol = 0.005  # eV, half a kJ/mol
+    large_ref = 1e5  # eV per graph
+
+    n_atoms = int(batch.n_node[0].item())
+    assert (batch.n_node == n_atoms).all(), "fixture assumption: uniform atom count"
+    with torch.no_grad():
+        energy_head.reference.linear.weight.fill_(large_ref / n_atoms)
+
+    interaction_energy = torch.full((batch.n_node.shape[0],), sub_kjmol, dtype=torch.float32)
+    absolute = energy_head.absolute_energy(interaction_energy, batch, fp64=True)
+
+    # fp64 preserves the interaction energy against the large reference
+    recovered = (absolute - large_ref).float()
+    torch.testing.assert_close(recovered, interaction_energy, atol=1e-6, rtol=0)
+
+    # fp32 loses the interaction energy precision, demonstrating why fp64 is required
+    absolute_fp32 = energy_head.absolute_energy(interaction_energy, batch, fp64=False)
+    fp32_roundtrip = absolute_fp32 - large_ref
+    assert (fp32_roundtrip - interaction_energy).abs().max() > sub_kjmol / 2
 
 
 def test_force_head_initialization(force_head):

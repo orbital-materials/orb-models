@@ -4,13 +4,12 @@ import torch
 from ase.build import bulk, molecule
 from ase.optimize import BFGS
 
-from orb_models.forcefield import pretrained
 from orb_models.forcefield.inference.calculator import ORBCalculator
 
 
-def test_orb_v2_predictions():
+def test_orb_v2_predictions(orb_v2_and_config):
     """Test that we haven't changed the predictions of orb-v2."""
-    orb, adapter = pretrained.orb_v2()
+    orb, adapter = orb_v2_and_config
     atoms = bulk("Cu", "fcc", a=3.58, cubic=True)
     graph = adapter.from_ase_atoms(atoms)
     result = orb.predict(graph)
@@ -27,9 +26,9 @@ def test_orb_v2_predictions():
     np.testing.assert_allclose(stress, stress_gold, atol=1e-4)
 
 
-def test_orbv2_optimization():
+def test_orbv2_optimization(orb_v2_and_config):
     """Test that we haven't changed the optimization behaviour of orb-v2."""
-    orb, adapter = pretrained.orb_v2()
+    orb, adapter = orb_v2_and_config
     calc = ORBCalculator(orb, adapter, device=torch.device("cpu"))
     atoms = bulk("Cu", "fcc", a=3.58, cubic=True)
     atoms.calc = calc
@@ -44,9 +43,9 @@ def test_orbv2_optimization():
     assert np.isclose(optimized_energy, gold_optimized_energy, atol=1e-5)
 
 
-def test_orb_v3_direct_omat_predictions():
+def test_orb_v3_direct_omat_predictions(orb_v3_direct_omat_and_config):
     """Test that we haven't changed the predictions of orb-v3-direct."""
-    orb, adapter = pretrained.orb_v3_direct_inf_omat()
+    orb, adapter = orb_v3_direct_omat_and_config
     atoms = bulk("Cu", "fcc", a=3.58, cubic=True)
     graph = adapter.from_ase_atoms(atoms)
     result = orb.predict(graph)
@@ -60,12 +59,12 @@ def test_orb_v3_direct_omat_predictions():
     )
     assert np.isclose(energy, energy_gold, atol=1e-4)
     np.testing.assert_allclose(forces, forces_gold, atol=1e-5)
-    np.testing.assert_allclose(stress, stress_gold, atol=1e-4)
+    np.testing.assert_allclose(stress, stress_gold, atol=1e-5)
 
 
-def test_orbv3_direct_omat_optimization():
+def test_orbv3_direct_omat_optimization(orb_v3_direct_omat_and_config):
     """Test that we haven't changed the optimization behaviour of orb-v3-direct."""
-    orb, adapter = pretrained.orb_v3_direct_inf_omat()
+    orb, adapter = orb_v3_direct_omat_and_config
     calc = ORBCalculator(orb, adapter, device=torch.device("cpu"))
     atoms = bulk("Cu", "fcc", a=3.58, cubic=True)
     atoms.calc = calc
@@ -80,9 +79,9 @@ def test_orbv3_direct_omat_optimization():
     assert np.isclose(optimized_energy, gold_optimized_energy, atol=1e-5)
 
 
-def test_orb_v3_con_omat_predictions():
+def test_orb_v3_con_omat_predictions(orb_v3_conservative_omat_and_config):
     """Test that we haven't changed the predictions of orb-v3-conservative."""
-    orb, adapter = pretrained.orb_v3_conservative_inf_omat()
+    orb, adapter = orb_v3_conservative_omat_and_config
     atoms = bulk("Cu", "fcc", a=3.58, cubic=True)
     graph = adapter.from_ase_atoms(atoms)
     result = orb.predict(graph)
@@ -96,12 +95,12 @@ def test_orb_v3_con_omat_predictions():
     )
     assert np.isclose(energy, energy_gold, atol=1e-4)
     np.testing.assert_allclose(forces, forces_gold, atol=1e-5)
-    np.testing.assert_allclose(stress, stress_gold, atol=1e-4)
+    np.testing.assert_allclose(stress, stress_gold, atol=1e-5)
 
 
-def test_orbv3_con_omat_optimization():
+def test_orbv3_con_omat_optimization(orb_v3_conservative_omat_and_config):
     """Test that we haven't changed the optimization behaviour of orb-v3-conservative."""
-    orb, adapter = pretrained.orb_v3_conservative_inf_omat()
+    orb, adapter = orb_v3_conservative_omat_and_config
     calc = ORBCalculator(orb, adapter, device=torch.device("cpu"))
     atoms = bulk("Cu", "fcc", a=3.58, cubic=True)
     atoms.calc = calc
@@ -116,9 +115,9 @@ def test_orbv3_con_omat_optimization():
     assert np.isclose(optimized_energy, gold_optimized_energy, atol=1e-5)
 
 
-def test_orb_v3_con_omol_predictions():
-    """Test that we haven't changed the predictions of orb-v3-conservative-omol."""
-    orb, adapter = pretrained.orb_v3_conservative_omol()
+def test_orbmol_v1_con_predictions(orb_v3_conservative_omol_and_config):
+    """Test that we haven't changed the predictions of orbmol-v1."""
+    orb, adapter = orb_v3_conservative_omol_and_config
     atoms = molecule("C6H6")
     atoms.info["charge"] = 1.0
     atoms.info["spin"] = 0.0
@@ -130,7 +129,7 @@ def test_orb_v3_con_omol_predictions():
     result = orb.predict(graph)
     energy = result["energy"][0].detach().numpy()
     forces = result["grad_forces"][0].detach().numpy()
-    assert np.isclose(energy, energy_gold, atol=1e-4)
+    assert np.isclose(energy, energy_gold, atol=1e-5)
     np.testing.assert_allclose(forces, forces_gold, atol=1e-5)
 
     # Second: check the ase calculator interface is correct
@@ -138,13 +137,13 @@ def test_orb_v3_con_omol_predictions():
     atoms.calc = calc
     energy = atoms.get_potential_energy()
     forces = atoms.get_forces()[0]
-    assert np.isclose(energy, energy_gold, atol=1e-4)
+    assert np.isclose(energy, energy_gold, atol=1e-5)
     np.testing.assert_allclose(forces, forces_gold, atol=1e-5)
 
 
-def test_orbv3_con_omol_optimization():
-    """Test that we haven't changed the optimization behaviour of orb-v3-conservative."""
-    orb, adapter = pretrained.orb_v3_conservative_omol()
+def test_orbmol_v1_con_omol_optimization(orb_v3_conservative_omol_and_config):
+    """Test that we haven't changed the optimization behaviour of orbmol-v1."""
+    orb, adapter = orb_v3_conservative_omol_and_config
     calc = ORBCalculator(orb, adapter, device=torch.device("cpu"))
     atoms = molecule("C6H6")
     atoms.calc = calc
@@ -166,3 +165,68 @@ def test_orbv3_con_omol_optimization():
     atoms.calc = calc
     with pytest.raises(ValueError, match="atoms.info must contain both 'charge' and 'spin'"):
         atoms.get_potential_energy()
+
+
+@pytest.mark.parametrize(
+    "fixture_name",
+    [
+        "orb_v3_conservative_omat_and_config",
+        "orb_v3_conservative_omol_and_config",
+    ],
+)
+def test_pre_cutoff_conservative_models_use_mean_pair_repulsion(fixture_name, request):
+    """Pre-cutoff conservative models must keep ZBL mean-aggregation via load_model override.
+
+    The default for newly-trained ConservativeForcefieldRegressor is
+    node_aggregation="sum"; load_model switches it back to "mean" for
+    artifacts created before _CONSERVATIVE_PAIR_REPULSION_SUM_CUTOFF. All
+    shipped orb-v3 conservative models (and orbmol-v2) predate that cutoff.
+    """
+    orb, _ = request.getfixturevalue(fixture_name)
+    assert orb.pair_repulsion, f"{fixture_name} should have pair_repulsion enabled"
+    assert orb.pair_repulsion_fn.node_aggregation == "mean", (
+        f"{fixture_name}: expected mean aggregation for pre-cutoff model, "
+        f"got {orb.pair_repulsion_fn.node_aggregation}"
+    )
+
+
+def test_orbmol_v2_predictions(orbmol_v2_and_config):
+    """Test that we haven't changed the predictions of orbmol-v2 (electrostatics model)."""
+    orb, adapter = orbmol_v2_and_config
+
+    # Non-periodic: H2O
+    atoms = molecule("H2O")
+    atoms.info["charge"] = 0
+    atoms.info["spin"] = 1
+    graph = adapter.from_ase_atoms(atoms)
+    result = orb.predict(graph)
+    energy = result["energy"][0].detach().numpy()
+    forces = result["grad_forces"][0].detach().numpy()
+    h2o_energy_gold = np.array(-2079.86339)
+    h2o_forces_gold = np.array([-1.0472e-04, 2.5031e-04, -4.8726e-01])
+    assert np.isclose(energy, h2o_energy_gold, atol=1e-5)
+    np.testing.assert_allclose(forces, h2o_forces_gold, atol=1e-5)
+
+    # Periodic: Cu
+    atoms = bulk("Cu", "fcc", a=3.58, cubic=True)
+    atoms.info["charge"] = 0
+    atoms.info["spin"] = 1
+    graph = adapter.from_ase_atoms(atoms)
+    result = orb.predict(graph)
+    energy = result["energy"][0].detach().numpy()
+    stress = result["grad_stress"][0].detach().numpy()
+    cu_energy_gold = np.array(-178549.3860)
+    cu_stress_gold = np.array([-0.49615, -0.49357, -0.49229, 0.00097, 0.00205, -0.00068])
+    assert np.isclose(energy, cu_energy_gold, atol=1e-5)
+    np.testing.assert_allclose(stress, cu_stress_gold, atol=1e-5)
+
+    # Also verify via ASE calculator interface
+    calc = ORBCalculator(orb, adapter, device=torch.device("cpu"))
+    h2o = molecule("H2O")
+    h2o.info["charge"] = 0
+    h2o.info["spin"] = 1
+    h2o.calc = calc
+    energy = h2o.get_potential_energy()
+    forces = h2o.get_forces()[0]
+    assert np.isclose(energy, h2o_energy_gold[()], atol=1e-5)
+    np.testing.assert_allclose(forces, h2o_forces_gold, atol=1e-5)
