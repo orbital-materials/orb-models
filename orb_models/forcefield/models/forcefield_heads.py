@@ -175,22 +175,6 @@ class EnergyHead(ForcefieldHead):
         pred = self(node_features, batch)
         return self.denormalize(pred, batch)
 
-    def absolute_energy(
-        self,
-        interaction_energy: torch.Tensor,
-        batch: AtomGraphs,
-        fp64: bool = True,
-    ) -> torch.Tensor:
-        """Combine interaction energy (physical units, no reference) with reference.
-
-        When reference energies are large (~1e4-1e5 eV for OMol), fp32 step size at
-        that scale destroys kJ/mol resolution, so `fp64=True` is the default.
-        """
-        ref = self.reference(batch.atomic_numbers, batch.n_node)
-        if fp64:
-            return interaction_energy.double() + ref.double()
-        return interaction_energy + ref.to(interaction_energy.dtype)
-
     def loss(
         self,
         pred: torch.Tensor,
@@ -724,19 +708,23 @@ class ChargeConditionedEnergyHead(EnergyHead):
         batch: AtomGraphs,
         per_atom_charges: torch.Tensor,
         per_atom_spins: torch.Tensor | None = None,
-        *,
-        fp64: bool = True,
     ) -> torch.Tensor:
-        """Predict absolute energy = interaction energy + reference energy.
-
-        When reference energies are large (~1e4-1e5 eV for OMol), fp32 step size at that scale
-        destroys kJ/mol resolution, so `fp64=True` is the default.
-        """
+        """Predict absolute energy = interaction energy + reference energy."""
         interaction_energy = self.forward(node_features, batch, per_atom_charges, per_atom_spins)
+        return self.absolute_energy(interaction_energy, batch)
+
+    def absolute_energy(
+        self,
+        interaction_energy: torch.Tensor,
+        batch: AtomGraphs,
+    ) -> torch.Tensor:
+        """Combine interaction energy (physical units, no reference) with reference.
+
+        OMol25 references reach ~1e4-1e5 eV (kJ/mol step at that scale is ~0.01 eV in fp32),
+        so the addition is always done in fp64 and returns fp64. Cast back if desired.
+        """
         ref = self.reference(batch.atomic_numbers, batch.n_node)
-        if fp64:
-            return interaction_energy.double() + ref.double()
-        return interaction_energy + ref.to(interaction_energy.dtype)
+        return interaction_energy.double() + ref.double()
 
 
 class LatentChargeHead(torch.nn.Module):

@@ -1167,6 +1167,7 @@ def orbmol_v2_architecture(
             mlp_norm="rms_norm",
         ),
         pair_repulsion=True,
+        pair_repulsion_node_aggregation="sum",
         has_stress=False,
         coulomb_module=coulomb,
     )
@@ -1190,8 +1191,8 @@ def orbmol_v2(
 
     Public release is the s11doh8x wandb run, trained on OMol25 (ωB97M-V/def2-TZVPD).
     The checkpoint at `weights_path` must be a flat state_dict with EMA shadow params
-    already applied — see scripts/convert_orbmol_v2_ckpt.py to convert from a raw
-    wandb-format checkpoint (which contains state_dict, optimizer, ema, etc.).
+    already applied — produce one from the wandb training artifact via
+    `core/scripts/misc/export_model.py` (the same tool used for all other public orb-models).
     """
     if compile is None and train:
         compile = False

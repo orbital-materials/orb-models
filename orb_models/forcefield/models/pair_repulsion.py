@@ -23,7 +23,7 @@ class ZBLBasis(torch.nn.Module):
     def __init__(
         self,
         p: int = 6,
-        node_aggregation: str = "sum",
+        node_aggregation: str = "mean",
         compute_gradients: bool = False,
     ):
         super().__init__()

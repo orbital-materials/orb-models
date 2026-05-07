@@ -60,6 +60,7 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
         level_of_theory: str | None = None,
         forces_loss_type: Literal["mae", "mse", "huber_0.01", "condhuber_0.01"] = "condhuber_0.01",
         pair_repulsion: bool = False,
+        pair_repulsion_node_aggregation: str = "mean",
         has_stress: bool = True,
         coulomb_module: CoulombModule | None = None,
         **kwargs,
@@ -94,7 +95,11 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
 
         self.pair_repulsion = pair_repulsion
         if self.pair_repulsion:
-            self.pair_repulsion_fn = ZBLBasis(p=6, compute_gradients=False, node_aggregation="sum")
+            self.pair_repulsion_fn = ZBLBasis(
+                p=6,
+                compute_gradients=False,
+                node_aggregation=pair_repulsion_node_aggregation,
+            )
 
         self.coulomb_module = coulomb_module
         if self.coulomb_module is not None:
@@ -245,30 +250,15 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
 
         return out
 
-    def predict(
-        self,
-        batch: AtomGraphs,
-        split: bool = False,
-        fp64_energy: bool = True,
-    ) -> dict[str, torch.Tensor]:
-        """Predict energy, forces, and stress.
-
-        Args:
-            batch: Input batch.
-            split: If True, split predictions per graph.
-            fp64_energy: If True (default), return absolute energy in fp64; required to
-                preserve kJ/mol resolution since reference energies can be ~1e4-1e5 eV.
-                Only applies when the energy head is a ChargeConditionedEnergyHead.
-        """
+    def predict(self, batch: AtomGraphs, split: bool = False) -> dict[str, torch.Tensor]:
+        """Predict energy, forces, and stress."""
         preds = self(batch)
 
         out = {}
         energy_head = self.heads[self.energy_name]
         if isinstance(energy_head, ChargeConditionedEnergyHead):
-            # preds[energy_name] is interaction energy in physical units; add reference.
-            out[self.energy_name] = energy_head.absolute_energy(
-                preds[self.energy_name], batch, fp64=fp64_energy
-            )
+            # preds[energy_name] is interaction energy in physical units; add reference in fp64.
+            out[self.energy_name] = energy_head.absolute_energy(preds[self.energy_name], batch)
         else:
             energy_head = cast(ForcefieldHead, energy_head)
             out[self.energy_name] = energy_head.denormalize(preds[self.energy_name], batch)
