@@ -26,6 +26,8 @@ model, atoms_adapter = orbmol_v2(device="cuda")
 # atoms.info["charge"] and atoms.info["spin"] (multiplicity, = 2S+1) must be set.
 ```
 
+> **Caution:** While the model does predict per-atom charge and spin values as latent features in the charge and spin heads, the model has not seen any per-atom charge or spin values during training — these are emergent from optimisation against energies and forces alone. They should therefore be treated with caution: while in at least some cases they appear to correspond to the correct physical values, the reliability and generality of this correspondence is unclear and is the subject of ongoing investigations.
+
 ### [V3 Models](https://arxiv.org/abs/2504.06231)
 
 V3 models use the following naming convention: ```orb-v3-X-Y-Z``` where:
