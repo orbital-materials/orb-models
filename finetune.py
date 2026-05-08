@@ -678,12 +678,15 @@ def main():
         type=str,
         help="Base model to finetune.",
         choices=[
+            "orbmol_v2",
+            "orb_v3_conservative_omol",
+            "orb_v3_direct_omol",
+            "orbmol_v1_conservative",
+            "orbmol_v1_direct",
             "orb_v3_conservative_inf_omat",
             "orb_v3_conservative_20_omat",
             "orb_v3_direct_inf_omat",
             "orb_v3_direct_20_omat",
-            "orb_v3_conservative_omol",
-            "orb_v3_direct_omol",
             "orb_v2",
         ],
     )

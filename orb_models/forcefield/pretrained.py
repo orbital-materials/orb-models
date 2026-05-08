@@ -407,6 +407,8 @@ def orbmol_v2(
     precision: str = "float32-high",
     compile: bool | None = None,
     train: bool = False,
+    train_reference_energies: bool = False,
+    loss_weights: dict[str, float] | None = None,
 ) -> tuple[ConservativeForcefieldRegressor, ForcefieldAtomsAdapter]:
     """Load OrbMol-v2 with learnable electrostatics (charges, spins, Coulomb).
 
@@ -417,6 +419,14 @@ def orbmol_v2(
     assert not (train and _should_compile(device, compile)), (
         "Cannot compile a conservative model in training mode."
     )
+
+    # Default to evenly weighted losses
+    loss_weights = {
+        "energy": 1.0,
+        "grad_forces": 1.0,
+        "confidence": 1.0,
+        **(loss_weights or {}),
+    }
 
     atoms_adapter = ForcefieldAtomsAdapter(
         radius=6.0,
@@ -430,7 +440,14 @@ def orbmol_v2(
         device=device,
     )
     model = load_model(
-        model, weights_path, device, precision=precision, compile=compile, train=train
+        model,
+        weights_path,
+        device,
+        precision=precision,
+        compile=compile,
+        train=train,
+        train_reference_energies=train_reference_energies,
+        loss_weights=loss_weights,
     )
     return model, atoms_adapter
 

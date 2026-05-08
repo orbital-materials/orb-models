@@ -199,7 +199,7 @@ from ase.build import molecule
 from orb_models.forcefield import pretrained
 
 device = "cpu"  # or device="cuda"
-orbff, atoms_adapter = pretrained.orbmol_v1_conservative(
+orbff, atoms_adapter = pretrained.orbmol_v2(
   device=device,
   precision="float32-high",   # or "float32-highest" / "float64
 )

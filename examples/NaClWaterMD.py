@@ -60,8 +60,8 @@ def run_md_simulation(
     # Set the calculator
     # Note: If you encounter compilation errors (e.g., Triton issues on clusters),
     # you can disable compilation by adding compile=False:
-    # orbff, atoms_adapter = pretrained.orb_v3_conservative_omol(device=device, compile=False)
-    orbff, atoms_adapter = pretrained.orb_v3_conservative_omol(device=device)
+    # orbff, atoms_adapter = pretrained.orbmol_v2(device=device, compile=False)
+    orbff, atoms_adapter = pretrained.orbmol_v2(device=device)
     atoms.calc = ORBCalculator(orbff, atoms_adapter=atoms_adapter, device=device)
 
     # Set the initial velocities
