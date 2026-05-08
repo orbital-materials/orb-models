@@ -209,6 +209,7 @@ class ForcefieldAtomsAdapter(AbstractAtomsAdapter):
         if len(atoms) == 1:
             return self.from_ase_atoms(
                 atoms[0],
+                max_num_neighbors=max_num_neighbors,
                 edge_method=edge_method,
                 wrap=wrap,
                 device=device,
@@ -311,6 +312,7 @@ class ForcefieldAtomsAdapter(AbstractAtomsAdapter):
             "positions": positions,
             "atomic_numbers": atomic_numbers,
             "atomic_numbers_embedding": atomic_numbers_embedding,
+            "atom_identity": torch.cat([torch.arange(n, dtype=torch.long) for n in n_atoms], dim=0),
         }
         edge_feats = {
             "vectors": edge_vectors,
@@ -320,6 +322,17 @@ class ForcefieldAtomsAdapter(AbstractAtomsAdapter):
             "cell": cells,
             "pbc": pbcs,
         }
+
+        # Merge extra features from atoms.info
+        node_feats.update(_batch_info_tensors(atoms, "node_features"))
+        edge_feats.update(_batch_info_tensors(atoms, "edge_features"))
+        graph_feats.update(_batch_info_tensors(atoms, "graph_features", system_level=True))
+
+        # Collect targets from atoms.info
+        node_targets = _batch_info_tensors(atoms, "node_targets")
+        edge_targets = _batch_info_tensors(atoms, "edge_targets")
+        system_targets = _batch_info_tensors(atoms, "graph_targets", system_level=True)
+
         # Collect charge and spin: all-or-nothing semantics
         charge_spin_list = [_get_charge_and_spin(a) for a in atoms]
         has_charge_spin = [bool(cs) for cs in charge_spin_list]
@@ -341,9 +354,9 @@ class ForcefieldAtomsAdapter(AbstractAtomsAdapter):
             node_features=node_feats,
             edge_features=edge_feats,
             system_features=graph_feats,
-            node_targets={},
-            edge_targets={},
-            system_targets={},
+            node_targets=node_targets,
+            edge_targets=edge_targets,
+            system_targets=system_targets,
             system_id=None,
             fix_atoms=fix_atoms,
             tags=tags,
@@ -480,6 +493,39 @@ class ForcefieldAtomsAdapter(AbstractAtomsAdapter):
             raise ValueError(error_message)
 
         return True
+
+
+def _batch_info_tensors(
+    atoms_list: list[ase.Atoms],
+    info_key: str,
+    system_level: bool = False,
+) -> dict:
+    """Collect tensor dicts from atoms.info[info_key] across a list and batch them.
+
+    For system-level tensors, matches from_ase_atoms behavior: unsqueeze non-scalars
+    (numel > 1) before concatenating, so cat produces [N, ...] for non-scalars
+    and [N] for scalars.
+    """
+    dicts = [a.info.get(info_key, {}) for a in atoms_list]
+    all_keys = [set(d.keys()) for d in dicts]
+    keys = set().union(*all_keys)
+    if not keys:
+        return {}
+    if any(ks != keys for ks in all_keys):
+        raise ValueError(
+            f"All atoms must have the same set of keys in info['{info_key}']. "
+            f"Got: {[sorted(ks) for ks in all_keys]}"
+        )
+    out: dict = {}
+    for k in keys:
+        values = [d[k] for d in dicts]
+        if any(v is None for v in values):
+            out[k] = None
+        elif system_level:
+            out[k] = torch.cat([v.unsqueeze(0) if v.numel() > 1 else v for v in values], dim=0)
+        else:
+            out[k] = torch.cat(values, dim=0)
+    return out
 
 
 def _get_charge_and_spin(atoms: ase.Atoms | ts.SimState) -> dict[str, torch.Tensor]:

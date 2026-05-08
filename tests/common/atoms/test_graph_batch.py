@@ -131,6 +131,26 @@ def test_random_batching():
     assert batched.equals(AtomGraphs.batch(graphs))
 
 
+def test_batch_none_values_collapse():
+    """Batching graphs where a target value is None in one graph produces None for that key."""
+    g1 = graph()
+    g2 = graph()
+    g2.node_targets["node_target"] = None
+
+    batched = AtomGraphs.batch([g1, g2])
+    assert batched.node_targets["node_target"] is None
+
+
+def test_batch_mismatched_keys_raises():
+    """Batching graphs with different feature/target keys raises."""
+    g1 = graph()
+    g2 = graph()
+    g2.system_targets["extra"] = torch.tensor([1.0])
+
+    with pytest.raises(ValueError, match="same nested structure"):
+        AtomGraphs.batch([g1, g2])
+
+
 def test_refeaturization_pos_substitution(dataset_and_loader):
     dataset = dataset_and_loader[0]
     datapoint = dataset[0]
