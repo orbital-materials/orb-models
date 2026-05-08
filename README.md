@@ -23,8 +23,8 @@ Alternatively, you can use Docker to run orb-models; [see instructions below](#d
 
 **May 2026**: Release of OrbMol-v2 — extends the OrbMol architecture with learnable per-atom electrostatics:
 
-* New `LatentChargeHead` and `LatentSpinHead` predict per-atom charges and spins (constrained to sum to the system total charge / 2S = `spin_multiplicity − 1`), and a `CoulombModule` adds long-range Coulomb energy on top of the GNN — direct Coulomb sum for non-periodic systems, Particle Mesh Ewald via `nvalchemiops` for periodic.
-* The energy head (`ChargeConditionedEnergyHead`) is conditioned on the predicted charges and spins per atom.
+* New `LatentChargeHead` and `LatentSpinHead` predict per-atom latent features that are constrained to sum to the system total charge / 2S = `spin_multiplicity − 1`, and a `CoulombModule` adds long-range Coulomb energy on top of the GNN — direct Coulomb sum for non-periodic systems, Particle Mesh Ewald via `nvalchemiops` for periodic.
+* The energy head (`ChargeConditionedEnergyHead`) is conditioned on these per-atom features.
 * Trained on OMol25 and OPoly26 (ωB97M-V/def2-TZVPD); load with `pretrained.orbmol_v2(device="cuda")`.
 * `model.predict(...)["energy"]` now returns **fp64** by default. OMol25 reference energies reach ~1e4–1e5 eV, where fp32's ~0.01 eV step destroys kJ/mol resolution; fp64 preserves it. Pass `fp64_energy=False` to `predict` to opt out.
 

@@ -16,7 +16,7 @@ See below for more explanation of this naming convention. Both models have `inf`
 
 * `orbmol-v2`
 
-OrbMol-v2 extends the OrbMol architecture with **learnable per-atom electrostatics**: a `LatentChargeHead` predicts per-atom partial charges (constrained to sum to the system total charge), a `LatentSpinHead` predicts per-atom spins (constrained to sum to 2S = `spin_multiplicity − 1`), and a `CoulombModule` adds a long-range Coulomb energy on top of the GNN — direct bare-1/r Coulomb sum for non-periodic systems, Particle Mesh Ewald via `nvalchemiops` for periodic systems. The energy head (`ChargeConditionedEnergyHead`) is conditioned on the predicted charges and spins per-atom.
+OrbMol-v2 extends the OrbMol architecture with **learnable per-atom electrostatics**: a `LatentChargeHead` and `LatentSpinHead` predict per-atom latent features that are constrained to sum to the system total charge and to 2S = `spin_multiplicity − 1` respectively, and a `CoulombModule` adds a long-range Coulomb energy on top of the GNN — direct bare-1/r Coulomb sum for non-periodic systems, Particle Mesh Ewald via `nvalchemiops` for periodic systems. The energy head (`ChargeConditionedEnergyHead`) is conditioned on these per-atom features.
 
 Trained on OMol25 and OPoly26 (ωB97M-V/def2-TZVPD); supports both periodic and non-periodic systems. Stress is enabled via `model.enable_stress()` if needed.
 
