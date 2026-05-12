@@ -196,15 +196,23 @@ def test_forcefield_adapter_requires_both_spin_and_charge():
 
 def test_from_ase_atoms_list_parallel_equivalence():
     """Test that from_ase_atoms_list produces equivalent results to sequential processing."""
-    atoms_list = [
-        Atoms(
+    n_atoms = 3
+    atoms_list = []
+    for i in range(4):
+        a = Atoms(
             "H2O",
             positions=np.array([[0, 0, 0], [0, 1, 0], [1, 0, 0]]) + i * 0.1,
             pbc=True,
             cell=np.diag([5, 5, 5]),
         )
-        for i in range(4)
-    ]
+        a.info["graph_features"] = {"bandgap": torch.tensor([float(i)])}
+        a.info["graph_targets"] = {
+            "energy": torch.tensor([float(i) * 0.5]),
+            "stress": torch.randn(6),
+        }
+        a.info["node_features"] = {"mulliken_charges": torch.randn(n_atoms, 1)}
+        a.info["node_targets"] = {"forces": torch.randn(n_atoms, 3)}
+        atoms_list.append(a)
     adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=20)
 
     batch_result = adapter.from_ase_atoms_list(atoms_list)
@@ -225,6 +233,88 @@ def test_from_ase_atoms_list_parallel_equivalence():
         bd = batch_result.edge_features["vectors"][start:end].cpu().norm(dim=1).sort()[0]
         sd = sequential_batch.edge_features["vectors"][start:end].cpu().norm(dim=1).sort()[0]
         assert torch.allclose(bd, sd, atol=1e-4)
+
+    # Verify features/targets keys match between batched and sequential
+    assert batch_result.node_features.keys() == sequential_batch.node_features.keys()
+    assert batch_result.system_features.keys() == sequential_batch.system_features.keys()
+    assert batch_result.system_targets.keys() == sequential_batch.system_targets.keys()
+    assert batch_result.node_targets.keys() == sequential_batch.node_targets.keys()
+
+    # Verify feature/target values
+    torch.testing.assert_close(
+        batch_result.system_features["bandgap"].cpu(),
+        sequential_batch.system_features["bandgap"].cpu(),
+    )
+    torch.testing.assert_close(
+        batch_result.system_targets["energy"].cpu(),
+        sequential_batch.system_targets["energy"].cpu(),
+    )
+    torch.testing.assert_close(
+        batch_result.system_targets["stress"].cpu(),
+        sequential_batch.system_targets["stress"].cpu(),
+    )
+    torch.testing.assert_close(
+        batch_result.node_features["mulliken_charges"].cpu(),
+        sequential_batch.node_features["mulliken_charges"].cpu(),
+    )
+    torch.testing.assert_close(
+        batch_result.node_targets["forces"].cpu(),
+        sequential_batch.node_targets["forces"].cpu(),
+    )
+
+
+def test_from_ase_atoms_list_inconsistent_info_raises():
+    """Test that from_ase_atoms_list raises when atoms have inconsistent info keys."""
+    adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=20)
+
+    a0 = Atoms(
+        "H2O",
+        positions=np.array([[0, 0, 0], [0, 1, 0], [1, 0, 0]]),
+        pbc=True,
+        cell=np.diag([5, 5, 5]),
+    )
+    a0.info["node_targets"] = {"forces": torch.randn(3, 3)}
+    a0.info["graph_targets"] = {"energy": torch.tensor([1.0])}
+
+    a1 = Atoms(
+        "H2O",
+        positions=np.array([[0, 0, 0], [0, 1, 0], [1, 0, 0]]) + 0.1,
+        pbc=True,
+        cell=np.diag([5, 5, 5]),
+    )
+
+    with pytest.raises(ValueError, match="same set of keys"):
+        adapter.from_ase_atoms_list([a0, a1])
+
+
+def test_from_ase_atoms_list_none_values_collapse_to_none():
+    """Test that if any atom has None for a key, the batched result is None for that key."""
+    adapter = ForcefieldAtomsAdapter(radius=6.0, max_num_neighbors=20)
+    atoms_list = []
+    for i in range(3):
+        a = Atoms(
+            "H2O",
+            positions=np.array([[0, 0, 0], [0, 1, 0], [1, 0, 0]]) + i * 0.1,
+            pbc=True,
+            cell=np.diag([5, 5, 5]),
+        )
+        a.info["node_targets"] = {
+            "forces": None if i == 0 else torch.randn(3, 3),
+        }
+        a.info["graph_targets"] = {
+            "energy": torch.tensor([float(i)]),
+            "stress": None if i == 1 else torch.randn(6),
+        }
+        atoms_list.append(a)
+
+    batch_result = adapter.from_ase_atoms_list(atoms_list)
+
+    assert batch_result.node_targets["forces"] is None
+    assert batch_result.system_targets["stress"] is None
+    torch.testing.assert_close(
+        batch_result.system_targets["energy"].cpu(),
+        torch.tensor([0.0, 1.0, 2.0]),
+    )
 
 
 def test_from_ase_atoms_list_nonperiodic():

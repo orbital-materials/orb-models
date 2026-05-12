@@ -151,7 +151,7 @@ Number of atoms: 3
 ```bash
 python finetune.py \
   --data_path /path/to/your/dataset.db \
-  --base_model orb_v3_conservative_omol \
+  --base_model orbmol_v2 \
   --energy_loss_weight 0.1 \
   --forces_loss_weight 1.0 \
   --stress_loss_weight 0.0 \
@@ -164,7 +164,7 @@ python finetune.py \
 ```bash
 python finetune.py \
   --data_path /path/to/your/dataset.db \
-  --base_model orb_v3_conservative_omol \
+  --base_model orbmol_v2 \
   --custom_reference_energies /path/to/reference_energies.json \
   --energy_loss_weight 0.1 \
   --forces_loss_weight 1.0
@@ -175,7 +175,7 @@ python finetune.py \
 ```bash
 python finetune.py \
   --data_path /path/to/your/dataset.db \
-  --base_model orb_v3_conservative_omol \
+  --base_model orbmol_v2 \
   --custom_reference_energies /path/to/reference_energies.json \
   --trainable_reference_energies \
   --energy_loss_weight 0.1 \
@@ -187,7 +187,7 @@ python finetune.py \
 ```bash
 python finetune.py \
   --data_path /path/to/your/dataset.db \
-  --base_model orb_v3_conservative_omol \
+  --base_model orbmol_v2 \
   --trainable_reference_energies \
   --energy_loss_weight 0.1 \
   --forces_loss_weight 1.0
@@ -258,7 +258,7 @@ Lines starting with `#` are treated as comments and ignored.
 
 The script automatically handles the differences between conservative and direct models:
 
-- **Conservative models** (e.g., `orb_v3_conservative_omol`):
+- **Conservative models** (e.g., `orbmol_v2`):
   - Use `grad_forces` and `grad_stress` as **loss-weight keys**
   - Compute forces via automatic differentiation
 
@@ -276,7 +276,7 @@ If you prefer to write your own finetuning script, you can use the clean API dir
 from orb_models.forcefield import pretrained
 
 # Load model with custom configuration
-model, atoms_adapter = pretrained.orb_v3_conservative_omol(
+model, atoms_adapter = pretrained.orbmol_v2(
     device='cuda',
     precision='float32-high',
     train=True,
@@ -319,7 +319,7 @@ import torch
 from orb_models.forcefield import pretrained
 
 # Load model architecture (set train=False for inference)
-model, atoms_adapter = pretrained.orb_v3_conservative_omol(train=False)
+model, atoms_adapter = pretrained.orbmol_v2(train=False)
 
 # Load your finetuned checkpoint
 model.load_state_dict(torch.load('path/to/finetuned_checkpoint.pt'))
@@ -331,7 +331,7 @@ You can also specify loss weights when loading for further finetuning:
 
 ```python
 # Load for continued finetuning with different loss weights
-model, atoms_adapter = pretrained.orb_v3_conservative_omol(
+model, atoms_adapter = pretrained.orbmol_v2(
     train=True,
     loss_weights={'energy': 0.5, 'grad_forces': 20.0}
 )
@@ -358,7 +358,7 @@ Finetuning on ORCA wB97M-V data with different reference scheme:
 ```bash
 python finetune.py \
   --data_path my_dataset.db \
-  --base_model orb_v3_conservative_omol \
+  --base_model orbmol_v2 \
   --custom_reference_energies my_refs.json \
   --energy_loss_weight 1.0 \
   --forces_loss_weight 10.0 \
@@ -370,7 +370,7 @@ python finetune.py \
 from orb_models.forcefield import pretrained
 import torch
 
-model, atoms_adapter = pretrained.orb_v3_conservative_omol(train=False)
+model, atoms_adapter = pretrained.orbmol_v2(train=False)
 model.load_state_dict(torch.load('checkpoints/my_finetuned_model.pt'))
 # Reference energies from my_refs.json are now loaded!
 ```
@@ -384,7 +384,7 @@ from orb_models.forcefield import pretrained
 from orb_models.dataset.ase_sqlite_dataset import AseSqliteDataset
 
 # Load model with configuration
-model, atoms_adapter = pretrained.orb_v3_conservative_omol(
+model, atoms_adapter = pretrained.orbmol_v2(
     device='cuda',
     train=True,
     train_reference_energies=False,  # Fixed reference energies

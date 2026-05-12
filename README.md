@@ -21,11 +21,25 @@ Alternatively, you can use Docker to run orb-models; [see instructions below](#d
 
 ### Updates
 
+**May 2026**: Release of OrbMol-v2 — adds a `CoulombModule` for long-range electrostatics on top of the OrbMol architecture, using direct Coulomb summation for non-periodic systems and Particle Mesh Ewald (via `nvalchemiops`) for periodic. Trained on OMol25 and OPoly26 (ωB97M-V/def2-TZVPD); load with `pretrained.orbmol_v2(device="cuda")`. See [MODELS.md](MODELS.md) for the full architecture description.
+
+Adding learned electrostatics (LES) to OrbMol-v2 costs essentially nothing on speed but slashes the error.
+
+* **Speed.** On H100, OrbMol-v2 runs at 44 QPS at 1k atoms and 9 QPS at 10k atoms on periodic systems — within ~5% of OrbMol-v1 at every system size.
+* **Accuracy.** On GSCDB138 (5,000+ reaction energies covering noncovalent interactions, thermochemistry, isomerization, transition-metal chemistry, etc.; excluding reactions involving single-atom species), OrbMol-v2's overall Normalized Error Ratio drops from **6.05 → 1.83** (3.3× lower, comparable to a good DFT functional). The improvement concentrates in categories that explicit long-range electrostatics actually fixes:
+  * Noncovalent interactions (NC): 5.96 → 2.60 (2.3× lower)
+  * Thermochemistry (TC): 11.68 → 1.53 (7.6× lower)
+  * Transition metal chemistry (TM): 2.86 → 1.60 (1.8× lower)
+  * Barrier heights and intramolecular noncovalent: modest gains; isomerization essentially unchanged.
+
+`model.predict(...)["energy"]` now returns **fp64** by default to preserve kJ/mol resolution against OMol-scale references (~1e4–1e5 eV). Pass `fp64_energy=False` to opt out.
+
 **February 2026**: Improved GPU-accelerated graph construction with [ALCHEMI Toolkit-Ops](https://github.com/NVIDIA/nvalchemi-toolkit-ops) and batched simulation with [TorchSim](https://github.com/TorchSim/torch-sim):
 
 * Alchemi-based graph construction (GPU-accelerated, up to 12x faster for large single systems, and sub-linear batch scaling delivering >100x graph construction speed-up for large batches of small systems)
 * TorchSim wrapper for batched optimisation and simulation, see [usage with TorchSim](#usage-with-torchsim)
 * Alchemi-based D3 dispersion correction module, see [D3 correction](#d3-correction)
+
 
 **August 2025**: Release of the [OrbMol potentials](https://www.orbitalindustries.com/posts/orbmol-extending-orb-to-molecular-systems):
 
@@ -189,7 +203,7 @@ from ase.build import molecule
 from orb_models.forcefield import pretrained
 
 device = "cpu"  # or device="cuda"
-orbff, atoms_adapter = pretrained.orb_v3_conservative_omol(
+orbff, atoms_adapter = pretrained.orbmol_v2(
   device=device,
   precision="float32-high",   # or "float32-highest" / "float64
 )

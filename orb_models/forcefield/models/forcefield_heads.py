@@ -16,44 +16,31 @@ from orb_models.forcefield.models.reference_energies import REFERENCE_ENERGIES
 
 
 class ForcefieldHead(torch.nn.Module, abc.ABC):
-    """Abstract base class for forcefield prediction heads."""
+    """Abstract base class for forcefield prediction heads.
+
+    Heads return predictions in physical units from `forward`.
+    The losses normalize the predictions and targets internally.
+    """
 
     target: PropertyDefinition
 
     @abc.abstractmethod
     def forward(self, node_features: torch.Tensor, batch: AtomGraphs) -> torch.Tensor:
-        """Forward pass returning normalized predictions."""
+        """Forward pass returning predictions in physical units."""
         ...
 
     @abc.abstractmethod
     def predict(self, node_features: torch.Tensor, batch: AtomGraphs) -> torch.Tensor:
-        """Return predictions in physical units (denormalized)."""
+        """Return predictions in physical units."""
         ...
 
     @abc.abstractmethod
     def loss(
         self,
-        pred: torch.Tensor,
+        raw_pred: torch.Tensor,
         batch: AtomGraphs,
-        alternative_target: torch.Tensor | None = None,
     ) -> base.ModelOutput:
-        """Compute loss and metrics."""
-        ...
-
-    @abc.abstractmethod
-    def normalize(
-        self,
-        x: torch.Tensor,
-        batch: AtomGraphs,
-        reference: torch.Tensor | None = None,
-        online: bool | None = None,
-    ) -> torch.Tensor:
-        """Normalize values to normalized space."""
-        ...
-
-    @abc.abstractmethod
-    def denormalize(self, x: torch.Tensor, batch: AtomGraphs) -> torch.Tensor:
-        """Denormalize values to physical units."""
+        """Compute loss and metrics. `raw_pred` is in physical units."""
         ...
 
 
@@ -163,73 +150,99 @@ class EnergyHead(ForcefieldHead):
         self.loss_type = loss_type
 
     def forward(self, node_features: torch.Tensor, batch: AtomGraphs) -> torch.Tensor:
-        """Forward pass (without inverse transformation)."""
-        input = segment_ops.aggregate_nodes(
+        """Return interaction energy in physical units."""
+        aggregated = segment_ops.aggregate_nodes(
             node_features, batch.n_node, reduction=self.node_aggregation
         )
-        pred = self.mlp(input)
-        return pred
+        mlp_out = self.mlp(aggregated).squeeze(-1)
+        return self._denormalize(mlp_out, batch)
 
-    def predict(self, node_features: torch.Tensor, batch: AtomGraphs) -> torch.Tensor:
-        """Predict energy."""
-        pred = self(node_features, batch)
-        return self.denormalize(pred, batch)
+    def absolute_energy(
+        self,
+        interaction_energy: torch.Tensor,
+        batch: AtomGraphs,
+        fp64: bool = True,
+    ) -> torch.Tensor:
+        """Combine interaction energy with reference.
+
+        When reference energies are ~1e4-1e5 eV (e.g. for Omol); fp32 step size at that scale (~0.01-0.04 eV) destroys
+        kJ/mol resolution, so `fp64=True` is the default and is required if the absolute value needs to be accurate
+        to sub-eV. `fp64=False` returns the sum in the input dtype and corresponds to the old behaviour.
+        """
+        ref = self.reference(batch.atomic_numbers, batch.n_node)
+        if fp64:
+            return interaction_energy.double() + ref.double()
+        return interaction_energy + ref.to(interaction_energy.dtype)
+
+    def predict(
+        self,
+        node_features: torch.Tensor,
+        batch: AtomGraphs,
+        *,
+        fp64: bool = True,
+    ) -> torch.Tensor:
+        """Predict absolute energy.
+
+        Args:
+            node_features: Latent features from the backbone.
+            batch: Graph batch.
+            fp64: If True (default), return absolute energy in fp64 to preserve
+                kJ/mol resolution against large reference energies. See
+                `absolute_energy` for the precision trade-off.
+        """
+        interaction_energy = self.forward(node_features, batch)
+        return self.absolute_energy(interaction_energy, batch, fp64=fp64)
 
     def loss(
         self,
-        pred: torch.Tensor,
+        interaction_pred: torch.Tensor,
         batch: AtomGraphs,
-        alternative_target: torch.Tensor | None = None,
     ):
-        """Apply mlp to compute loss and metrics."""
+        """Compute loss and metrics."""
         name = self.target.fullname
-        pred = pred.reshape(-1)
-        if alternative_target is not None:
-            raw_target = alternative_target.reshape(-1)
-        else:
-            raw_target = batch.system_targets[name].reshape(-1)
 
+        raw_target = batch.system_targets[name].reshape(-1)
         reference = self.reference(batch.atomic_numbers, batch.n_node).reshape(-1)
-        target = self.normalize(raw_target, batch, reference)
-        assert pred.shape == raw_target.shape == target.shape, (
-            f"{pred.shape} != {raw_target.shape} != {target.shape}"
-        )
+        interaction_target = (raw_target.double() - reference.double()).to(interaction_pred.dtype)
+        interaction_pred = interaction_pred.reshape(-1)
+        # Learn the normalizer stats from the targets (online=None defaults
+        # to True when self.training is True); don't learn from the prediction.
+        target = self._normalize(interaction_target, batch, online=None)
+        pred = self._normalize(interaction_pred, batch, online=False)
 
         loss = mean_error(pred, target, self.loss_type)
 
-        reference_error = raw_target - reference
+        # Metrics computed in fp64 for precision
+        reference_error = (raw_target.double() - reference.double()).float()
         if self.atom_avg:
             reference_error = reference_error / batch.n_node
-        raw_pred = self.denormalize(pred, batch)
+        absolute_pred_f64 = interaction_pred.double() + reference.double()
+        absolute_target_f64 = raw_target.double()
         metrics = {
             f"{name}_loss": loss,
-            f"{name}_mae_raw": torch.abs(raw_pred - raw_target).mean(),
-            f"{name}_mse_raw": ((raw_pred - raw_target) ** 2).mean(),
+            f"{name}_mae_raw": torch.abs(absolute_pred_f64 - absolute_target_f64).mean().float(),
+            f"{name}_mse_raw": ((absolute_pred_f64 - absolute_target_f64) ** 2).mean().float(),
             f"{name}_reference_mae": torch.abs(reference_error).mean(),
             f"{name}_mae_per_atom": torch.mean(
-                torch.abs(raw_pred - raw_target) / batch.n_node.float()
-            ),
+                torch.abs(absolute_pred_f64 - absolute_target_f64) / batch.n_node.double()
+            ).float(),
         }
         return base.ModelOutput(loss=loss, log=metrics)
 
-    def denormalize(self, x: torch.Tensor, batch: AtomGraphs):
+    def _denormalize(self, x: torch.Tensor, batch: AtomGraphs) -> torch.Tensor:
         """Denormalize the energy prediction."""
-        x = self.normalizer.inverse(x).squeeze(-1)
+        x = self.normalizer.inverse(x)
         if self.atom_avg:
             x = x * batch.n_node
-        return x + self.reference(batch.atomic_numbers, batch.n_node)
+        return x
 
-    def normalize(
+    def _normalize(
         self,
         x: torch.Tensor,
         batch: AtomGraphs,
-        reference: torch.Tensor | None = None,
         online: bool | None = None,
     ):
         """Normalize the energy prediction."""
-        if reference is None:
-            reference = self.reference(batch.atomic_numbers, batch.n_node)
-        x = x - reference
         if self.atom_avg:
             x = x / batch.n_node
         return self.normalizer(x, online=online)
@@ -296,10 +309,11 @@ class ForceHead(ForcefieldHead):
         self.detach_node_features = detach_node_features
 
     def forward(self, node_features: torch.Tensor, batch: AtomGraphs) -> torch.Tensor:
-        """Forward pass (without inverse normalisation)."""
+        """Return forces in physical units (eV/Å), shape (n_atoms, output_size)."""
         if self.detach_node_features:
             node_features = node_features.detach()
         pred = self.mlp(node_features)
+        pred = self.normalizer.inverse(pred)
         pred = maybe_remove_net_force_and_torque(
             batch, pred, self.remove_mean, self.remove_torque_for_nonpbc_systems
         )
@@ -307,23 +321,20 @@ class ForceHead(ForcefieldHead):
 
     def predict(self, node_features: torch.Tensor, batch: AtomGraphs) -> torch.Tensor:
         """Predict forces."""
-        pred = self(node_features, batch)
-        return self.normalizer.inverse(pred)
+        return self(node_features, batch)
 
     def loss(
         self,
-        pred: torch.Tensor,
+        raw_pred: torch.Tensor,
         batch: AtomGraphs,
-        alternative_target: torch.Tensor | None = None,
     ):
         """Compute loss and metrics."""
         name = self.target.fullname
-        gold_target = batch.node_targets[name]
-        raw_target = gold_target if alternative_target is None else alternative_target
+        raw_target = batch.node_targets[name]
         return forces_loss_function(
-            pred=pred,
+            raw_pred=raw_pred,
             raw_target=raw_target,
-            raw_gold_target=gold_target,
+            raw_gold_target=raw_target,
             name=name,
             normalizer=self.normalizer,
             n_node=batch.n_node,
@@ -331,20 +342,6 @@ class ForceHead(ForcefieldHead):
             loss_type=self.loss_type,
             training=self.training,
         )
-
-    def denormalize(self, x: torch.Tensor, batch: AtomGraphs):
-        """Denormalize the force prediction."""
-        return self.normalizer.inverse(x)
-
-    def normalize(
-        self,
-        x: torch.Tensor,
-        batch: AtomGraphs,
-        reference: torch.Tensor | None = None,
-        online: bool | None = None,
-    ) -> torch.Tensor:
-        """Normalize the force prediction."""
-        return self.normalizer(x, online=online)
 
 
 class StressHead(ForcefieldHead):
@@ -402,65 +399,60 @@ class StressHead(ForcefieldHead):
         self.loss_type = loss_type
 
     def forward(self, node_features: torch.Tensor, batch: AtomGraphs) -> torch.Tensor:
-        """Predictions with raw logits (no sigmoid/softmax or any inverse transformations)."""
-        input = segment_ops.aggregate_nodes(
+        """Return stress in physical units (eV/Å³), shape (n_graphs, 6) Voigt."""
+        aggregated = segment_ops.aggregate_nodes(
             node_features,
             batch.n_node,
             reduction=self.node_aggregation,
         )
-        pred = self.mlp(input)
-        return pred
+        mlp_out = self.mlp(aggregated)
+        return self._denormalize(mlp_out)
 
     def predict(self, node_features: torch.Tensor, batch: AtomGraphs) -> torch.Tensor:
         """Predict stress in eV/Å^3."""
-        pred = self(node_features, batch)
-        return self.denormalize(pred, batch)
+        return self(node_features, batch)
 
     def loss(
         self,
-        pred: torch.Tensor,
+        raw_pred: torch.Tensor,
         batch: AtomGraphs,
-        alternative_target: torch.Tensor | None = None,
     ):
-        """Apply mlp to compute loss and metrics."""
+        """Compute loss and metrics."""
         name = self.target.fullname
-        if alternative_target is not None:
-            target = alternative_target
-        else:
-            target = batch.system_targets[name]
+        raw_target = batch.system_targets[name]
 
-        assert pred.shape == target.shape, f"{pred.shape} != {target.shape}"
+        assert raw_pred.shape == raw_target.shape, f"{raw_pred.shape} != {raw_target.shape}"
 
-        normalized_target = self.normalize(target, batch)
-        loss_diag = mean_error(pred[:, :3], normalized_target[:, :3], self.loss_type)
-        loss_offdiag = mean_error(pred[:, 3:], normalized_target[:, 3:], self.loss_type)
+        # Target updates normalizer stats; pred uses them without contributing.
+        target = self._normalize(raw_target, online=None)
+        pred = self._normalize(raw_pred, online=False)
+
+        loss_diag = mean_error(pred[:, :3], target[:, :3], self.loss_type)
+        loss_offdiag = mean_error(pred[:, 3:], target[:, 3:], self.loss_type)
         loss = loss_diag + (self.off_diag_loss_weight * loss_offdiag)
 
-        raw_pred = self.denormalize(pred, batch)
         metrics = {
             f"{name}_loss": loss,
-            f"{name}_mae_raw": torch.abs(raw_pred - target).mean(),
-            f"{name}_mse_raw": ((raw_pred - target) ** 2).mean(),
-            f"{name}_diag_mae_raw": torch.abs(raw_pred[:, :3] - target[:, :3]).mean(),
-            f"{name}_diag_mse_raw": ((raw_pred[:, :3] - target[:, :3]) ** 2).mean(),
-            f"{name}_offdiag_mae_raw": torch.abs(raw_pred[:, 3:] - target[:, 3:]).mean(),
-            f"{name}_offdiag_mse_raw": ((raw_pred[:, 3:] - target[:, 3:]) ** 2).mean(),
+            f"{name}_mae_raw": torch.abs(raw_pred - raw_target).mean(),
+            f"{name}_mse_raw": ((raw_pred - raw_target) ** 2).mean(),
+            f"{name}_diag_mae_raw": torch.abs(raw_pred[:, :3] - raw_target[:, :3]).mean(),
+            f"{name}_diag_mse_raw": ((raw_pred[:, :3] - raw_target[:, :3]) ** 2).mean(),
+            f"{name}_offdiag_mae_raw": torch.abs(raw_pred[:, 3:] - raw_target[:, 3:]).mean(),
+            f"{name}_offdiag_mse_raw": ((raw_pred[:, 3:] - raw_target[:, 3:]) ** 2).mean(),
         }
 
         return base.ModelOutput(loss=loss, log=metrics)
 
-    def denormalize(self, pred: torch.Tensor, batch: AtomGraphs):
+    def _denormalize(self, pred: torch.Tensor):
         """Denormalize the stress prediction."""
         diag = self.diag_normalizer.inverse(pred[:, :3])
         offdiag = self.offdiag_normalizer.inverse(pred[:, 3:])
         out = torch.cat([diag, offdiag], dim=-1)
         return out
 
-    def normalize(
+    def _normalize(
         self,
         x: torch.Tensor,
-        batch: AtomGraphs,
-        reference: torch.Tensor | None = None,
         online: bool | None = None,
     ) -> torch.Tensor:
         """Normalize the stress prediction."""
@@ -614,3 +606,213 @@ class ConfidenceHead(torch.nn.Module):
         }
 
         return base.ModelOutput(loss=loss, log=metrics)
+
+
+class ChargeConditionedEnergyHead(EnergyHead):
+    """Energy head that conditions on per-atom charges (and optionally spins).
+
+    Unlike EnergyHead, this module applies the MLP per-atom and then aggregates,
+    rather than aggregating node features first. This preserves size-consistency:
+    for two non-interacting subsystems A and B (separated by more than the GNN
+    cutoff), E(A ∪ B) == E(A) + E(B).
+
+    Requires a latent_charges head (and optionally latent_spins) on the regressor to provide charges.
+    """
+
+    def __init__(
+        self,
+        latent_dim: int,
+        num_mlp_layers: int,
+        mlp_hidden_dim: int,
+        use_spins: bool = False,
+        predict_atom_avg: bool = True,
+        level_of_theory: str | None = None,
+        loss_type: Literal["mae", "mse", "huber_0.01"] = "huber_0.01",
+        dropout: float | None = None,
+        checkpoint: str | None = None,
+        online_normalisation: bool = True,
+        activation: str = "ssp",
+        reference_energy: str | None = None,
+    ):
+        """Initialize ChargeConditionedEnergyHead.
+
+        Args:
+            latent_dim: Dimensionality of the incoming latent vector from the base model.
+            num_mlp_layers: Number of MLP layers.
+            mlp_hidden_dim: MLP hidden size.
+            use_spins: If True, also condition on per-atom spins.
+            predict_atom_avg: Accepted for Hydra config compatibility but ignored.
+                Always uses per-atom energy (MLP per atom, then sum-pool).
+            level_of_theory: The method used to compute the gold energies.
+            loss_type: The type of loss to use.
+            dropout: The level of dropout to apply.
+            checkpoint: Whether to use checkpointing.
+            online_normalisation: Whether to update the normalisation statistics online.
+            activation: The activation function to use.
+            reference_energy: The reference energy to use.
+        """
+        # Initialize parent with predict_atom_avg=True for per-atom normalization
+        assert predict_atom_avg, "predict_atom_avg must be True for ChargeConditionedEnergyHead"
+        # Extra features for charges and spins (1 + int(use_spins))
+        super().__init__(
+            latent_dim=latent_dim + 1 + int(use_spins),
+            num_mlp_layers=num_mlp_layers,
+            mlp_hidden_dim=mlp_hidden_dim,
+            level_of_theory=level_of_theory,
+            predict_atom_avg=True,
+            loss_type=loss_type,
+            dropout=dropout,
+            checkpoint=checkpoint,
+            online_normalisation=online_normalisation,
+            activation=activation,
+            reference_energy=reference_energy,
+        )
+        self._use_spins = use_spins
+
+    def forward(  # type: ignore[override]
+        self,
+        node_features: torch.Tensor,
+        batch: AtomGraphs,
+        per_atom_charges: torch.Tensor,
+        per_atom_spins: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Return interaction energy in physical units, conditioned on per-atom charges/spins.
+
+        Applies the MLP per-atom (with charges/spins as extra features),
+        denormalizes each atom's contribution, then sums over atoms per
+        system. Sum-pooling preserves size-consistency:
+        E(A ∪ B) = E(A) + E(B) for non-interacting subsystems.
+
+        Shape: (n_graphs,).
+        """
+        features = torch.cat([node_features, per_atom_charges], dim=-1)
+        if self._use_spins:
+            assert per_atom_spins is not None, "per_atom_spins required when use_spins=True"
+            features = torch.cat([features, per_atom_spins], dim=-1)
+        per_atom_mlp = self.mlp(features).squeeze(-1)
+        per_atom_interaction_energy = self.normalizer.inverse(per_atom_mlp)
+        return segment_ops.aggregate_nodes(
+            per_atom_interaction_energy, batch.n_node, reduction="sum"
+        )
+
+    def predict(  # type: ignore[override]
+        self,
+        node_features: torch.Tensor,
+        batch: AtomGraphs,
+        per_atom_charges: torch.Tensor,
+        per_atom_spins: torch.Tensor | None = None,
+        *,
+        fp64: bool = True,
+    ) -> torch.Tensor:
+        """Predict energy. See EnergyHead.predict for the `fp64` flag."""
+        interaction_energy = self(node_features, batch, per_atom_charges, per_atom_spins)
+        return self.absolute_energy(interaction_energy, batch, fp64=fp64)
+
+
+class LatentChargeHead(torch.nn.Module):
+    """Predicts per-atom latent charges from node features.
+
+    Charges are learned purely from energy/force supervision.
+    Optionally enforces charge neutrality (sum to zero or total_charge).
+    """
+
+    def __init__(
+        self,
+        latent_dim: int,
+        num_mlp_layers: int = 1,
+        mlp_hidden_dim: int = 128,
+        enforce_total_charge: bool = True,
+        activation: str = "ssp",
+        charge_scale: float = 1.0,
+    ):
+        super().__init__()
+        self.latent_dim = latent_dim
+        self.enforce_total_charge = enforce_total_charge
+        self.charge_scale = charge_scale
+
+        self.mlp = build_mlp(
+            input_size=latent_dim,
+            hidden_layer_sizes=[mlp_hidden_dim] * (num_mlp_layers - 1),
+            output_size=1,
+            activation=activation,
+        )
+
+    def forward(self, node_features: torch.Tensor, batch: AtomGraphs) -> torch.Tensor:
+        """Predict per-atom charges.
+
+        Args:
+            node_features: (n_atoms, latent_dim)
+            batch: AtomGraphs with batch indices
+
+        Returns:
+            latent_charges: (n_atoms, 1)
+        """
+        charges = self.mlp(node_features)
+
+        if self.enforce_total_charge:
+            # Center charges to zero mean per system
+            mean_charges = segment_ops.aggregate_nodes(charges, batch.n_node, reduction="mean")
+            charges = charges - mean_charges[batch.node_batch_index]
+
+            # If total_charge is available, shift charges to match it
+            if batch.system_features is not None and "total_charge" in batch.system_features:
+                total_charge = batch.system_features["total_charge"].to(dtype=charges.dtype)
+                charge_shift = total_charge / batch.n_node.to(dtype=charges.dtype)
+                charges = charges + charge_shift.unsqueeze(-1)[batch.node_batch_index]
+
+        charges = charges * self.charge_scale
+
+        return charges
+
+
+class LatentSpinHead(torch.nn.Module):
+    """Predicts per-atom latent spins for energy conditioning from node features.
+
+    Spins are learned purely from energy/force supervision.
+    Constraint: per-atom spins sum to 2S (= spin_multiplicity - 1).
+    """
+
+    def __init__(
+        self,
+        latent_dim: int,
+        num_mlp_layers: int = 1,
+        mlp_hidden_dim: int = 128,
+        enforce_spin_constraint: bool = True,
+        activation: str = "ssp",
+    ):
+        super().__init__()
+        self.latent_dim = latent_dim
+        self.enforce_spin_constraint = enforce_spin_constraint
+
+        self.mlp = build_mlp(
+            input_size=latent_dim,
+            hidden_layer_sizes=[mlp_hidden_dim] * (num_mlp_layers - 1),
+            output_size=1,
+            activation=activation,
+        )
+
+    def forward(self, node_features: torch.Tensor, batch: AtomGraphs) -> torch.Tensor:
+        """Predict per-atom spins.
+
+        Args:
+            node_features: (n_atoms, latent_dim)
+            batch: AtomGraphs with batch indices
+
+        Returns:
+            latent_spins: (n_atoms, 1)
+        """
+        spins = self.mlp(node_features)
+
+        if self.enforce_spin_constraint:
+            # Center spins to zero mean per system
+            mean_spins = segment_ops.aggregate_nodes(spins, batch.n_node, reduction="mean")
+            spins = spins - mean_spins[batch.node_batch_index]
+
+            # Shift spins so they sum to 2S = spin_multiplicity - 1 per system
+            if batch.system_features is not None and "spin_multiplicity" in batch.system_features:
+                spin_multiplicity = batch.system_features["spin_multiplicity"].to(dtype=spins.dtype)
+                total_spin = spin_multiplicity - 1  # 2S = multiplicity - 1
+                spin_shift = total_spin / batch.n_node.to(dtype=spins.dtype)
+                spins = spins + spin_shift.unsqueeze(-1)[batch.node_batch_index]
+
+        return spins

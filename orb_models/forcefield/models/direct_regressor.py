@@ -9,7 +9,7 @@ from orb_models.common.models.gns import MoleculeGNS
 from orb_models.common.models.graph_regressor import _validate_heads_and_loss_weights
 from orb_models.common.models.load import load_regressor_state_dict
 from orb_models.common.models.segment_ops import split_prediction
-from orb_models.forcefield.models.forcefield_heads import ConfidenceHead, ForcefieldHead
+from orb_models.forcefield.models.forcefield_heads import ConfidenceHead, EnergyHead, ForcefieldHead
 from orb_models.forcefield.models.pair_repulsion import ZBLBasis
 
 
@@ -113,20 +113,37 @@ class DirectForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
                     continue
                 raw_repulsion = self._get_raw_repulsion(name, out_pair_repulsion)
                 if raw_repulsion is not None:
-                    head = cast(ForcefieldHead, head)
-                    raw = head.denormalize(out[name], batch)
-                    out[name] = head.normalize(raw + raw_repulsion, batch, online=False)
+                    out[name] = out[name] + raw_repulsion
         return out
 
-    def predict(self, batch: AtomGraphs, split: bool = False) -> dict[str, torch.Tensor]:
-        """Predict node and/or graph level attributes."""
+    def predict(
+        self,
+        batch: AtomGraphs,
+        split: bool = False,
+        fp64_energy: bool = True,
+    ) -> dict[str, torch.Tensor]:
+        """Predict node and/or graph level attributes.
+
+        Args:
+            batch: Input batch.
+            split: If True, split predictions per graph.
+            fp64_energy: If True (default), return absolute energy in fp64;
+                required to preserve kJ/mol resolution since reference
+                energies can be as high as ~1e4-1e5 eV. If False, returns
+                energy in the input dtype.
+        """
         out = self.model(batch)
         node_features = out["node_features"]
         output = {}
         for name, head in self.heads.items():
             if self._stress_disabled and "stress" in name:
                 continue
-            output[name] = cast(ForcefieldHead | ConfidenceHead, head).predict(node_features, batch)
+            if isinstance(head, EnergyHead):
+                output[name] = head.predict(node_features, batch, fp64=fp64_energy)
+            else:
+                output[name] = cast(ForcefieldHead | ConfidenceHead, head).predict(
+                    node_features, batch
+                )
 
         if self.pair_repulsion:
             out_pair_repulsion = self.pair_repulsion_fn(batch)
@@ -176,8 +193,7 @@ class DirectForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
             confidence_head = cast(ConfidenceHead, confidence_head)
 
             # Per-atom force MAE
-            forces_pred = out["forces"]
-            raw_forces_pred = forces_head.denormalize(forces_pred, batch)
+            raw_forces_pred = out["forces"]
             raw_forces_target = batch.node_targets[forces_head.target.fullname]
             forces_error = torch.abs(raw_forces_pred - raw_forces_target).mean(dim=-1)
 

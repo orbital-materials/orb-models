@@ -7,10 +7,26 @@ We provide several pretrained models that can be used to calculate energies, for
 These models are a continuation of the [`orb-v3`](#v3-models) series trained on the [Open Molecules 2025 (OMol25)](https://arxiv.org/pdf/2505.08762) dataset—over 100M high-accuracy DFT calculations (ωB97M-V/def2-TZVPD) on diverse molecular systems including metal complexes, biomolecules, and electrolytes. Note: The training data does not contain periodic systems and these models have not been carefully tested on periodic systems. 
 
 There are two options:
-* `orb-v3-conservative-omol`
-* `orb-v3-direct-omol`
+* `orbmol-v1-conservative`
+* `orbmol-v1-direct`
 
 See below for more explanation of this naming convention. Both models have `inf` neighbors, ensuring a continuous PES.
+
+### OrbMol-v2 (learnable electrostatics)
+
+* `orbmol-v2`
+
+OrbMol-v2 extends the OrbMol architecture with **learnable per-atom electrostatics**: a `LatentChargeHead` and `LatentSpinHead` predict per-atom latent features that are constrained to sum to the system total charge and to 2S = `spin_multiplicity − 1` respectively, and a `CoulombModule` adds a long-range Coulomb energy on top of the GNN — direct bare-1/r Coulomb sum for non-periodic systems, Particle Mesh Ewald via `nvalchemiops` for periodic systems. The energy head (`ChargeConditionedEnergyHead`) is conditioned on these per-atom features.
+
+Trained on OMol25 and OPoly26 (ωB97M-V/def2-TZVPD); supports both periodic and non-periodic systems. Stress is enabled via `model.enable_stress()` if needed.
+
+```python
+from orb_models.forcefield.pretrained import orbmol_v2
+model, atoms_adapter = orbmol_v2(device="cuda")
+# atoms.info["charge"] and atoms.info["spin"] (multiplicity, = 2S+1) must be set.
+```
+
+> **Caution:** While the model does predict per-atom charge and spin values as latent features in the charge and spin heads, the model has not seen any per-atom charge or spin values during training — these are emergent from optimisation against energies and forces alone. They should therefore be treated with caution: while in at least some cases they appear to correspond to the correct physical values, the reliability and generality of this correspondence is unclear and is the subject of ongoing investigations.
 
 ### [V3 Models](https://arxiv.org/abs/2504.06231)
 
