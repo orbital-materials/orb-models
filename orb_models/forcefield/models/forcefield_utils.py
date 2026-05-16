@@ -56,7 +56,11 @@ def maybe_remove_net_force_and_torque(
 
     if remove_torque:
         force_pred = _selectively_remove_net_torque_for_nonpbc_systems(
-            force_pred, batch.positions, batch.system_features["cell"], batch.n_node
+            force_pred,
+            batch.positions,
+            batch.system_features["cell"],
+            batch.n_node,
+            batch.node_batch_index,
         )
 
     return force_pred
@@ -67,6 +71,7 @@ def _selectively_remove_net_torque_for_nonpbc_systems(
     positions: torch.Tensor,
     cell: torch.Tensor,
     n_node: torch.Tensor,
+    node_batch_index: torch.Tensor,
 ):
     """Remove net torque from non-PBC-system forces, but preserve PBC-system forces.
 
@@ -77,20 +82,10 @@ def _selectively_remove_net_torque_for_nonpbc_systems(
         n_node: The number of nodes per graph, of shape (n_batch,).
     """
     nopbc_graph = torch.all(cell == 0.0, dim=(1, 2))
-    if torch.any(nopbc_graph):
-        if torch.all(nopbc_graph):
-            pred = _remove_net_torque(positions, pred, n_node)
-        else:
-            # Handle a mixed batch of pbc and non-pbc systems
-            batch_indices = torch.repeat_interleave(
-                torch.arange(cell.size(0), device=n_node.device), n_node
-            )
-            nopbc_atom = nopbc_graph[batch_indices]
-            adjusted_pred_non_pbc = _remove_net_torque(
-                positions[nopbc_atom], pred[nopbc_atom], n_node[nopbc_graph]
-            )
-            pred = pred.clone()
-            pred[nopbc_atom] = adjusted_pred_non_pbc
+    nopbc_atom = nopbc_graph[node_batch_index]
+
+    adjusted = _remove_net_torque(positions, pred, n_node)
+    pred = torch.where(nopbc_atom.unsqueeze(-1), adjusted, pred)
 
     return pred
 

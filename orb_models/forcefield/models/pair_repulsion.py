@@ -193,7 +193,7 @@ class ZBLBasis(torch.nn.Module):
             tuple: (envelope, derivative)
         """
         # Convert p to float for calculations
-        p_float = float(p)
+        p_float = p.to(r.dtype)
 
         # Mask for r < r_max
         mask = (r < r_max).float()

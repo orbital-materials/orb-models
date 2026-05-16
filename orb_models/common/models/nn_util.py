@@ -330,7 +330,7 @@ class ScalarNormalizer(torch.nn.Module):
 
         mu = self.bn.running_mean  # type: ignore
         sigma = torch.sqrt(self.bn.running_var)  # type: ignore
-        if sigma < 1e-6:
+        if self.training and sigma < 1e-6:
             raise ValueError("ScalarNormalizer has ~zero std.")
 
         return (x - mu) / sigma  # type: ignore

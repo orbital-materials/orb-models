@@ -40,7 +40,9 @@ def aggregate_nodes(
         https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility"""
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         torch.use_deterministic_algorithms(True)
-    segments = torch.arange(count, device=device).repeat_interleave(n_node, output_size=tensor.shape[0])
+    segments = torch.arange(count, device=device).repeat_interleave(
+        n_node, output_size=tensor.shape[0]
+    )
     if reduction == "sum":
         return scatter_sum(tensor, segments, dim=0, dim_size=count)
     elif reduction == "mean":
