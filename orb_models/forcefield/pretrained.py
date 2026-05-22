@@ -215,13 +215,17 @@ def orb_v3_conservative_architecture(
     has_charge_spin_cond: bool = False,
     has_stress: bool = True,
     has_electrostatics: bool = False,
+    use_per_atom_spins: bool = False,
     device: torch.device | str | None = None,
 ) -> ConservativeForcefieldRegressor:
     """The orb-v3 conservative architecture.
 
     When has_electrostatics is True, the energy head is replaced with a
-    ChargeConditionedEnergyHead, latent charge/spin heads are added, and a
-    CoulombModule provides long-range electrostatics.
+    ChargeConditionedEnergyHead, a LatentChargeHead is added, and a
+    CoulombModule provides long-range electrostatics. Per-atom spin
+    prediction (LatentSpinHead) is added only when use_per_atom_spins is
+    True; system-level charge/spin conditioning is always controlled by
+    has_charge_spin_cond.
     """
     if has_charge_spin_cond or has_electrostatics:
         conditioner = ChargeSpinConditioner(latent_dim)
@@ -235,7 +239,7 @@ def orb_v3_conservative_architecture(
             mlp_hidden_dim=head_mlp_hidden_dim,
             predict_atom_avg=True,
             activation=activation,
-            use_spins=True,
+            use_spins=use_per_atom_spins,
         )
     else:
         energy_head = EnergyHead(
@@ -263,12 +267,13 @@ def orb_v3_conservative_architecture(
             enforce_total_charge=True,
             activation=activation,
         )
-        heads["latent_spins"] = LatentSpinHead(  # type: ignore[assignment]
-            latent_dim=latent_dim,
-            num_mlp_layers=2,
-            mlp_hidden_dim=128,
-            activation=activation,
-        )
+        if use_per_atom_spins:
+            heads["latent_spins"] = LatentSpinHead(  # type: ignore[assignment]
+                latent_dim=latent_dim,
+                num_mlp_layers=2,
+                mlp_hidden_dim=128,
+                activation=activation,
+            )
 
     model = ConservativeForcefieldRegressor(
         heads=heads,
@@ -402,7 +407,7 @@ def orb_v3_direct_architecture(
 
 
 def orbmol_v2(
-    weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orbmol-v2-s11doh8x-20260507.ckpt",
+    weights_path: str = "https://orbitalmaterials-public-models.s3.us-west-1.amazonaws.com/forcefields/orbmol-v2-teqabfhg-20260523.ckpt",
     device: torch.device | str | None = None,
     precision: str = "float32-high",
     compile: bool | None = None,

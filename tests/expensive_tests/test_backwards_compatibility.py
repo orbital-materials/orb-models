@@ -202,8 +202,8 @@ def test_orbmol_v2_predictions(orbmol_v2_and_config):
     result = orb.predict(graph)
     energy = result["energy"][0].detach().numpy()
     forces = result["grad_forces"][0].detach().numpy()
-    h2o_energy_gold = np.array(-2079.86339)
-    h2o_forces_gold = np.array([-1.0472e-04, 2.5031e-04, -4.8726e-01])
+    h2o_energy_gold = np.array(-2079.86222)
+    h2o_forces_gold = np.array([4.6290e-04, 6.6572e-04, -4.8360e-01])
     assert np.isclose(energy, h2o_energy_gold, atol=1e-5)
     np.testing.assert_allclose(forces, h2o_forces_gold, atol=1e-5)
 
@@ -215,8 +215,8 @@ def test_orbmol_v2_predictions(orbmol_v2_and_config):
     result = orb.predict(graph)
     energy = result["energy"][0].detach().numpy()
     stress = result["grad_stress"][0].detach().numpy()
-    cu_energy_gold = np.array(-178549.3860)
-    cu_stress_gold = np.array([-0.49615, -0.49357, -0.49229, 0.00097, 0.00205, -0.00068])
+    cu_energy_gold = np.array(-178550.9810)
+    cu_stress_gold = np.array([-0.09994, -0.10850, -0.11481, -0.00028, -0.00035, 0.00305])
     assert np.isclose(energy, cu_energy_gold, atol=1e-5)
     np.testing.assert_allclose(stress, cu_stress_gold, atol=1e-5)
 
