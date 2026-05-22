@@ -119,14 +119,6 @@ def test_segment_max():
     )
 
 
-def test_segment_mean():
-    data = torch.arange(5, dtype=torch.float)
-    print(data)
-    ids = torch.tensor([0, 1, 1, 2, 2])
-    result = segment_ops.segment_mean(data, ids, 3)
-    assert result.tolist() == [0, 1.5, 3.5]
-
-
 def test_segment_softmax():
     data = torch.arange(5)
     ids = torch.tensor([0, 1, 1, 2, 2])

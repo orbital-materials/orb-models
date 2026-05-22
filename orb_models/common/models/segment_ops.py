@@ -44,7 +44,7 @@ def aggregate_nodes(
     if reduction == "sum":
         return scatter_sum(tensor, segments, dim=0, dim_size=count)
     elif reduction == "mean":
-        return scatter_mean(tensor, segments, dim=0, dim_size=count)
+        return scatter_mean(tensor, segments, n_node, dim=0, dim_size=count)
     elif reduction == "max":
         return segment_max(tensor, segments, num_segments=count)
     else:
@@ -59,11 +59,6 @@ def segment_sum(data: torch.Tensor, segment_ids: torch.Tensor, num_segments: int
 def segment_max(data: torch.Tensor, segment_ids: torch.Tensor, num_segments: int):
     """Computes index based max over segments of a tensor."""
     return scatter_max(data, segment_ids, dim=0, dim_size=num_segments)
-
-
-def segment_mean(data: torch.Tensor, segment_ids: torch.Tensor, num_segments: int):
-    """Computes index based mean over segments of a tensor."""
-    return scatter_mean(data, segment_ids, dim=0, dim_size=num_segments)
 
 
 def segment_softmax(
@@ -222,6 +217,7 @@ def scatter_std(
 def scatter_mean(
     src: torch.Tensor,
     index: torch.Tensor,
+    count: torch.Tensor,
     dim: int = -1,
     out: torch.Tensor | None = None,
     dim_size: int | None = None,
@@ -231,6 +227,7 @@ def scatter_mean(
     Args:
         src (torch.Tensor): The source tensor.
         index (torch.Tensor): The indices of elements to scatter.
+        count (torch.Tensor): Pre-computed group sizes (e.g. n_node).
         dim (int, optional): The dimension along which to index. Defaults to -1.
         out (Optional[torch.Tensor], optional): The output tensor. Defaults to None.
         dim_size (Optional[int], optional): Size of the output tensor. Defaults to None.
@@ -241,20 +238,13 @@ def scatter_mean(
     out = scatter_sum(src, index, dim, out, dim_size)
     dim_size = out.size(dim)
 
-    index_dim = dim
-    if index_dim < 0:
-        index_dim = index_dim + src.dim()
-    if index.dim() <= index_dim:
-        index_dim = index.dim() - 1
-
-    ones = torch.ones(index.size(), dtype=src.dtype, device=src.device)
-    count = scatter_sum(ones, index, index_dim, None, dim_size)
-    count[count < 1] = 1
-    count = _broadcast(count, out, dim)
+    divisor = count.to(dtype=out.dtype)
+    divisor = divisor.clamp(min=1)
+    divisor = _broadcast(divisor, out, dim)
     if out.is_floating_point():
-        out.true_divide_(count)
+        out.true_divide_(divisor)
     else:
-        out.div_(count, rounding_mode="floor")
+        out.div_(divisor, rounding_mode="floor")
     return out
 
 
