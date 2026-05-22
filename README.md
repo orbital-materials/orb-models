@@ -25,7 +25,7 @@ Alternatively, you can use Docker to run orb-models; [see instructions below](#d
 
 Adding learned electrostatics (LES) to OrbMol-v2 costs essentially nothing on speed but slashes the error.
 
-* **Speed.** On H100, OrbMol-v2 runs at 44 QPS at 1k atoms and 9 QPS at 10k atoms on periodic systems — within ~5% of OrbMol-v1 at every system size.
+* **Speed.** With full-model `torch.compile`, forward-pass time on a single 80 GB GPU is ~30 ms at 100 atoms, ~42 ms at 1k atoms, ~116 ms at 5k atoms, and ~191 ms at 10k atoms (periodic systems). The no-per-atom-spin-head architecture is 1–12% faster than the previous LatentSpinHead-having v2 development checkpoint at every system size; single-graph inference is memory-capped around 10k atoms on 80 GB.
 * **Accuracy on GSCDB138** (5,000+ reaction energies covering noncovalent interactions, thermochemistry, isomerization, transition-metal chemistry, etc.; excluding reactions involving single-atom species). OrbMol-v2's overall Normalized Error Ratio drops from **6.05 → 1.62** (3.7× lower, comparable to a good DFT functional). The improvement concentrates in categories that explicit long-range electrostatics actually fixes:
   * Noncovalent interactions (NC): 5.96 → 1.66 (3.6× lower)
   * Thermochemistry (TC): 11.68 → 1.83 (6.4× lower)
