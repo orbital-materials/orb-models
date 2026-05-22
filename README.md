@@ -23,19 +23,19 @@ Alternatively, you can use Docker to run orb-models; [see instructions below](#d
 
 **May 2026**: Release of OrbMol-v2 — adds a `CoulombModule` for long-range electrostatics on top of the OrbMol architecture, using direct Coulomb summation for non-periodic systems and Particle Mesh Ewald (via `nvalchemiops`) for periodic. Trained on OMol25 and OPoly26 (ωB97M-V/def2-TZVPD); load with `pretrained.orbmol_v2(device="cuda")`. See [MODELS.md](MODELS.md) for the full architecture description.
 
-Adding learned electrostatics (LES) to OrbMol-v2 costs essentially nothing on speed but slashes the error.
+OrbMol-v2 trades a modest speed cost for substantially better accuracy. The picture also got better for v1: `model.compile(...)` now wraps the full regressor for both models thanks to the port of `orbital-materials/orb#3074`, lifting the previous backbone-only restriction.
 
-* **Speed.** Adding learnable electrostatics on top of OrbMol-v1 introduces a Coulomb / PME path with fixed overhead per forward, but `model.compile(...)` now wraps the **full** regressor (heads + Coulomb included) thanks to the changes ported from `orbital-materials/orb#3074`. The net result on a single 80 GB GPU (forward time on periodic random crystals):
+* **Speed.** Forward time on a single 80 GB GPU at periodic random crystals, comparing v1 in its old backbone-compile workaround, v1 in the new full-compile regime, and v2-teqabfhg in full-compile:
 
-  | Atoms | OrbMol-v1 (backbone-compile) | OrbMol-v2-teqabfhg (full-compile) |
-  |---:|---:|---:|
-  | 100 | 17 ms | 30 ms |
-  | 1,000 | 37 ms | 42 ms |
-  | 5,000 | 124 ms | 116 ms |
-  | 10,000 | 278 ms | **191 ms** |
-  | 50,000+ | OOM | OOM |
+  | Atoms | v1 (backbone, old) | v1 (full-compile, new) | v2-teqabfhg (full-compile) |
+  |---:|---:|---:|---:|
+  | 100 | 17 ms | 17 ms | 30 ms |
+  | 1,000 | 37 ms | 28 ms | 42 ms |
+  | 5,000 | 124 ms | 78 ms | 116 ms |
+  | 10,000 | 278 ms | **158 ms** | 191 ms |
+  | 50,000+ | OOM | OOM | OOM |
 
-  At small system sizes the electrostatics overhead dominates and v2 is slower; the crossover is around 5k atoms, after which v2 pulls ahead, reaching a **1.46× speedup at 10k atoms**. Single-graph inference is memory-capped around 10k atoms on 80 GB.
+  v1 alone gets a 1.3–1.8× speedup from full-compile (largest at 10k atoms). v2's learnable electrostatics adds about 20–60% latency on top of v1-full-compile, with the relative overhead largest at small system sizes where the PME / Coulomb setup dominates and smallest at 10k atoms (~21%). Single-graph inference is memory-capped around 10k atoms on 80 GB.
 * **Accuracy on GSCDB138** (5,000+ reaction energies covering noncovalent interactions, thermochemistry, isomerization, transition-metal chemistry, etc.; excluding reactions involving single-atom species). OrbMol-v2's overall Normalized Error Ratio drops from **6.05 → 1.62** (3.7× lower, comparable to a good DFT functional). The improvement concentrates in categories that explicit long-range electrostatics actually fixes:
   * Noncovalent interactions (NC): 5.96 → 1.66 (3.6× lower)
   * Thermochemistry (TC): 11.68 → 1.83 (6.4× lower)
