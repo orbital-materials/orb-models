@@ -199,47 +199,26 @@ class CoulombModule(torch.nn.Module):
         """
         cell_3d = cell.view(-1, 3, 3) if cell.dim() == 2 else cell
 
-        # Estimate PME parameters and construct neighbor list.
-        n_total = positions.shape[0]
-        with torch.no_grad():
-            params = estimate_pme_parameters(
+        alpha, mesh_dimensions, neighbor_matrix, neighbor_shift_matrix = (
+            _estimate_pme_params_and_neighbors(
                 positions,
                 cell,
+                cell_3d,
+                pbc,
                 batch_idx=batch_idx.to(torch.int32),
                 accuracy=self.pme_accuracy,
+                pme_cutoff=pme_cutoff,
+                pme_alpha=pme_alpha,
+                pme_mesh_dimensions=pme_mesh_dimensions,
             )
-            # NOTE: Because we're using max cutoff over the batch, this will be batch-dependent,
-            # which can cause batch non-determinism.
-            cutoff = params.real_space_cutoff.max().item()
-            if pme_cutoff is not None:
-                cutoff = pme_cutoff
-            alpha = params.alpha
-            if pme_alpha is not None:
-                alpha = pme_alpha
-            mesh_dimensions = tuple(params.mesh_dimensions)
-            if pme_mesh_dimensions is not None:
-                mesh_dimensions = pme_mesh_dimensions
-
-            neighbor_matrix, num_neighbors, neighbor_shift_matrix = (
-                _compute_neighbor_list_with_fallback(
-                    positions=positions,
-                    cell=cell_3d,
-                    pbc=pbc,
-                    cutoff=cutoff,
-                    batch_idx=batch_idx.to(torch.int32),
-                    fill_value=n_total,
-                )
-            )
-        max_nn = max(int(num_neighbors.max().item()), 1)
-        neighbor_matrix = neighbor_matrix[:, :max_nn]
-        neighbor_shift_matrix = neighbor_shift_matrix[:, :max_nn, :]
+        )
 
         # nvalchemiops computes pure q_i*q_j/r (no Coulomb constant).
         # We absorb our constant by scaling charges: q_scaled = q * sqrt(k),
         # so E = k * sum(q_i*q_j/r) = sum(q_scaled_i * q_scaled_j / r).
         scaled_charges = charges * torch.sqrt(self.coulomb_constant)
 
-        per_atom_energies, explicit_forces, explicit_virial = particle_mesh_ewald(
+        per_atom_energies, explicit_forces, explicit_virial = _particle_mesh_ewald(
             positions=positions,
             charges=scaled_charges,
             cell=cell,
@@ -249,7 +228,7 @@ class CoulombModule(torch.nn.Module):
             batch_idx=batch_idx.to(torch.int32),
             neighbor_matrix=neighbor_matrix.to(torch.int32),
             neighbor_matrix_shifts=neighbor_shift_matrix.to(torch.int32),
-            mask_value=n_total,
+            mask_value=positions.shape[0],
             accuracy=self.pme_accuracy,
             compute_forces=True,
             compute_charge_gradients=False,
@@ -269,6 +248,53 @@ class CoulombModule(torch.nn.Module):
         surrogate_energies = energies
 
         return surrogate_energies, explicit_forces, explicit_virial
+
+
+@torch.compiler.disable
+def _particle_mesh_ewald(**kwargs):
+    """Excluded from torch.compile — see "Additional notes" in https://github.com/NVIDIA/nvalchemi-toolkit-ops/pull/53."""
+    return particle_mesh_ewald(**kwargs)
+
+
+@torch.compiler.disable
+def _estimate_pme_params_and_neighbors(
+    positions,
+    cell,
+    cell_3d,
+    pbc,
+    *,
+    batch_idx,
+    accuracy,
+    pme_cutoff=None,
+    pme_alpha=None,
+    pme_mesh_dimensions=None,
+):
+    """Excluded from torch.compile — see "Additional notes" in https://github.com/NVIDIA/nvalchemi-toolkit-ops/pull/53."""
+    n_total = positions.shape[0]
+    with torch.no_grad():
+        params = estimate_pme_parameters(positions, cell, batch_idx=batch_idx, accuracy=accuracy)
+        # NOTE: Because we're using max cutoff over the batch, this will be batch-dependent,
+        # which can cause batch non-determinism.
+        cutoff = params.real_space_cutoff.max().item() if pme_cutoff is None else pme_cutoff
+        alpha = params.alpha if pme_alpha is None else pme_alpha
+        mesh_dimensions = (
+            tuple(params.mesh_dimensions) if pme_mesh_dimensions is None else pme_mesh_dimensions
+        )
+
+        neighbor_matrix, num_neighbors, neighbor_shift_matrix = (
+            _compute_neighbor_list_with_fallback(
+                positions=positions,
+                cell=cell_3d,
+                pbc=pbc,
+                cutoff=cutoff,
+                batch_idx=batch_idx,
+                fill_value=n_total,
+            )
+        )
+    max_nn = max(int(num_neighbors.max().item()), 1)
+    neighbor_matrix = neighbor_matrix[:, :max_nn]
+    neighbor_shift_matrix = neighbor_shift_matrix[:, :max_nn, :]
+    return alpha, mesh_dimensions, neighbor_matrix, neighbor_shift_matrix
 
 
 def _fully_connected_senders_receivers(

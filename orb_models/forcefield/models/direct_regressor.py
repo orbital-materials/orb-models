@@ -234,10 +234,6 @@ class DirectForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
             heads.append("free_energy")
         return heads
 
-    def compile(self, *args, **kwargs):
-        """Override the default Module.compile method to compile only the GNS model."""
-        self.model.compile(*args, **kwargs)
-
     def is_compiled(self):
         """Check if the model is compiled."""
         return self._compiled_call_impl or self.model._compiled_call_impl

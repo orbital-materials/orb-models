@@ -10,8 +10,14 @@ from orb_models.common.models import gns, segment_ops
 from orb_models.common.models.rbf import BesselBasis, ExpNormalSmearing
 from orb_models.forcefield.forcefield_adapter import ForcefieldAtomsAdapter
 from orb_models.forcefield.models.conservative_regressor import ConservativeForcefieldRegressor
+from orb_models.forcefield.models.coulomb_module import CoulombModule
 from orb_models.forcefield.models.direct_regressor import DirectForcefieldRegressor
-from orb_models.forcefield.models.forcefield_heads import EnergyHead, ForceHead, StressHead
+from orb_models.forcefield.models.forcefield_heads import (
+    EnergyHead,
+    ForceHead,
+    LatentChargeHead,
+    StressHead,
+)
 
 _KEY = "feat"
 
@@ -54,7 +60,7 @@ def get_batch_from_ase_with_latents():
     }
     atom_graphs.system_features = {
         **atom_graphs.system_features,
-        "cell": torch.eye(3).unsqueeze(0),
+        "cell": torch.tensor(atoms.cell.array, dtype=torch.float32).unsqueeze(0),
     }
     atom_graphs.node_targets = {"forces": force_targets}
     atom_graphs.edge_targets = {}
@@ -200,10 +206,20 @@ def gns_model():
     return m.to(dtype=torch.get_default_dtype())
 
 
+@pytest.fixture()
+def latent_charge_head():
+    return LatentChargeHead(latent_dim=9, num_mlp_layers=1, mlp_hidden_dim=16)
+
+
+@pytest.fixture()
+def coulomb_module():
+    return CoulombModule()
+
+
 @pytest.fixture
-def conservative_regressor(gns_model, energy_head, force_head, stress_head):
+def conservative_regressor(gns_model, energy_head, latent_charge_head, coulomb_module):
     return ConservativeForcefieldRegressor(
-        heads={"energy": energy_head},
+        heads={"energy": energy_head, "latent_charges": latent_charge_head},
         model=gns_model,
         loss_weights={
             "energy": 1.0,
@@ -211,6 +227,7 @@ def conservative_regressor(gns_model, energy_head, force_head, stress_head):
             "grad_stress": 1.0,
             "rotational_grad": 1.0,
         },
+        coulomb_module=coulomb_module,
     )
 
 
