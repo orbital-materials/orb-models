@@ -16,7 +16,7 @@ See below for more explanation of this naming convention. Both models have `inf`
 
 * `orbmol-v2`
 
-OrbMol-v2 extends the OrbMol architecture with **learnable per-atom electrostatics**: a `LatentChargeHead` and `LatentSpinHead` predict per-atom latent features that are constrained to sum to the system total charge and to 2S = `spin_multiplicity − 1` respectively, and a `CoulombModule` adds a long-range Coulomb energy on top of the GNN — direct bare-1/r Coulomb sum for non-periodic systems, Particle Mesh Ewald via `nvalchemiops` for periodic systems. The energy head (`ChargeConditionedEnergyHead`) is conditioned on these per-atom features.
+OrbMol-v2 extends the OrbMol architecture with **learnable per-atom electrostatics**: a `LatentChargeHead` predicts per-atom latent charges constrained to sum to the system total charge, and a `CoulombModule` adds a long-range Coulomb energy on top of the GNN, direct bare-1/r Coulomb sum for non-periodic systems, Particle Mesh Ewald via `nvalchemiops` for periodic systems. The energy head (`ChargeConditionedEnergyHead`) is conditioned on the per-atom charges. System-level total charge and spin multiplicity are still passed in via the `ChargeSpinConditioner`.
 
 Trained on OMol25 and OPoly26 (ωB97M-V/def2-TZVPD); supports both periodic and non-periodic systems. Stress is enabled via `model.enable_stress()` if needed.
 
@@ -26,7 +26,7 @@ model, atoms_adapter = orbmol_v2(device="cuda")
 # atoms.info["charge"] and atoms.info["spin"] (multiplicity, = 2S+1) must be set.
 ```
 
-> **Caution:** While the model does predict per-atom charge and spin values as latent features in the charge and spin heads, the model has not seen any per-atom charge or spin values during training — these are emergent from optimisation against energies and forces alone. They should therefore be treated with caution: while in at least some cases they appear to correspond to the correct physical values, the reliability and generality of this correspondence is unclear and is the subject of ongoing investigations.
+> **Caution:** While the model does predict per-atom charge values as a latent feature in the charge head, the model has not seen any per-atom charge values during training; these are emergent from optimisation against energies and forces alone. They should therefore be treated with caution: while in at least some cases they appear to correspond to the correct physical values, the reliability and generality of this correspondence is unclear and is the subject of ongoing investigations.
 
 ### [V3 Models](https://arxiv.org/abs/2504.06231)
 
