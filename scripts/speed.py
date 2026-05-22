@@ -171,6 +171,8 @@ def create_random_crystal(num_atoms, elements=["Au", "Ag", "Cu"], pbc=True):
     random_crystal.set_chemical_symbols(random_elements)
     random_crystal.center()
     random_crystal.set_pbc(pbc)
+    random_crystal.info["charge"] = 0
+    random_crystal.info["spin"] = 1
 
     return random_crystal
 
