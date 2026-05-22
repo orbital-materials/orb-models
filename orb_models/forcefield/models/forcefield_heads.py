@@ -750,15 +750,17 @@ class LatentChargeHead(torch.nn.Module):
         charges = self.mlp(node_features)
 
         if self.enforce_total_charge:
-            # Center charges to zero mean per system
+            # Center charges to zero mean per system.
             mean_charges = segment_ops.aggregate_nodes(charges, batch.n_node, reduction="mean")
-            charges = charges - mean_charges[batch.node_batch_index]
+            charges = charges - mean_charges.repeat_interleave(batch.n_node, dim=0)
 
             # If total_charge is available, shift charges to match it
             if batch.system_features is not None and "total_charge" in batch.system_features:
                 total_charge = batch.system_features["total_charge"].to(dtype=charges.dtype)
                 charge_shift = total_charge / batch.n_node.to(dtype=charges.dtype)
-                charges = charges + charge_shift.unsqueeze(-1)[batch.node_batch_index]
+                charges = charges + charge_shift.unsqueeze(-1).repeat_interleave(
+                    batch.n_node, dim=0
+                )
 
         charges = charges * self.charge_scale
 
@@ -804,15 +806,15 @@ class LatentSpinHead(torch.nn.Module):
         spins = self.mlp(node_features)
 
         if self.enforce_spin_constraint:
-            # Center spins to zero mean per system
+            # Center spins to zero mean per system.
             mean_spins = segment_ops.aggregate_nodes(spins, batch.n_node, reduction="mean")
-            spins = spins - mean_spins[batch.node_batch_index]
+            spins = spins - mean_spins.repeat_interleave(batch.n_node, dim=0)
 
             # Shift spins so they sum to 2S = spin_multiplicity - 1 per system
             if batch.system_features is not None and "spin_multiplicity" in batch.system_features:
                 spin_multiplicity = batch.system_features["spin_multiplicity"].to(dtype=spins.dtype)
                 total_spin = spin_multiplicity - 1  # 2S = multiplicity - 1
                 spin_shift = total_spin / batch.n_node.to(dtype=spins.dtype)
-                spins = spins + spin_shift.unsqueeze(-1)[batch.node_batch_index]
+                spins = spins + spin_shift.unsqueeze(-1).repeat_interleave(batch.n_node, dim=0)
 
         return spins

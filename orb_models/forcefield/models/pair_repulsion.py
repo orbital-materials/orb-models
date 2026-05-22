@@ -167,6 +167,7 @@ class ZBLBasis(torch.nn.Module):
                 reduction="sum",
             )
             stress = torch_full_3x3_to_voigt_6_stress(stress) / volume.unsqueeze(1)
+            stress = torch.where(torch.abs(stress) < 1e10, stress, torch.zeros_like(stress))
 
             output["forces"] = forces
             output["stress"] = stress
@@ -192,8 +193,7 @@ class ZBLBasis(torch.nn.Module):
         Returns:
             tuple: (envelope, derivative)
         """
-        # Convert p to float for calculations
-        p_float = float(p)
+        p_float = p.to(torch.float32)
 
         # Mask for r < r_max
         mask = (r < r_max).float()

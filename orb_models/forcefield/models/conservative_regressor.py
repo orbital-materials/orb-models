@@ -211,7 +211,7 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
             coulomb_energy, coulomb_explicit_forces, coulomb_explicit_virial = self.coulomb_module(
                 latent_charges, batch
             )
-            interaction_energy += coulomb_energy
+            interaction_energy = interaction_energy + coulomb_energy
 
         out[self.energy_name] = interaction_energy
 
