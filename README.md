@@ -26,11 +26,12 @@ Alternatively, you can use Docker to run orb-models; [see instructions below](#d
 Adding learned electrostatics (LES) to OrbMol-v2 costs essentially nothing on speed but slashes the error.
 
 * **Speed.** On H100, OrbMol-v2 runs at 44 QPS at 1k atoms and 9 QPS at 10k atoms on periodic systems — within ~5% of OrbMol-v1 at every system size.
-* **Accuracy.** On GSCDB138 (5,000+ reaction energies covering noncovalent interactions, thermochemistry, isomerization, transition-metal chemistry, etc.; excluding reactions involving single-atom species), OrbMol-v2's overall Normalized Error Ratio drops from **6.05 → 1.83** (3.3× lower, comparable to a good DFT functional). The improvement concentrates in categories that explicit long-range electrostatics actually fixes:
-  * Noncovalent interactions (NC): 5.96 → 2.60 (2.3× lower)
-  * Thermochemistry (TC): 11.68 → 1.53 (7.6× lower)
-  * Transition metal chemistry (TM): 2.86 → 1.60 (1.8× lower)
-  * Barrier heights and intramolecular noncovalent: modest gains; isomerization essentially unchanged.
+* **Accuracy on GSCDB138** (5,000+ reaction energies covering noncovalent interactions, thermochemistry, isomerization, transition-metal chemistry, etc.; excluding reactions involving single-atom species). OrbMol-v2's overall Normalized Error Ratio drops from **6.05 → 1.62** (3.7× lower, comparable to a good DFT functional). The improvement concentrates in categories that explicit long-range electrostatics actually fixes:
+  * Noncovalent interactions (NC): 5.96 → 1.66 (3.6× lower)
+  * Thermochemistry (TC): 11.68 → 1.83 (6.4× lower)
+  * Transition metal chemistry (TM): 2.86 → 1.92 (1.5× lower)
+  * Barrier heights (BH): 1.35 → 1.26; intramolecular noncovalent (INC): 1.49 → 1.33; isomerization (ISO) regresses slightly, 1.03 → 1.36.
+* **Other benchmarks.** GMTKN55 WTMAD-2 improves 5.41 → 4.37 kcal/mol; WIGGLE150 conformer-energy RMSE 1.23 → 1.19 kcal/mol. BEGDB (MAE 0.235 kcal/mol) and ACONFL (RMSE 0.40 kcal/mol) are new entries in the v2 evaluation suite where v1 wasn't benchmarked.
 
 `model.predict(...)["energy"]` now returns **fp64** by default to preserve kJ/mol resolution against OMol-scale references (~1e4–1e5 eV). Pass `fp64_energy=False` to opt out.
 
