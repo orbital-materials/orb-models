@@ -25,7 +25,17 @@ Alternatively, you can use Docker to run orb-models; [see instructions below](#d
 
 Adding learned electrostatics (LES) to OrbMol-v2 costs essentially nothing on speed but slashes the error.
 
-* **Speed.** With full-model `torch.compile`, forward-pass time on a single 80 GB GPU is ~30 ms at 100 atoms, ~42 ms at 1k atoms, ~116 ms at 5k atoms, and ~191 ms at 10k atoms (periodic systems). The no-per-atom-spin-head architecture is 1–12% faster than the previous LatentSpinHead-having v2 development checkpoint at every system size; single-graph inference is memory-capped around 10k atoms on 80 GB.
+* **Speed.** Adding learnable electrostatics on top of OrbMol-v1 introduces a Coulomb / PME path with fixed overhead per forward, but `model.compile(...)` now wraps the **full** regressor (heads + Coulomb included) thanks to the changes ported from `orbital-materials/orb#3074`. The net result on a single 80 GB GPU (forward time on periodic random crystals):
+
+  | Atoms | OrbMol-v1 (backbone-compile) | OrbMol-v2-teqabfhg (full-compile) |
+  |---:|---:|---:|
+  | 100 | 17 ms | 30 ms |
+  | 1,000 | 37 ms | 42 ms |
+  | 5,000 | 124 ms | 116 ms |
+  | 10,000 | 278 ms | **191 ms** |
+  | 50,000+ | OOM | OOM |
+
+  At small system sizes the electrostatics overhead dominates and v2 is slower; the crossover is around 5k atoms, after which v2 pulls ahead, reaching a **1.46× speedup at 10k atoms**. Single-graph inference is memory-capped around 10k atoms on 80 GB.
 * **Accuracy on GSCDB138** (5,000+ reaction energies covering noncovalent interactions, thermochemistry, isomerization, transition-metal chemistry, etc.; excluding reactions involving single-atom species). OrbMol-v2's overall Normalized Error Ratio drops from **6.05 → 1.62** (3.7× lower, comparable to a good DFT functional). The improvement concentrates in categories that explicit long-range electrostatics actually fixes:
   * Noncovalent interactions (NC): 5.96 → 1.66 (3.6× lower)
   * Thermochemistry (TC): 11.68 → 1.83 (6.4× lower)
