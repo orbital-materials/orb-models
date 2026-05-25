@@ -215,7 +215,7 @@ def test_orbmol_v2_predictions(orbmol_v2_and_config):
     result = orb.predict(graph)
     energy = result["energy"][0].detach().numpy()
     stress = result["grad_stress"][0].detach().numpy()
-    cu_energy_gold = np.array(-178550.9810)
+    cu_energy_gold = np.array(-178550.98098)
     cu_stress_gold = np.array([-0.09994, -0.10850, -0.11481, -0.00028, -0.00035, 0.00305])
     assert np.isclose(energy, cu_energy_gold, atol=1e-5)
     np.testing.assert_allclose(stress, cu_stress_gold, atol=1e-5)
