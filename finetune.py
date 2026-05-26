@@ -29,6 +29,9 @@ from orb_models.common.training.metrics import ScalarMetricTracker
 from orb_models.common.training.util import get_optim, init_device
 from orb_models.common.utils import seed_everything
 from orb_models.forcefield import pretrained
+from orb_models.forcefield.models.conservative_regressor import (
+    ConservativeForcefieldRegressor,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -448,9 +451,8 @@ def run(args):
         train_reference_energies=args.trainable_reference_energies,
     )
 
-    # Detect conservative vs direct from the actual model, not the name
-    # (orbmol_v2 is conservative but its name doesn't contain "conservative").
-    is_conservative_model = "grad_forces" in model.loss_weights
+    # Detect conservative vs direct from the instantiated model type.
+    is_conservative_model = isinstance(model, ConservativeForcefieldRegressor)
 
     # Map CLI loss-weight flags onto the keys the instantiated model expects.
     loss_weights: dict[str, float] = {}

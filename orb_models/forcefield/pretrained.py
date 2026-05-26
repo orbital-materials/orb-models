@@ -415,7 +415,7 @@ def orbmol_v2(
     train_reference_energies: bool = False,
     loss_weights: dict[str, float] | None = None,
 ) -> tuple[ConservativeForcefieldRegressor, ForcefieldAtomsAdapter]:
-    """Load OrbMol-v2 with learnable electrostatics (charges, spins, Coulomb).
+    """Load OrbMol-v2 with learnable electrostatics (charges, Coulomb).
 
     Trained on OMol25 and OPoly26 (ωB97M-V/def2-TZVPD).
     """
