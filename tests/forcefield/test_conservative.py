@@ -145,6 +145,18 @@ def test_regressor_compile(conservative_regressor, graph_name, request):
     conservative_regressor(graph)
 
 
+def test_compile_engages_backbone(conservative_regressor):
+    """``.compile()`` must compile the GNS backbone, not just the regressor wrapper.
+
+    Guards against falling back to ``nn.Module.compile()`` semantics in a future
+    refactor; the backbone-only override is what gives the post-backbone path (autograd,
+    Coulomb, etc.) clean eager execution without fragmenting a full traced graph.
+    """
+    assert conservative_regressor.model._compiled_call_impl is None
+    conservative_regressor.compile(mode="default", dynamic=True)
+    assert conservative_regressor.model._compiled_call_impl is not None
+
+
 @pytest.mark.parametrize("graph_name", ["single_graph", "batch"])
 def test_regressor_compile_matches_eager(conservative_regressor, graph_name, request):
     """Compile produces the same outputs as eager."""

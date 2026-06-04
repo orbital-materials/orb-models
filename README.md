@@ -24,7 +24,7 @@ Alternatively, you can use Docker to run orb-models; [see instructions below](#d
 **May 2026**: Release of OrbMol-v2 — adds a `CoulombModule` for long-range electrostatics on top of the OrbMol architecture, using direct Coulomb summation for non-periodic systems and Particle Mesh Ewald (via `nvalchemiops`) for periodic. Trained on OMol25 and OPoly26 (ωB97M-V/def2-TZVPD); load with `pretrained.orbmol_v2(device="cuda")`. See [MODELS.md](MODELS.md) for the full architecture description.
 
 * **Long-range electrostatics and learnable charges.** GSCDB138 Normalized Error Ratio drops from **6.05 → 1.62** (3.7× lower, comparable to a good DFT functional).
-* **Full-model compilation.** `model.compile(...)` now wraps the full regressor for all models, giving ~1.7× speedup at 10k atoms on a single 80 GB GPU.
+* **Backbone compilation.** `model.compile(...)` compiles the GNS message-passing backbone (where the FLOPs are), giving a measurable inference speedup on direct models that previously slipped through the compile call (~1.3× at 1k-10k atoms on a single H100).
 
 `model.predict(...)["energy"]` now returns **fp64** by default to preserve kJ/mol resolution against OMol-scale references (~1e4–1e5 eV). Pass `fp64_energy=False` to opt out.
 

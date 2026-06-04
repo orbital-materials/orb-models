@@ -11,6 +11,18 @@ def test_regressor_compile(direct_regressor, graph_name, request):
     direct_regressor(graph)
 
 
+def test_compile_engages_backbone(direct_regressor):
+    """``.compile()`` must compile the GNS backbone, not just the regressor wrapper.
+
+    ``predict()`` calls ``self.model(batch)`` directly and bypasses ``__call__``, so
+    compiling only the regressor leaves inference fully eager. Guards against silently
+    falling back to ``nn.Module.compile()`` semantics in a future refactor.
+    """
+    assert direct_regressor.model._compiled_call_impl is None
+    direct_regressor.compile(mode="default", dynamic=True)
+    assert direct_regressor.model._compiled_call_impl is not None
+
+
 @pytest.mark.parametrize("graph_name", ["single_graph", "batch"])
 def test_regressor_compile_matches_eager(direct_regressor, graph_name, request):
     """Compile produces the same outputs as eager."""

@@ -234,6 +234,17 @@ class DirectForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
             heads.append("free_energy")
         return heads
 
+    def compile(self, *args, **kwargs):
+        """Override the default Module.compile method to compile only the GNS backbone.
+
+        ``predict()`` calls ``self.model(batch)`` directly rather than going through
+        ``__call__``, so compiling the regressor as a whole (the default
+        ``nn.Module.compile()`` behaviour) leaves inference uncompiled. Compiling the
+        backbone instead ensures the message-passing layers, which dominate FLOPs, run
+        through ``torch.compile`` in both training and inference paths.
+        """
+        self.model.compile(*args, **kwargs)
+
     def is_compiled(self):
         """Check if the model is compiled."""
         return self._compiled_call_impl or self.model._compiled_call_impl
