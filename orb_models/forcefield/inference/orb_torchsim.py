@@ -12,7 +12,6 @@ import torch
 
 from orb_models.common.atoms.graph_featurization import EdgeCreationMethod
 from orb_models.forcefield.forcefield_adapter import ForcefieldAtomsAdapter
-from orb_models.forcefield.inference.calculator import _is_conservative
 from orb_models.forcefield.inference.d3_model import D3SumModel
 from orb_models.forcefield.models.conservative_regressor import ConservativeForcefieldRegressor
 from orb_models.forcefield.models.direct_regressor import DirectForcefieldRegressor
@@ -44,25 +43,16 @@ class OrbTorchSimModel(ModelInterface):
         self._device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self._dtype = dtype
 
-        # Set up system configuration
         self.atoms_adapter = atoms_adapter
         self.edge_method = edge_method
-        self.conservative = _is_conservative(model)
 
-        # Set device and dtype
         self.model = model.to(self._device)  # type: ignore
         self.model = self.model.eval()
         if self.dtype is not None:
             self.model = self.model.to(dtype=self.dtype)
 
-        # Set up implemented properties
         self.implemented_properties = self.model.properties
-        if self.conservative:
-            self.implemented_properties.extend(["forces"])
-            if self.model.has_stress:
-                self.implemented_properties.append("stress")
 
-        # Set flags for TorchSim
         self._compute_stress = "stress" in self.implemented_properties
         self._compute_forces = "forces" in self.implemented_properties
 
@@ -103,31 +93,11 @@ class OrbTorchSimModel(ModelInterface):
     def _get_results(self, out: dict[str, torch.Tensor]):
         """Parses the results into a final output dictionary."""
         results = {}
-        model = self.model.xc_model if isinstance(self.model, D3SumModel) else self.model
-        no_direct_energy_head = "energy" not in model.heads  # type: ignore
-        no_direct_force_head = "forces" not in model.heads  # type: ignore
-        no_direct_stress_head = "stress" not in model.heads  # type: ignore
-        for property in self.implemented_properties:
-            if property == "free_energy" and no_direct_energy_head:
+        for prop in self.implemented_properties:
+            out_key = "energy" if prop == "free_energy" else prop
+            if out_key not in out:
                 continue
-            if property == "forces" and no_direct_force_head:
-                continue
-            if property == "stress" and no_direct_stress_head:
-                continue
-            _property = "energy" if property == "free_energy" else property
-
-            results[property] = torch.atleast_1d(out[_property])
-
-        # Rename certain keys for the conservative model
-        if self.conservative:
-            if model.forces_name in results:
-                results["direct_forces"] = results[model.forces_name]
-            results["forces"] = results[model.grad_forces_name]
-
-            if model.has_stress:
-                if model.stress_name in results:
-                    results["direct_stress"] = results[model.stress_name]
-                results["stress"] = results[model.grad_stress_name]
+            results[prop] = torch.atleast_1d(out[out_key])
 
         # Ensure stress has shape [-1, 3, 3]
         if "stress" in results and results["stress"].shape[-1] == 6:

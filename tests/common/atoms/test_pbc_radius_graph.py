@@ -146,7 +146,7 @@ def test_CO2_graph(edge_method):
     adsorbate = get_CO2()
     positions = torch.tensor(adsorbate.positions, dtype=torch.float32)
     cell = torch.zeros((3, 3), dtype=torch.float32)
-    pbc = torch.tensor([False], dtype=torch.bool)
+    pbc = torch.tensor([False, False, False], dtype=torch.bool)
     out = graph_featurization.compute_pbc_radius_graph(
         positions=positions,
         radius=6.0,

@@ -259,14 +259,14 @@ Lines starting with `#` are treated as comments and ignored.
 The script automatically handles the differences between conservative and direct models:
 
 - **Conservative models** (e.g., `orbmol_v2`):
-  - Use `grad_forces` and `grad_stress` as **loss-weight keys**
+  - Use `energy`, `forces` and `stress` as **loss-weight keys**
   - Compute forces via automatic differentiation
 
 - **Direct models** (e.g., `orb_v3_direct_omol`):
-  - Use `forces` and `stress` as **loss-weight keys**
+  - Use `energy`, `forces` and `stress` as **loss-weight keys**
   - Predict forces directly
 
-When you specify loss weights via command line (e.g., `--forces_loss_weight 10.0`), the script automatically maps this to the correct key (`grad_forces` for conservative models, `forces` for direct models).
+You can specify loss weights via command line (e.g., `--forces_loss_weight 10.0`).
 
 ## Using the API Directly (Without the Finetuning Script)
 
@@ -283,19 +283,8 @@ model, atoms_adapter = pretrained.orbmol_v2(
     train_reference_energies=True,  # Make reference energies trainable
     loss_weights={
         'energy': 1.0,
-        'grad_forces': 10.0,      # Use 'grad_forces' for conservative models
-        'grad_stress': 100.0       # Use 'grad_stress' for conservative models
-    }
-)
-
-# For direct models, use 'forces' and 'stress' keys:
-model, atoms_adapter = pretrained.orb_v3_direct_omol(
-    device='cuda',
-    train=True,
-    loss_weights={
-        'energy': 1.0,
-        'forces': 10.0,    # Use 'forces' for direct models
-        'stress': 100.0    # Use 'stress' for direct models  
+        'forces': 10.0,
+        'stress': 100.0
     }
 )
 
@@ -333,7 +322,7 @@ You can also specify loss weights when loading for further finetuning:
 # Load for continued finetuning with different loss weights
 model, atoms_adapter = pretrained.orbmol_v2(
     train=True,
-    loss_weights={'energy': 0.5, 'grad_forces': 20.0}
+    loss_weights={'energy': 0.5, 'forces': 20.0}
 )
 model.load_state_dict(torch.load('path/to/finetuned_checkpoint.pt'))
 ```
@@ -390,7 +379,7 @@ model, atoms_adapter = pretrained.orbmol_v2(
     train_reference_energies=False,  # Fixed reference energies
     loss_weights={
         'energy': 1.0,
-        'grad_forces': 10.0,
+        'forces': 10.0,
     }
 )
 

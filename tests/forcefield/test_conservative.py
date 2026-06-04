@@ -14,33 +14,40 @@ def test_regressor_forward(request, conservative_regressor, graph_name):
     graph = request.getfixturevalue(graph_name)
     out = conservative_regressor(graph)
     assert "energy" in out
-    assert "grad_forces" in out
-    assert "grad_stress" in out
+    assert "forces" in out
+    assert "stress" in out
 
 
 def test_regressor_loss(conservative_regressor, batch):
     out = conservative_regressor.loss(batch)
     out.loss.backward()
 
-    # Check that metrics are computed for both direct and conservative predictions
     assert any("energy" in k for k in out.log)
-    assert any("grad-forces" in k for k in out.log)
-    assert any("grad-stress" in k for k in out.log)
+    assert any("forces" in k for k in out.log)
+    assert any("stress" in k for k in out.log)
     assert any("rotational_grad" in k for k in out.log)
 
 
-def test_regressor_head_config_raises_error(gns_model, energy_head, force_head, stress_head):
+def test_regressor_head_config_raises_error(gns_model, energy_head):
     with pytest.raises(ValueError, match="Loss weights for unknown targets"):
         ConservativeForcefieldRegressor(
-            heads={"energy": energy_head, "forces": force_head},
+            heads={"energy": energy_head},
             model=gns_model,
             loss_weights={
                 "energy": 1.0,
                 "forces": 1.0,
                 "stress": 1.0,
-                "grad_forces": 1.0,
-                "grad_stress": 1.0,
+                "nonexistent_head": 1.0,
             },
+        )
+
+
+def test_forces_stress_heads_rejected(gns_model, energy_head, force_head, stress_head):
+    with pytest.raises(AssertionError, match="collide with gradient-based prediction keys"):
+        ConservativeForcefieldRegressor(
+            heads={"energy": energy_head, "forces": force_head, "stress": stress_head},
+            model=gns_model,
+            loss_weights={"energy": 1.0, "forces": 1.0, "stress": 1.0},
         )
 
 
@@ -68,8 +75,33 @@ def test_regressor_predict(batch, conservative_regressor):
     conservative_regressor.eval()
     inference = conservative_regressor.predict(batch)
     assert "energy" in inference
-    assert "grad_forces" in inference
-    assert "grad_stress" in inference
+    assert "forces" in inference
+    assert "stress" in inference
+
+
+def test_regressor_predict_preserves_kjmol_at_scale(batch, conservative_regressor):
+    """End-to-end mirror of test_energy_head_absolute_energy_preserves_kjmol_at_scale."""
+    conservative_regressor.eval()
+    large_ref = 1e5
+
+    energy_head = conservative_regressor.heads["energy"]
+    n_atoms = int(batch.n_node[0].item())
+    assert (batch.n_node == n_atoms).all(), "fixture assumption: uniform atom count"
+    with torch.no_grad():
+        energy_head.reference.linear.weight.fill_(large_ref / n_atoms)
+
+    # The MLP-produced interaction energy is whatever gets added to reference inside predict
+    interaction_energy = conservative_regressor(batch)["interaction_energy"].detach()
+
+    # fp64 path preserves the interaction energy against the large reference.
+    absolute = conservative_regressor.predict(batch, fp64_energy=True)["energy"]
+    recovered = (absolute - large_ref).float()
+    torch.testing.assert_close(recovered, interaction_energy, atol=1e-6, rtol=0)
+
+    # fp32 path loses the interaction energy precision, demonstrating why fp64 is required
+    absolute_fp32 = conservative_regressor.predict(batch, fp64_energy=False)["energy"]
+    fp32_roundtrip = absolute_fp32 - large_ref
+    assert not torch.allclose(fp32_roundtrip, interaction_energy, atol=1e-6, rtol=0)
 
 
 def test_featurization_differentiability_with_conservative_regressor(

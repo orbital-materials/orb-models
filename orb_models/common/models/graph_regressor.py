@@ -32,7 +32,6 @@ class RegressionHead(torch.nn.Module, abc.ABC):
         self,
         pred: torch.Tensor,
         batch: AbstractAtomBatch,
-        alternative_target: torch.Tensor | None = None,
     ) -> base.ModelOutput: ...
 
 
@@ -103,42 +102,37 @@ class GraphHead(RegressionHead):
         self.real_loss_type = real_loss_type
 
     def forward(self, node_features: torch.Tensor, batch: AbstractAtomBatch) -> torch.Tensor:
-        """Predictions with raw logits (no sigmoid/softmax or any inverse transformations)."""
+        """Return predictions. Physical units for real domain, raw logits for binary/categorical."""
         input = segment_ops.aggregate_nodes(
             node_features,
             batch.n_node,
             reduction=self.node_aggregation,
         )
         pred = self.mlp(input)
+        if self.target.domain == "real":
+            return self.normalizer.inverse(pred)
         return pred
 
     def predict(self, node_features: torch.Tensor, batch: AbstractAtomBatch) -> torch.Tensor:
         """Predict graph-level attribute."""
-        pred = self(node_features, batch)
-        logits = pred.squeeze(-1)
-        probs = self.output_activation(logits)
-        if self.target.domain == "real":
-            probs = self.normalizer.inverse(probs)
-        return probs
+        pred = self(node_features, batch).squeeze(-1)
+        if self.target.domain != "real":
+            pred = self.output_activation(pred)
+        return pred
 
     def loss(
         self,
         pred: torch.Tensor,
         batch: AbstractAtomBatch,
-        alternative_target: torch.Tensor | None = None,
     ):
-        """Apply mlp to compute loss and metrics.
+        """Compute loss and metrics.
 
-        Depending on whether the target is real/binary/categorical, we
-        use an MSE/cross-entropy loss. In the case of cross-entropy, the
-        preds are logits (not normalized) to take advantage of numerically
-        stable log-softmax.
+        For real domain, pred is in physical units (from forward). For
+        binary/categorical, pred is raw logits for numerically stable
+        log-softmax / BCE.
         """
         name = self.target.fullname
-        if alternative_target is not None:
-            target = alternative_target
-        else:
-            target = batch.system_targets[name].squeeze(-1)
+        target = batch.system_targets[name].squeeze(-1)
         pred = pred.squeeze(-1)
 
         if self.target.domain == "categorical":
@@ -151,12 +145,12 @@ class GraphHead(RegressionHead):
         else:
             assert pred.shape == target.shape, f"{pred.shape} != {target.shape}"
             normalized_target = self.normalizer(target)
-            loss = mean_error(pred, normalized_target, self.real_loss_type)
-            raw_pred = self.normalizer.inverse(pred)
+            normalized_pred = self.normalizer(pred, online=False)
+            loss = mean_error(normalized_pred, normalized_target, self.real_loss_type)
             metrics = {
                 f"{name}_loss": loss,
-                f"{name}_mae_raw": torch.abs(raw_pred - target).mean(),
-                f"{name}_mse_raw": ((raw_pred - target) ** 2).mean(),
+                f"{name}_mae_raw": torch.abs(pred - target).mean(),
+                f"{name}_mse_raw": ((pred - target) ** 2).mean(),
             }
 
         return base.ModelOutput(loss=loss, log=metrics)

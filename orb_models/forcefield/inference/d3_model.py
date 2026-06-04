@@ -97,10 +97,23 @@ class AlchemiDFTD3(torch.nn.Module):
         self.register_buffer("c6_reference", d3_params.c6ab.float(), persistent=True)
         self.register_buffer("coord_num_ref", d3_params.cn_ref.float(), persistent=True)
 
-    def predict(self, batch: AtomGraphs, split: bool = False) -> dict[str, torch.Tensor]:
+    def predict(
+        self,
+        batch: AtomGraphs,
+        split: bool = False,
+        *,
+        compute_forces: bool = True,
+        compute_stress: bool = True,
+    ) -> dict[str, torch.Tensor]:
         """Predict by summing outputs from both XC and D3 models."""
         out = self(
-            batch.positions, batch.cell, batch.atomic_numbers, batch.pbc, batch.node_batch_index
+            batch.positions,
+            batch.cell,
+            batch.atomic_numbers,
+            batch.pbc,
+            batch.node_batch_index,
+            compute_forces=compute_forces,
+            compute_stress=compute_stress,
         )
 
         if split:
@@ -109,9 +122,19 @@ class AlchemiDFTD3(torch.nn.Module):
         return out
 
     def forward(
-        self, positions, cell, atomic_numbers, pbc, node_batch_index
+        self,
+        positions,
+        cell,
+        atomic_numbers,
+        pbc,
+        node_batch_index,
+        *,
+        compute_forces: bool = True,
+        compute_stress: bool = True,
     ) -> dict[str, torch.Tensor]:
-        """Compute DFT-D3 dispersion energy and forces."""
+        """Compute DFT-D3 dispersion energy, and optionally forces and stress."""
+        compute_stress = compute_stress and self.has_stress
+
         with torch.inference_mode():
             # Convert inputs to atomic units
             cell_angstrom = cell.contiguous()
@@ -155,19 +178,21 @@ class AlchemiDFTD3(torch.nn.Module):
                 k3=self.k3,
                 s5_smoothing_on=self.s5_smoothing_on,
                 s5_smoothing_off=self.s5_smoothing_off,
-                compute_virial=self.has_stress,
+                compute_virial=compute_stress,
             )
-            if self.has_stress:
-                energy, forces, coord_num, virial = d3_out
+            if compute_stress:
+                energy, forces, _coord_num, virial = d3_out
             else:
-                energy, forces, coord_num = d3_out
+                energy, forces, _coord_num = d3_out
 
             # Convert outputs back to conventional units
             # Energy: Hartree -> eV
             energy = energy * HARTREE_TO_EV
+            out: dict[str, torch.Tensor] = {"energy": energy}
             # Forces: Hartree/Bohr -> eV/Angstrom
-            forces = forces * (HARTREE_TO_EV / BOHR_TO_ANGSTROM)
-            if self.has_stress:
+            if compute_forces:
+                out["forces"] = forces * (HARTREE_TO_EV / BOHR_TO_ANGSTROM)
+            if compute_stress:
                 # Virial is in Hartree, convert to eV
                 virial = virial * HARTREE_TO_EV
                 # Convert to stress tensor (units: eV/Å³)
@@ -175,13 +200,8 @@ class AlchemiDFTD3(torch.nn.Module):
                 stress = -virial / volume.view(-1, 1, 1)
                 # Convert full stress matrix [N, 3, 3] to Voigt notation [N, 6]
                 stress_voigt = torch_full_3x3_to_voigt_6_stress(stress)
-
-            out = {
-                "energy": energy,
-                "forces": forces,
-            }
-            if self.has_stress:
                 out["stress"] = stress_voigt
+
         return out
 
     def extra_repr(self) -> str:
@@ -321,61 +341,38 @@ class D3SumModel(RegressorModelMixin):
         """Check if the model has stress prediction."""
         return self.xc_model.has_stress
 
-    def predict(self, batch: AtomGraphs, split: bool = False) -> dict[str, torch.Tensor]:
+    def predict(
+        self,
+        batch: AtomGraphs,
+        split: bool = False,
+        *,
+        compute_forces: bool = True,
+        compute_stress: bool = True,
+        **kwargs,
+    ) -> dict[str, torch.Tensor]:
         """Predict by summing outputs from both XC and D3 models.
-
-        Handles the special naming conventions for conservative models where
-        forces/stress may have grad_ prefixes or level-of-theory suffixes.
 
         Args:
             batch: Input batch of atomic structures
             split: Whether to split predictions by system
+            compute_forces: Whether to compute forces.
+            compute_stress: Whether to compute stress.
 
         Returns:
             Dictionary with summed predictions, including energy, forces, and stress
         """
-        # Get predictions from both models
-        xc_out = self.xc_model.predict(batch, split=split)
-        d3_out = self.d3_model.predict(batch, split=split)
+        xc_out = self.xc_model.predict(
+            batch, split=split, compute_forces=compute_forces, compute_stress=compute_stress
+        )
+        d3_out = self.d3_model.predict(
+            batch, split=split, compute_forces=compute_forces, compute_stress=compute_stress
+        )
 
-        # Start with XC model output
         out: dict[str, torch.Tensor] = xc_out.copy()
-
-        # Sum energy predictions
         out["energy"] = out["energy"] + d3_out["energy"]
-
-        # Sum force predictions (handling conservative naming)
-        if "forces" in d3_out:
-            if isinstance(self.xc_model, ConservativeForcefieldRegressor):
-                # For conservative models, add to the gradient-based forces
-                grad_forces_key: str = self.xc_model.grad_forces_name
-                if grad_forces_key in out:
-                    out[grad_forces_key] = out[grad_forces_key] + d3_out["forces"]
-
-                # Also add to direct forces if they exist
-                forces_key: str = self.xc_model.forces_name
-                if forces_key in out:
-                    out[forces_key] = out[forces_key] + d3_out["forces"]
-            else:
-                # For direct models, simple addition
-                if "forces" in out:
-                    out["forces"] = out["forces"] + d3_out["forces"]
-
-        # Sum stress predictions (handling conservative naming)
-        if "stress" in d3_out and self.xc_model.has_stress:
-            if isinstance(self.xc_model, ConservativeForcefieldRegressor):
-                # For conservative models, add to the gradient-based stress
-                grad_stress_key: str = self.xc_model.grad_stress_name  # type: ignore
-                if grad_stress_key in out:
-                    out[grad_stress_key] = out[grad_stress_key] + d3_out["stress"]
-
-                # Also add to direct stress if it exists
-                stress_key: str = self.xc_model.stress_name  # type: ignore
-                if stress_key in out:
-                    out[stress_key] = out[stress_key] + d3_out["stress"]
-            else:
-                # For direct models, simple addition
-                if "stress" in out:
-                    out["stress"] = out["stress"] + d3_out["stress"]
+        if "forces" in out and "forces" in d3_out:
+            out["forces"] = out["forces"] + d3_out["forces"]
+        if "stress" in out and "stress" in d3_out:
+            out["stress"] = out["stress"] + d3_out["stress"]
 
         return out

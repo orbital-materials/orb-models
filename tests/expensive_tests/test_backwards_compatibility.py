@@ -86,8 +86,8 @@ def test_orb_v3_con_omat_predictions(orb_v3_conservative_omat_and_config):
     graph = adapter.from_ase_atoms(atoms)
     result = orb.predict(graph)
     energy = result["energy"][0].detach().numpy()
-    forces = result["grad_forces"][0].detach().numpy()
-    stress = result["grad_stress"][0].detach().numpy()
+    forces = result["forces"][0].detach().numpy()
+    stress = result["stress"][0].detach().numpy()
     energy_gold = np.array(-14.9525)
     forces_gold = np.array([1.3970e-09, 1.0419e-08, -1.0361e-08])
     stress_gold = np.array(
@@ -128,7 +128,7 @@ def test_orbmol_v1_con_predictions(orb_v3_conservative_omol_and_config):
     graph = adapter.from_ase_atoms(atoms)
     result = orb.predict(graph)
     energy = result["energy"][0].detach().numpy()
-    forces = result["grad_forces"][0].detach().numpy()
+    forces = result["forces"][0].detach().numpy()
     assert np.isclose(energy, energy_gold, atol=1e-5)
     np.testing.assert_allclose(forces, forces_gold, atol=1e-5)
 
@@ -180,7 +180,7 @@ def test_pre_cutoff_conservative_models_use_mean_pair_repulsion(fixture_name, re
     The default for newly-trained ConservativeForcefieldRegressor is
     node_aggregation="sum"; load_model switches it back to "mean" for
     artifacts created before _CONSERVATIVE_PAIR_REPULSION_SUM_CUTOFF. All
-    shipped orb-v3 conservative models (and orbmol-v2) predate that cutoff.
+    shipped orb-v3 conservative models predate that cutoff.
     """
     orb, _ = request.getfixturevalue(fixture_name)
     assert orb.pair_repulsion, f"{fixture_name} should have pair_repulsion enabled"
@@ -201,7 +201,7 @@ def test_orbmol_v2_predictions(orbmol_v2_and_config):
     graph = adapter.from_ase_atoms(atoms)
     result = orb.predict(graph)
     energy = result["energy"][0].detach().numpy()
-    forces = result["grad_forces"][0].detach().numpy()
+    forces = result["forces"][0].detach().numpy()
     h2o_energy_gold = np.array(-2079.86222)
     h2o_forces_gold = np.array([4.6290e-04, 6.6572e-04, -4.8360e-01])
     assert np.isclose(energy, h2o_energy_gold, atol=1e-5)
@@ -214,7 +214,7 @@ def test_orbmol_v2_predictions(orbmol_v2_and_config):
     graph = adapter.from_ase_atoms(atoms)
     result = orb.predict(graph)
     energy = result["energy"][0].detach().numpy()
-    stress = result["grad_stress"][0].detach().numpy()
+    stress = result["stress"][0].detach().numpy()
     cu_energy_gold = np.array(-178550.98098)
     cu_stress_gold = np.array([-0.09994, -0.10850, -0.11481, -0.00028, -0.00035, 0.00305])
     assert np.isclose(energy, cu_energy_gold, atol=1e-5)

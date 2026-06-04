@@ -82,8 +82,8 @@ result = orbff.predict(graph, split=False)
 # Convert to ASE atoms (unbatches the results and transfers to cpu if necessary)
 atoms = graph.to_ase_atoms(
     energy=result["energy"],
-    forces=result["grad_forces"],
-    stress=result["grad_stress"]
+    forces=result["forces"],
+    stress=result["stress"]
 )
 ```
 

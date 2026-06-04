@@ -43,6 +43,16 @@ class ModelMixin[T: AbstractAtomBatch](torch.nn.Module):
 class RegressorModelMixin[T: AbstractAtomBatch](ModelMixin[T]):
     """Model Mixin for our regression models."""
 
-    def predict(self, batch: T, split: bool) -> dict[str, torch.Tensor]:
-        """Predicts a set of properties."""
+    def predict(
+        self,
+        batch: T,
+        split: bool = False,
+        **kwargs,
+    ) -> dict[str, torch.Tensor]:
+        """Predicts a set of properties.
+
+        Args:
+            batch: Input batch.
+            split: If True, split predictions per graph.
+        """
         raise NotImplementedError()

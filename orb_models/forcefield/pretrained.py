@@ -100,7 +100,7 @@ def load_model(
         train: Whether to set the model to training mode and keep parameters trainable (except reference energies).
         train_reference_energies: Whether to make reference energies trainable during finetuning.
         loss_weights: Optional dictionary of loss weights to override model defaults.
-            Keys should match the loss terms (e.g., "energy", "grad_forces", "forces", "stress", "grad_stress").
+            Keys should match the loss terms (e.g., "energy", "forces", "stress").
 
     Returns:
         model: The pretrained model
@@ -428,7 +428,7 @@ def orbmol_v2(
     # Default to evenly weighted losses
     loss_weights = {
         "energy": 1.0,
-        "grad_forces": 1.0,
+        "forces": 1.0,
         "confidence": 1.0,
         **(loss_weights or {}),
     }
@@ -484,7 +484,7 @@ def orb_v3_conservative_omol(
     # Default to evenly weighted losses
     loss_weights = {
         "energy": 1.0,
-        "grad_forces": 1.0,
+        "forces": 1.0,
         "confidence": 1.0,
         **(loss_weights or {}),
     }
@@ -590,8 +590,8 @@ def orb_v3_conservative_20_omat(
     # Default to evenly weighted losses
     loss_weights = {
         "energy": 1.0,
-        "grad_forces": 1.0,
-        "grad_stress": 1.0,
+        "forces": 1.0,
+        "stress": 1.0,
         "confidence": 1.0,
         **(loss_weights or {}),
     }
@@ -642,8 +642,8 @@ def orb_v3_conservative_inf_omat(
     # Default to evenly weighted losses
     loss_weights = {
         "energy": 1.0,
-        "grad_forces": 1.0,
-        "grad_stress": 1.0,
+        "forces": 1.0,
+        "stress": 1.0,
         "confidence": 1.0,
         **(loss_weights or {}),
     }
@@ -774,8 +774,8 @@ def orb_v3_conservative_20_mpa(
     # Default to evenly weighted losses
     loss_weights = {
         "energy": 1.0,
-        "grad_forces": 1.0,
-        "grad_stress": 1.0,
+        "forces": 1.0,
+        "stress": 1.0,
         "confidence": 1.0,
         **(loss_weights or {}),
     }
@@ -826,8 +826,8 @@ def orb_v3_conservative_inf_mpa(
     # Default to evenly weighted losses
     loss_weights = {
         "energy": 1.0,
-        "grad_forces": 1.0,
-        "grad_stress": 1.0,
+        "forces": 1.0,
+        "stress": 1.0,
         "confidence": 1.0,
         **(loss_weights or {}),
     }

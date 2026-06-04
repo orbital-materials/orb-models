@@ -460,12 +460,10 @@ def run(args):
         loss_weights["energy"] = args.energy_loss_weight
 
     if args.forces_loss_weight is not None:
-        key = "grad_forces" if is_conservative_model else "forces"
-        loss_weights[key] = args.forces_loss_weight
+        loss_weights["forces"] = args.forces_loss_weight
 
     if args.stress_loss_weight is not None:
-        key = "grad_stress" if is_conservative_model else "stress"
-        loss_weights[key] = args.stress_loss_weight
+        loss_weights["stress"] = args.stress_loss_weight
 
     if args.equigrad_loss_weight is not None:
         if not is_conservative_model:
@@ -700,13 +698,13 @@ def main():
         "--forces_loss_weight",
         default=None,
         type=float,
-        help="Weight for forces loss. Automatically uses 'forces' or 'grad_forces' depending on model type. If not specified, defaults to 1.0.",
+        help="Weight for forces loss. If not specified, defaults to 1.0.",
     )
     parser.add_argument(
         "--stress_loss_weight",
         default=None,
         type=float,
-        help="Weight for stress loss. Automatically uses 'stress' or 'grad_stress' depending on model type. Set to 0 to disable stress training. If not specified, defaults to 1.0.",
+        help="Weight for stress loss. Set to 0 to disable stress training. If not specified, defaults to 1.0.",
     )
     parser.add_argument(
         "--equigrad_loss_weight",

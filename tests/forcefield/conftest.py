@@ -101,7 +101,7 @@ class EuclideanNormModel(torch.nn.Module):
         )
         return energies, neg_grad, stress
 
-    def predict(self, batch, split: bool = False):
+    def predict(self, batch, split: bool = False, **kwargs):
         assert not split, "Split not supported for EuclideanNormModel."
         energy, forces, stress = self.forward(batch)
         return {"energy": energy, "forces": forces, "stress": stress}
@@ -223,8 +223,8 @@ def conservative_regressor(gns_model, energy_head, latent_charge_head, coulomb_m
         model=gns_model,
         loss_weights={
             "energy": 1.0,
-            "grad_forces": 1.0,
-            "grad_stress": 1.0,
+            "forces": 1.0,
+            "stress": 1.0,
             "rotational_grad": 1.0,
         },
         coulomb_module=coulomb_module,

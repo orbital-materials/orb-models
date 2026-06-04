@@ -6,18 +6,8 @@ from orb_models.common.atoms.graph_featurization import EdgeCreationMethod
 from orb_models.common.models.nn_util import ChargeSpinConditioner
 from orb_models.common.torch_utils import to_numpy
 from orb_models.forcefield.inference.d3_model import D3SumModel
-from orb_models.forcefield.models.conservative_regressor import (
-    ConservativeForcefieldRegressor,
-)
+from orb_models.forcefield.models.conservative_regressor import ConservativeForcefieldRegressor
 from orb_models.forcefield.models.direct_regressor import DirectForcefieldRegressor
-
-
-def _is_conservative(
-    model: DirectForcefieldRegressor | ConservativeForcefieldRegressor | D3SumModel,
-) -> bool:
-    if isinstance(model, D3SumModel):
-        model = model.xc_model
-    return isinstance(model, ConservativeForcefieldRegressor)
 
 
 class ORBCalculator(Calculator):
@@ -40,7 +30,7 @@ class ORBCalculator(Calculator):
             model: The Orb forcefield model to use for predictions.
             atoms_adapter: The adapter to convert between ASE Atoms and AtomGraphs.
             edge_method (EdgeCreationMethod, optional): The method to use for graph edge construction. Defaults to knn_alchemi.
-            max_number_neighbors (int): The maximum number of neighbors for each atom.
+            max_num_neighbors (int): The maximum number of neighbors for each atom.
                 Larger values should generally increase performace, but the gains may be marginal,
                 whilst the increse in latency could be significant (depending on num atoms).
                     - Defaults to atoms_adapter.max_num_neighbors.
@@ -62,7 +52,6 @@ class ORBCalculator(Calculator):
         self.max_num_neighbors = max_num_neighbors
         self.edge_method = edge_method
         self.half_supercell = half_supercell
-        self.conservative = _is_conservative(model)
 
         conditioner = (
             model.xc_model.model.conditioner
@@ -74,10 +63,25 @@ class ORBCalculator(Calculator):
         )
 
         self.implemented_properties = model.properties  # type: ignore
-        if self.conservative:
-            self.implemented_properties.append("forces")
-            if self.model.has_stress:
-                self.implemented_properties.append("stress")
+
+    def check_state(self, atoms, tol=1e-15):
+        """Check if calculation is needed.
+
+        Extends ASE's default check to also detect changes in charge/spin,
+        which are stored in atoms.info and not tracked by ASE's default
+        change detection (positions, numbers, cell, pbc).
+        """
+        system_changes = Calculator.check_state(self, atoms, tol)
+        if self.expects_charge_and_spin and self.atoms is not None:
+            old_charge = self.atoms.info.get("charge")
+            old_spin = self.atoms.info.get("spin")
+            new_charge = atoms.info.get("charge")
+            new_spin = atoms.info.get("spin")
+            if (
+                old_charge != new_charge or old_spin != new_spin
+            ) and "positions" not in system_changes:
+                system_changes.append("positions")
+        return system_changes
 
     def calculate(self, atoms=None, properties=None, system_changes=all_changes):
         """Calculate properties.
@@ -111,33 +115,14 @@ class ORBCalculator(Calculator):
     def _update_results(self, out: dict[str, torch.Tensor]):
         """Updates the results dictionary with the computed properties."""
         self.results = {}
-        model = self.model.xc_model if isinstance(self.model, D3SumModel) else self.model
-        no_direct_energy_head = "energy" not in model.heads  # type: ignore
-        no_direct_force_head = "forces" not in model.heads  # type: ignore
-        no_direct_stress_head = "stress" not in model.heads  # type: ignore
-        for property in self.implemented_properties:
-            if property == "free_energy" and no_direct_energy_head:
+        for prop in self.implemented_properties:
+            out_key = "energy" if prop == "free_energy" else prop
+            if out_key not in out:
                 continue
-            if property == "forces" and no_direct_force_head:
-                continue
-            if property == "stress" and no_direct_stress_head:
-                continue
-            _property = "energy" if property == "free_energy" else property
-
             # ASE expects:
             #  - stresses to be squeezed to a 1D array of shape (6,)
             #  - forces to never be squeezed i.e. single-atom systems should be (1, 3)
-            if property == "stress" or property == "grad_stress":
-                self.results[property] = to_numpy(out[_property].squeeze())
+            if prop == "stress":
+                self.results[prop] = to_numpy(out[out_key].squeeze())
             else:
-                self.results[property] = to_numpy(out[_property])
-
-        if self.conservative:
-            if model.forces_name in self.results:
-                self.results["direct_forces"] = self.results[model.forces_name]
-            self.results["forces"] = self.results[model.grad_forces_name]
-
-            if model.has_stress:
-                if model.stress_name in self.results:
-                    self.results["direct_stress"] = self.results[model.stress_name]
-                self.results["stress"] = self.results[model.grad_stress_name]
+                self.results[prop] = to_numpy(out[out_key])

@@ -96,63 +96,122 @@ class DirectForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
         """Disable stress computation."""
         self._stress_disabled = True
 
-    def forward(self, batch: AtomGraphs) -> dict[str, torch.Tensor | dict[str, torch.Tensor]]:
-        """Forward pass of DirectForcefieldRegressor."""
+    @property
+    def properties(self) -> list[str]:
+        """Canonical names of properties available from predict()."""
+        heads = list(self.heads.keys())
+        if self._stress_disabled:
+            heads = [head for head in heads if "stress" not in head]
+        if "energy" in heads:
+            heads.append("free_energy")
+        return heads
+
+    @property
+    def autograd_derivative_keys(self) -> frozenset[str]:
+        """Derivative keys computed via autograd on the energy.
+
+        Direct models predict forces/stress from NN heads, not via
+        autograd, so this is always empty.
+        """
+        return frozenset()
+
+    @property
+    def analytic_derivative_keys(self) -> frozenset[str]:
+        """Forward() output keys for spatial derivatives that cannot be computed via autograd.
+
+        Direct models predict forces/stress from NN heads, so there are
+        no explicit (analytical) derivative terms to expose.
+        """
+        return frozenset()
+
+    def forward(
+        self,
+        batch: AtomGraphs,
+        *,
+        compute_forces: bool = True,
+        compute_stress: bool = True,
+        fp64_energy: bool = True,
+    ) -> dict[str, torch.Tensor]:
+        """Compute absolute energy and NN-predicted forces/stress.
+
+        Returns a dict with total quantities and their components:
+
+            Totals (consumer-facing):
+                "energy"              — absolute energy (B,); fp64 when fp64_energy=True
+                "forces"              — NN-predicted forces (N, 3)
+                "stress"              — NN-predicted stress (B, 6) in Voigt notation
+
+            Components (used by loss and pipeline frameworks):
+                "interaction_energy"  — energy without reference (B,)
+        """
+        compute_stress = compute_stress and not self._stress_disabled and self.has_stress
         out = self.model(batch)
         node_features = out["node_features"]
         for name, head in self.heads.items():
-            if self._stress_disabled and "stress" in name:
+            if not compute_forces and "forces" in name:
                 continue
-            res = head(node_features, batch)
-            out[name] = res
+            if not compute_stress and "stress" in name:
+                continue
+            out[name] = head(node_features, batch)
 
         if self.pair_repulsion:
             out_pair_repulsion = self.pair_repulsion_fn(batch)
-            for name, head in self.heads.items():
-                if self._stress_disabled and "stress" in name:
+            for name in self.heads:
+                if name not in out:
                     continue
                 raw_repulsion = self._get_raw_repulsion(name, out_pair_repulsion)
                 if raw_repulsion is not None:
                     out[name] = out[name] + raw_repulsion
+
+        if "energy" in self.heads and isinstance(self.heads["energy"], EnergyHead):
+            interaction_energy = out["energy"]
+            out["interaction_energy"] = interaction_energy
+            out["energy"] = cast(EnergyHead, self.heads["energy"]).absolute_energy(
+                interaction_energy, batch, fp64_energy
+            )
+
         return out
 
     def predict(
         self,
         batch: AtomGraphs,
         split: bool = False,
+        *,
+        compute_forces: bool = True,
+        compute_stress: bool = True,
         fp64_energy: bool = True,
+        **kwargs,
     ) -> dict[str, torch.Tensor]:
-        """Predict node and/or graph level attributes.
+        """Consumer-facing inference: absolute energy, total forces/stress.
 
         Args:
-            batch: Input batch.
-            split: If True, split predictions per graph.
-            fp64_energy: If True (default), return absolute energy in fp64;
+            batch: Input atomic graph batch.
+            split: If True, split per-system predictions into a list.
+            compute_forces: Include forces in the output.
+            compute_stress: Include stress in the output.
+            fp64_energy: Upcast energy to fp64 before adding reference;
                 required to preserve kJ/mol resolution since reference
-                energies can be as high as ~1e4-1e5 eV. If False, returns
-                energy in the input dtype.
-        """
-        out = self.model(batch)
-        node_features = out["node_features"]
-        output = {}
-        for name, head in self.heads.items():
-            if self._stress_disabled and "stress" in name:
-                continue
-            if isinstance(head, EnergyHead):
-                output[name] = head.predict(node_features, batch, fp64=fp64_energy)
-            else:
-                output[name] = cast(ForcefieldHead | ConfidenceHead, head).predict(
-                    node_features, batch
-                )
+                energies can be as high as ~1e4-1e5 eV.
 
-        if self.pair_repulsion:
-            out_pair_repulsion = self.pair_repulsion_fn(batch)
-            for name, head in self.heads.items():
-                if self._stress_disabled and "stress" in name:
-                    continue
-                raw_repulsion = self._get_raw_repulsion(name, out_pair_repulsion)
-                if raw_repulsion is not None:
-                    output[name] = output[name] + raw_repulsion
+        Returns:
+            "energy"  — absolute energy in fp64 (B,)
+            "forces"  — NN-predicted forces (N, 3)
+            "stress"  — NN-predicted stress in Voigt notation (B, 6)
+        """
+        # self() not self.forward() to respect torch.compile
+        preds = self(
+            batch,
+            compute_forces=compute_forces,
+            compute_stress=compute_stress,
+            fp64_energy=fp64_energy,
+        )
+
+        output = {name: preds[name] for name in self.heads if name in preds}
+        for name, head in self.heads.items():
+            if name not in preds:
+                continue
+            if isinstance(head, ConfidenceHead):
+                output[name] = torch.softmax(preds[name], dim=-1)
 
         if split:
             for name, pred in output.items():
@@ -177,7 +236,8 @@ class DirectForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
             if self._stress_disabled and "stress" in name:
                 continue
             head = cast(ForcefieldHead, head)
-            head_out = head.loss(out[name], batch)
+            pred = out["interaction_energy"] if name == "energy" else out[name]
+            head_out = head.loss(pred, batch)
             weight = self.loss_weights[name]
             loss = weight * head_out.loss
             total_loss += loss
@@ -223,16 +283,6 @@ class DirectForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
             assign=assign,
             skip_artifact_reference_energy=skip_artifact_reference_energy,
         )
-
-    @property
-    def properties(self):
-        """List of names of predicted properties."""
-        heads = list(self.heads.keys())
-        if self._stress_disabled:
-            heads = [head for head in heads if "stress" not in head]
-        if "energy" in heads:
-            heads.append("free_energy")
-        return heads
 
     def is_compiled(self):
         """Check if the model is compiled."""

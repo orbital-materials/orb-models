@@ -4,7 +4,6 @@ from typing import Any, Literal, cast
 import torch
 
 from orb_models.common.atoms.batch.graph_batch import AtomGraphs
-from orb_models.common.dataset.property_definitions import PROPERTIES, PropertyDefinition
 from orb_models.common.models import base
 from orb_models.common.models.gns import MoleculeGNS
 from orb_models.common.models.graph_regressor import _validate_heads_and_loss_weights
@@ -18,10 +17,7 @@ from orb_models.forcefield.models.forcefield_heads import (
     EnergyHead,
     ForcefieldHead,
 )
-from orb_models.forcefield.models.forcefield_utils import (
-    compute_gradient_forces_and_stress,
-    torch_full_3x3_to_voigt_6_stress,
-)
+from orb_models.forcefield.models.forcefield_utils import compute_gradient_forces_and_stress
 from orb_models.forcefield.models.loss import forces_loss_function, stress_loss_function
 from orb_models.forcefield.models.pair_repulsion import ZBLBasis
 
@@ -35,11 +31,8 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
     Args:
         heads: A mapping of head names to heads.
         model: A pretrained model to use for transfer learning/finetuning.
-        loss_weights: The weight of the energy loss in the total loss.
-            Additionally, the conservative model must also have two keys:
-                - "grad_forces"
-                - "grad_stress"
-            which weight the gradient based losses of forces/stress respectively.
+        loss_weights: The weight of each loss term. Expected keys:
+                - "energy", "forces", "stress", and optionally "rotational_grad".
         coulomb_module: Optional CoulombModule for long-range electrostatics.
             When present, a latent_charges head must also be in heads.
         **kwargs: Additional kwargs, used for backwards compatibility of deprecated arguments.
@@ -57,7 +50,6 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
         model: MoleculeGNS,
         loss_weights: dict[str, float] | None = None,
         online_normalisation: bool = True,
-        level_of_theory: str | None = None,
         forces_loss_type: Literal["mae", "mse", "huber_0.01", "condhuber_0.01"] = "condhuber_0.01",
         pair_repulsion: bool = False,
         has_stress: bool = True,
@@ -71,15 +63,19 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
                     f"Unknown kwargs: {kwarg}, expected only backward compatible kwargs "
                     f"from {self._deprecated_kwargs}"
                 )
+        heads = {k: v for k, v in heads.items() if v is not None}
         if "energy" not in heads:
             raise ValueError("Missing required energy head.")
 
         loss_weights = loss_weights or {}
         loss_weights = {k: v for k, v in loss_weights.items() if v is not None}
+        # BC: rename old grad-prefixed loss weight keys
+        _bc = {"grad_forces": "forces", "grad_stress": "stress"}
+        loss_weights = {_bc.get(k, k): v for k, v in loss_weights.items()}
         nongrad_loss_weights = {
             k: v
             for k, v in loss_weights.items()
-            if k not in ["grad_forces", "grad_stress", "rotational_grad"]
+            if k not in ["forces", "stress", "rotational_grad"]
         }
         _validate_heads_and_loss_weights(heads, nongrad_loss_weights)
 
@@ -101,31 +97,12 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
                 "CoulombModule requires a 'latent_charges' head in heads"
             )
 
-        # Target names
-        self.energy_name = heads["energy"].target.fullname
-        self.grad_prefix = "grad"
-
-        self.forces_name = f"forces-{level_of_theory}" if level_of_theory else "forces"
-        self.forces_target = PROPERTIES[self.forces_name]
-        self.grad_forces_name = f"{self.grad_prefix}_{self.forces_name}"
-
-        # Stress is optional since only periodic systems have it
         self.has_stress = has_stress
-        if self.has_stress:
-            self.stress_name: str | None = (
-                f"stress-{level_of_theory}" if level_of_theory else "stress"
-            )
-            self.stress_target: PropertyDefinition | None = PROPERTIES[self.stress_name]
-            self.grad_stress_name: str | None = f"{self.grad_prefix}_{self.stress_name}"
-        else:
-            self.stress_name = None
-            self.stress_target = None
-            self.grad_stress_name = None
-        assert self.has_stress == (self.grad_stress_name is not None), (
-            "grad_stress_name must be set if has_stress is True"
-        )
 
-        self.grad_rotation_name = "rotational_grad"
+        collisions = {"forces", "stress"} & heads.keys()
+        assert not collisions, (
+            f"Heads {collisions} collide with gradient-based prediction keys in predict()."
+        )
 
         self.extra_properties = []
         for name in heads.keys() - {"energy", "latent_charges", "latent_spins"}:
@@ -134,12 +111,7 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
 
     def enable_stress(self) -> None:
         """Enable stress computation. No-op if already enabled."""
-        if self.has_stress:
-            return
         self.has_stress = True
-        self.stress_name = "stress"
-        self.stress_target = PROPERTIES["stress"]
-        self.grad_stress_name = f"{self.grad_prefix}_{self.stress_name}"
 
     def prepare_for_inference(self) -> None:
         """Enable stress for inference — always available via autograd."""
@@ -150,37 +122,77 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
         self.has_stress = False
 
     @property
-    def properties(self):
-        """List of names of predicted properties."""
-        props = [
-            self.energy_name,
-            "free_energy",
-            self.grad_forces_name,
-            self.grad_rotation_name,
-        ]
+    def properties(self) -> list[str]:
+        """Canonical names of properties available from predict()."""
+        props = ["energy", "free_energy", "forces"]
         if self.has_stress:
-            assert self.grad_stress_name is not None, (
-                "grad_stress_name must be set if has_stress is True"
-            )
-            props.append(self.grad_stress_name)
+            props.append("stress")
         props.extend(self.extra_properties)
         return props
 
-    def forward(self, batch: AtomGraphs) -> dict[str, torch.Tensor]:
-        """Forward pass computing both direct and conservative predictions."""
-        vectors, stress_displacement, generator = batch.compute_differentiable_edge_vectors()
-        assert stress_displacement is not None
-        assert generator is not None
-        batch.system_features["stress_displacement"] = stress_displacement
-        batch.system_features["generator"] = generator
-        batch.edge_features["vectors"] = vectors
+    @property
+    def autograd_derivative_keys(self) -> frozenset[str]:
+        """Forward() output keys computed via autograd on the energy.
 
-        # Get base model features
+        Pipeline frameworks use this to know which outputs they should compute via their own
+        autograd pass rather than reading from the model directly.
+        """
+        keys: set[str] = {"forces"}
+        if self.has_stress:
+            keys.add("stress")
+        return frozenset(keys)
+
+    @property
+    def analytic_derivative_keys(self) -> frozenset[str]:
+        """Forward() output keys for spatial derivatives that cannot be computed via autograd.
+
+        Returns the dict keys of analytically computed derivatives (e.g. from Coulomb PME)
+        that are *not* obtained via autograd on the energy, and should be added to the gradient-based forces/stress.
+        """
+        if self.coulomb_module is not None:
+            keys = {"analytic_forces"}
+            if self.has_stress:
+                keys.add("analytic_stress")
+            return frozenset(keys)
+        return frozenset()
+
+    def forward(
+        self,
+        batch: AtomGraphs,
+        *,
+        compute_forces: bool = True,
+        compute_stress: bool = True,
+        fp64_energy: bool = True,
+    ) -> dict[str, torch.Tensor]:
+        """Compute absolute energy and conservative forces/stress.
+
+        Returns a dict with total quantities and their components:
+
+            Totals (consumer-facing):
+                "energy"              — absolute energy (B,); fp64 when fp64_energy=True
+                "forces"              — total forces (N, 3), autograd + explicit
+                "stress"              — total stress (B, 6) in Voigt notation
+
+            Components (used by loss and pipeline frameworks):
+                "interaction_energy"  — energy without reference (B,)
+                "rotational_grad"     — equivariance regularisation gradient (B, 3, 3)
+                "analytic_forces"     — non-autograd forces, e.g. Coulomb (N, 3)
+                "analytic_stress"     — non-autograd stress, e.g. Coulomb (B, 6)
+        """
+        compute_stress = compute_stress and self.has_stress
+
+        if compute_forces or compute_stress:
+            vectors, stress_displacement, generator = batch.compute_differentiable_edge_vectors()
+            assert stress_displacement is not None
+            assert generator is not None
+            batch.system_features["stress_displacement"] = stress_displacement
+            batch.system_features["generator"] = generator
+            batch.edge_features["vectors"] = vectors
+
         out = self.model(batch)
         node_features = out["node_features"]
 
-        # Predict per-atom charges/spins BEFORE energy head so they can
-        # be used as conditioning features in ChargeConditionedEnergyHead and CoulombModule.
+        # Latent charges (and spins) are fed into the energy head
         latent_charges = None
         if "latent_charges" in self.heads:
             latent_charges = self.heads["latent_charges"](node_features, batch)
@@ -189,7 +201,7 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
         if "latent_spins" in self.heads:
             latent_spins = self.heads["latent_spins"](node_features, batch)
 
-        energy_head = self.heads[self.energy_name]
+        energy_head = self.heads["energy"]
         energy_head = cast(ForcefieldHead, energy_head)
         if isinstance(energy_head, ChargeConditionedEnergyHead):
             interaction_energy = energy_head(
@@ -204,49 +216,43 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
         if self.pair_repulsion:
             interaction_energy += self.pair_repulsion_fn(batch)["energy"]
 
-        coulomb_explicit_forces = None
-        coulomb_explicit_virial = None
         if self.coulomb_module is not None:
             assert latent_charges is not None, "CoulombModule requires a LatentChargeHead"
-            coulomb_energy, coulomb_explicit_forces, coulomb_explicit_virial = self.coulomb_module(
-                latent_charges, batch
+            coulomb_energy, explicit_forces, explicit_stress = self.coulomb_module(
+                latent_charges, batch, compute_forces=True, compute_stress=self.has_stress
             )
             interaction_energy = interaction_energy + coulomb_energy
+            out["analytic_forces"] = explicit_forces
+            if explicit_stress is not None:
+                out["analytic_stress"] = explicit_stress
 
-        out[self.energy_name] = interaction_energy
-
-        forces, stress, rotational_grad = compute_gradient_forces_and_stress(
-            energy=interaction_energy,
-            positions=batch.node_features["positions"],
-            displacement=batch.system_features["stress_displacement"],
-            cell=batch.system_features["cell"],
-            training=self.training,
-            compute_stress=self.has_stress,
-            generator=batch.system_features["generator"],
+        out["interaction_energy"] = interaction_energy
+        out["energy"] = cast(EnergyHead, self.heads["energy"]).absolute_energy(
+            interaction_energy, batch, fp64_energy
         )
 
-        # Add explicit/spatial Coulomb force/stress corrections (see CoulombModule docstring).
-        if self.coulomb_module is not None:
-            assert coulomb_explicit_forces is not None, "Explicit/spatial forces are not computed"
-            assert coulomb_explicit_virial is not None, "Explicit/spatial virial is not computed"
-            forces = forces + coulomb_explicit_forces
-            if self.has_stress:
-                assert stress is not None, "has_stress is True but stress is None"
-                cell_3d = batch.system_features["cell"].view(-1, 3, 3)
-                volume = torch.linalg.det(cell_3d).abs()
-                coulomb_stress_3x3 = -coulomb_explicit_virial / volume.view(-1, 1, 1)
-                coulomb_stress_3x3 = torch.where(
-                    torch.abs(coulomb_stress_3x3) < 1e10,
-                    coulomb_stress_3x3,
-                    torch.zeros_like(coulomb_stress_3x3),
-                )
-                stress = stress + torch_full_3x3_to_voigt_6_stress(coulomb_stress_3x3)
+        if compute_forces or compute_stress:
+            forces, stress, rotational_grad = compute_gradient_forces_and_stress(
+                energy=interaction_energy,
+                positions=batch.node_features["positions"],
+                displacement=batch.system_features["stress_displacement"],
+                cell=batch.system_features["cell"],
+                training=self.training,
+                compute_stress=compute_stress,
+                generator=batch.system_features["generator"],
+            )
 
-        out[self.grad_forces_name] = forces  # eV / A
-        if self.has_stress:
-            out[self.grad_stress_name] = stress  # eV / A^3
+            if "analytic_forces" in out:
+                forces = forces + out["analytic_forces"]
+            if "analytic_stress" in out:
+                stress = stress + out["analytic_stress"]
 
-        out[self.grad_rotation_name] = rotational_grad
+            if compute_forces:
+                out["forces"] = forces  # eV / A
+            if compute_stress:
+                out["stress"] = stress  # eV / A^3
+            out["rotational_grad"] = rotational_grad
+
         for name in self.extra_properties:
             out[name] = self.heads[name](node_features, batch)
 
@@ -256,32 +262,45 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
         self,
         batch: AtomGraphs,
         split: bool = False,
+        *,
+        compute_forces: bool = True,
+        compute_stress: bool = True,
         fp64_energy: bool = True,
+        **kwargs,
     ) -> dict[str, torch.Tensor]:
-        """Predict energy, forces, and stress.
+        """Consumer-facing inference: absolute energy, forces, and stress.
 
         Args:
-            batch: Input batch.
-            split: If True, split predictions per graph.
-            fp64_energy: If True (default), return absolute energy in fp64;
+            batch: Input atomic graph batch.
+            split: If True, split per-system predictions into a list.
+            compute_forces: Include forces in the output.
+            compute_stress: Include stress in the output.
+            fp64_energy: Upcast energy to fp64 before adding reference;
                 required to preserve kJ/mol resolution since reference
-                energies can be as high as ~1e4-1e5 eV. If False, returns
-                energy in the input dtype.
-        """
-        preds = self(batch)
+                energies can be as high as ~1e4-1e5 eV.
 
-        out = {}
-        energy_head = cast(EnergyHead, self.heads[self.energy_name])
-        out[self.energy_name] = energy_head.absolute_energy(
-            preds[self.energy_name], batch, fp64=fp64_energy
+        If both compute_forces and compute_stress are False, the autograd computation
+        is skipped and the energy retains its computation graph.
+
+        Returns:
+            "energy"  — absolute energy (B,)
+            "forces"  — total forces (N, 3)
+            "stress"  — total stress in Voigt notation (B, 6)
+        """
+        # self() not self.forward() to respect torch.compile
+        preds = self(
+            batch,
+            compute_forces=compute_forces,
+            compute_stress=compute_stress,
+            fp64_energy=fp64_energy,
         )
-        out[self.grad_forces_name] = preds[self.grad_forces_name]
-        if self.has_stress:
-            assert self.grad_stress_name is not None, (
-                "grad_stress_name must be set if has_stress is True"
-            )
-            out[self.grad_stress_name] = preds[self.grad_stress_name]
-        out[self.grad_rotation_name] = preds[self.grad_rotation_name]
+
+        out: dict[str, torch.Tensor] = {"energy": preds["energy"]}
+        if compute_forces and "forces" in preds:
+            out["forces"] = preds["forces"]
+        if compute_stress and "stress" in preds:
+            out["stress"] = preds["stress"]
+
         for name in self.extra_properties:
             head = self.heads[name]
             if isinstance(head, ForcefieldHead):
@@ -301,96 +320,65 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
         """Compute loss including both direct and conservative terms."""
         out = self(batch)
 
-        energy_pred = out[self.energy_name]
-        raw_grad_forces_pred = out[self.grad_forces_name]
+        energy_pred = out["interaction_energy"]
+        forces_pred = out["forces"]
 
-        # metrics
         metrics: dict = {}
-
-        total_loss = torch.tensor(
-            0.0,
-            device=batch.positions.device,
-            dtype=batch.positions.dtype,
-        )
+        total_loss = torch.tensor(0.0, device=batch.positions.device, dtype=batch.positions.dtype)
 
         # Energy
-        energy_head = self.heads[self.energy_name]
-        energy_head = cast(EnergyHead, energy_head)
+        energy_head = cast(EnergyHead, self.heads["energy"])
         loss_out = energy_head.loss(energy_pred, batch)
-        loss = self.loss_weights[self.energy_name] * loss_out.loss
+        loss = self.loss_weights["energy"] * loss_out.loss
         total_loss += loss
         metrics.update(loss_out.log)
-        metrics[f"{self.energy_name}_loss"] = loss
+        metrics["energy_loss"] = loss
 
         # Conservative forces
         loss_out = forces_loss_function(
-            raw_pred=raw_grad_forces_pred,
-            raw_target=batch.node_targets[self.forces_name],
-            raw_gold_target=batch.node_targets[self.forces_name],
-            name=self.forces_name,
+            raw_pred=forces_pred,
+            raw_target=batch.node_targets["forces"],
+            raw_gold_target=batch.node_targets["forces"],
+            name="forces",
             normalizer=self.grad_forces_normalizer,
             n_node=batch.n_node,
             fix_atoms=batch.fix_atoms,
             loss_type=self.forces_loss_type,
             training=self.training,
         )
-        loss = self.loss_weights[self.grad_forces_name] * loss_out.loss
+        loss = self.loss_weights["forces"] * loss_out.loss
         total_loss += loss
-        metrics.update({f"{self.grad_prefix}-{k}": v for k, v in loss_out.log.items()})
-        metrics[f"{self.grad_forces_name}_loss"] = loss
+        metrics.update(loss_out.log)
+        metrics["forces_loss"] = loss
 
         # Conservative stress (optional)
-        if self.has_stress and self.grad_stress_name in out:
-            assert self.stress_name is not None, "stress_name must be set if has_stress is True"
-            assert self.grad_stress_name is not None, (
-                "grad_stress_name must be set if has_stress is True"
-            )
-            raw_grad_stress_pred = out[self.grad_stress_name]
+        if self.has_stress and "stress" in out:
             loss_out = stress_loss_function(
-                raw_pred=raw_grad_stress_pred,
-                raw_target=batch.system_targets[self.stress_name],
-                raw_gold_target=batch.system_targets[self.stress_name],
-                name=self.stress_name,
+                raw_pred=out["stress"],
+                raw_target=batch.system_targets["stress"],
+                raw_gold_target=batch.system_targets["stress"],
+                name="stress",
                 normalizer=self.grad_stress_normalizer,
                 loss_type=energy_head.loss_type,
             )
-            loss = self.loss_weights[self.grad_stress_name] * loss_out.loss
-            loss_out.log[f"{self.grad_stress_name}_loss"] = loss
+            loss = self.loss_weights["stress"] * loss_out.loss
             total_loss += loss
-            metrics.update({f"{self.grad_prefix}-{k}": v for k, v in loss_out.log.items()})
-
-        # Direct forces / stress predictions
-        for grad_name in [self.grad_forces_name] + (
-            [self.grad_stress_name] if self.has_stress and self.grad_stress_name in out else []
-        ):
-            assert grad_name is not None
-            direct_name = grad_name.replace(self.grad_prefix + "_", "")
-            if direct_name in self.extra_properties:
-                direct_head = cast(ForcefieldHead, self.heads[direct_name])
-                direct_pred = out[direct_name]
-                loss_out = direct_head.loss(direct_pred, batch)
-                loss = self.loss_weights[direct_name] * loss_out.loss
-                total_loss += loss
-                metrics.update(loss_out.log)
-                metrics[f"{direct_name}_loss"] = loss
+            metrics.update(loss_out.log)
+            metrics["stress_loss"] = loss
 
         # Equigrad
-        if self.grad_rotation_name in self.loss_weights:
-            rotational_grad_rms = torch.linalg.norm(
-                out[self.grad_rotation_name],
-                dim=(1, 2),
-            ).mean()
-            loss = self.loss_weights[self.grad_rotation_name] * rotational_grad_rms
+        if "rotational_grad" in self.loss_weights:
+            rotational_grad_rms = torch.linalg.norm(out["rotational_grad"], dim=(1, 2)).mean()
+            loss = self.loss_weights["rotational_grad"] * rotational_grad_rms
             total_loss += loss
             metrics["equigrad_loss"] = loss
-            metrics[f"{self.grad_rotation_name}_rms"] = rotational_grad_rms
+            metrics["rotational_grad_rms"] = rotational_grad_rms
 
         # Confidence
         if "confidence" in self.heads:
-            confidence_head = self.heads["confidence"]
-            confidence_head = cast(ConfidenceHead, confidence_head)
-            raw_forces_target = batch.node_targets[self.forces_name]
-            forces_error = torch.abs(raw_grad_forces_pred - raw_forces_target).mean(dim=-1)
+            confidence_head = cast(ConfidenceHead, self.heads["confidence"])
+            raw_forces_target = batch.node_targets["forces"]
+            forces_error = torch.abs(forces_pred - raw_forces_target).mean(dim=-1)
             confidence_logits = out["confidence"]
             loss_out = confidence_head.loss(confidence_logits, forces_error, batch)
             loss = self.loss_weights["confidence"] * loss_out.loss
