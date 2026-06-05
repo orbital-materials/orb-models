@@ -396,6 +396,7 @@ class MoleculeGNS(base.ModelMixin):
                 f"The following kwargs are not arguments to MoleculeGNS: {kwargs.keys()}"
             )
 
+        self.latent_dim = latent_dim
         self.node_feature_names = node_feature_names or []
         self.edge_feature_names = edge_feature_names or []
         self.num_message_passing_steps = num_message_passing_steps
