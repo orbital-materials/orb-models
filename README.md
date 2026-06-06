@@ -183,7 +183,95 @@ relaxed_state = ts.optimize(
     steps_between_swaps=10,
 )
 results = ts_model(relaxed_state)
-print("Rattled energies:", results["energy"])
+print("Optimized energies:", results["energy"])
+```
+
+#### Usage with NVALCHEMI Toolkit
+
+For integration with [NVALCHEMI Toolkit](https://github.com/NVIDIA/nvalchemi-toolkit), we provide an `OrbWrapper`. This allows using Orb models with nvalchemi's dynamics engines and pipeline composition. It's an optional dependency that can be installed with `pip install nvalchemi-toolkit`.
+
+Standalone geometry optimization with FIRE:
+
+```python
+import torch
+from ase.build import bulk
+
+from nvalchemi.data import AtomicData, Batch
+from nvalchemi.dynamics import FIRE, ConvergenceHook, DynamicsStage
+from nvalchemi.hooks import NeighborListHook
+
+from orb_models.forcefield.inference.orb_nvalchemi import OrbWrapper
+
+device = "cuda"  # or device="cuda"
+orb = OrbWrapper.from_pretrained("orb-v3-conservative-inf-omat", device=device)
+
+nl_hook = NeighborListHook(
+    config=orb.model_config.neighbor_config,
+    stage=DynamicsStage.BEFORE_COMPUTE,
+)
+
+atoms = bulk("Cu", "fcc", a=3.58, cubic=True)
+atoms.rattle(0.5)
+batch = Batch.from_data_list([AtomicData.from_atoms(atoms, device=device)])
+batch.forces = torch.zeros(batch.num_nodes, 3, dtype=batch.positions.dtype, device=device)
+
+optimizer = FIRE(
+    model=orb,
+    dt=1.0,
+    n_steps=100,
+    hooks=[nl_hook],
+    convergence_hook=ConvergenceHook.from_fmax(0.01),
+)
+with optimizer:
+    relaxed = optimizer.run(batch)
+print("Optimized energy:", orb(relaxed)["energy"])
+```
+
+Pipeline composition with DFT-D3 dispersion correction (only for conservative models):
+
+```python
+import torch
+from ase.build import bulk
+
+from nvalchemi.data import AtomicData, Batch
+from nvalchemi.dynamics import FIRE, ConvergenceHook, DynamicsStage
+from nvalchemi.hooks import NeighborListHook
+from nvalchemi.models.dftd3 import DFTD3ModelWrapper
+from nvalchemi.models.pipeline import PipelineGroup, PipelineModelWrapper
+
+from orb_models.forcefield.inference.orb_nvalchemi import OrbWrapper
+
+device = "cuda"  # or device="cuda"
+orb = OrbWrapper.from_pretrained("orb-v3-conservative-inf-omat", device=device)
+
+# DFT-D3 dispersion correction (PBE-BJ parameters)
+d3 = DFTD3ModelWrapper(a1=0.4289, a2=4.4407, s8=0.7875).to(device)
+
+# Combine in a pipeline with shared autograd
+pipe = PipelineModelWrapper(groups=[
+    PipelineGroup(steps=[orb, d3], use_autograd=True),
+])
+
+nl_hook = NeighborListHook(
+    config=pipe.model_config.neighbor_config,
+    stage=DynamicsStage.BEFORE_COMPUTE,
+)
+
+atoms = bulk("Cu", "fcc", a=3.58, cubic=True)
+atoms.rattle(0.5)
+batch = Batch.from_data_list([AtomicData.from_atoms(atoms, device=device)])
+batch.forces = torch.zeros(batch.num_nodes, 3, dtype=batch.positions.dtype, device=device)
+
+optimizer = FIRE(
+    model=pipe,
+    dt=1.0,
+    n_steps=100,
+    hooks=[nl_hook],
+    convergence_hook=ConvergenceHook.from_fmax(0.01),
+)
+with optimizer:
+    relaxed = optimizer.run(batch)
+print("Optimized energy:", pipe(relaxed)["energy"])
 ```
 
 #### How to specify total charge and spin multiplicity for OrbMol
