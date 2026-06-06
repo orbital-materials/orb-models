@@ -10,6 +10,8 @@ from nvalchemiops.torch.neighbors import neighbor_list as nva_neighbor_list
 from nvalchemiops.torch.neighbors.neighbor_utils import get_neighbor_list_from_neighbor_matrix
 from scipy.spatial import KDTree as SciKDTree
 
+from orb_models.common.torch_utils import get_device
+
 try:
     import cuml  # type: ignore
 except Exception:
@@ -17,7 +19,7 @@ except Exception:
 
 from orb_models.common import TORCH_FLOAT_DTYPES
 from orb_models.common.models.segment_ops import aggregate_nodes
-from orb_models.common.torch_utils import get_device, torch_lexsort
+from orb_models.common.torch_utils import torch_lexsort
 
 EdgeCreationMethod = Literal[
     "knn_brute_force",
@@ -735,6 +737,11 @@ def _compute_neighbor_list_with_fallback(
 
     See: https://nvidia.github.io/warp/modules/sim.html#neighbor-finding
     """
+    # nvalchemiops produces incorrect results when pbc has shape (3,) for batched inputs
+    # so we expand it to (n_systems, 3). We can remove this once it's fixed.
+    n_systems = cell.shape[0] if cell.dim() == 3 else 1
+    pbc = pbc.view(-1, 3).expand(n_systems, 3).contiguous()
+
     for safety_factor in [initial_safety_factor, fallback_safety_factor]:
         max_num_neighbors_alchemi = estimate_max_neighbors(
             cutoff, atomic_density=atomic_density, safety_factor=safety_factor

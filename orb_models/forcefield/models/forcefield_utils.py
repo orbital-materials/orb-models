@@ -197,7 +197,11 @@ def compute_gradient_forces_and_stress(
         allow_unused=True,
     )
     forces = grads[0]
-    virials = grads[1]
+    # neg_virials = dE/dε (the negative of the Clausius/MD-textbook virial
+    # W = −Σᵢ rᵢ · Fᵢ = +Σᵢ rᵢ · ∂E/∂rᵢ = +dE/dε; so `neg_virials = -W`).
+    # We keep this sign because stress = dE/dε / V (elasticity / ASE Voigt
+    # convention, tensile positive).
+    neg_virials = grads[1]
     rotational_grad = grads[2]
 
     if forces is None:
@@ -206,9 +210,9 @@ def compute_gradient_forces_and_stress(
             "positions has been broken. Make sure the positions tensor has "
             "not been replaced since calling compute_differentiable_edge_vectors()"
         )
-    if virials is None:
+    if neg_virials is None:
         raise ValueError(
-            "Virials are None. The computational graph between energy and "
+            "neg_virials are None. The computational graph between energy and "
             "displacement has been broken. Make sure the displacement tensor has "
             "not been replaced since calling compute_differentiable_edge_vectors()"
         )
@@ -223,7 +227,7 @@ def compute_gradient_forces_and_stress(
     if compute_stress:
         cell = cell.view(-1, 3, 3)
         volume = torch.linalg.det(cell).abs().unsqueeze(-1)
-        stress = virials / volume.view(-1, 1, 1)
+        stress = neg_virials / volume.view(-1, 1, 1)
         stress = torch.where(torch.abs(stress) < 1e10, stress, torch.zeros_like(stress))
     voigt_stress = torch_full_3x3_to_voigt_6_stress(stress)
     return -1 * forces, voigt_stress, rotational_grad
