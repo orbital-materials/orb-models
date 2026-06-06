@@ -154,11 +154,6 @@ class TestConservativeWrapper:
     def test_standalone_h2o(self, conservative_wrapper):
         _compare_standalone_predictions(conservative_wrapper, _h2o())
 
-    # TODO (Vaidas): Re-enable this test once the bug is fixed.
-    # The bug is in prepare_strain function in nvalchemi. They need to symmetrize the displacement tensor.
-    # Their current implementation is correct for rotationally equivariant models, but not for non-equivariant models.
-    # https://github1s.com/NVIDIA/nvalchemi-toolkit/blob/main/nvalchemi/models/_utils.py#L144-L147
-    @pytest.mark.xfail(reason="Stress comparison fails due to a bug in nvalchemi.")
     def test_pipeline_autograd_nacl_bulk(self, conservative_wrapper):
         _compare_pipeline_predictions(conservative_wrapper, _nacl_bulk())
 
