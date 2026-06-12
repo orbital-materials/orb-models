@@ -299,7 +299,8 @@ class OrbWrapper(nn.Module, BaseModelMixin):
         atom_graphs = self.adapt_input(data, **kwargs)
 
         if self._is_pipeline_autograd():
-            raw = self.model.forward(  # type: ignore[operator]
+            # Call via __call__ (not .forward) so torch.compile / module hooks apply.
+            raw = self.model(  # type: ignore[operator]
                 atom_graphs,
                 compute_forces=False,
                 compute_stress=False,
@@ -316,7 +317,8 @@ class OrbWrapper(nn.Module, BaseModelMixin):
             return self.adapt_output(out, data)
         else:
             active = self.model_config.active_outputs & self.model_config.outputs
-            raw = self.model.forward(  # type: ignore[operator]
+            # Call via __call__ (not .forward) so torch.compile / module hooks apply.
+            raw = self.model(  # type: ignore[operator]
                 atom_graphs,
                 compute_forces="forces" in active,
                 compute_stress="stress" in active,
