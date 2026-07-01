@@ -726,6 +726,7 @@ def _compute_neighbor_list_with_fallback(
     fallback_safety_factor: float = 5.0,
     atomic_density: float = 0.35,
     fill_value: int | None = None,
+    wrap_positions: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Compute neighbor list with automatic fallback if initial estimate is too low.
 
@@ -755,7 +756,7 @@ def _compute_neighbor_list_with_fallback(
             batch_ptr=batch_ptr,
             fill_value=fill_value,
             max_neighbors=max_num_neighbors_alchemi,
-            wrap_positions=False,  # we handle wrapping externally
+            wrap_positions=wrap_positions,
         )
         if max_num_neighbors_alchemi >= num_neighbors.max().item():
             return neighbor_matrix, num_neighbors, neighbor_shift_matrix

@@ -152,6 +152,7 @@ class AlchemiDFTD3(torch.nn.Module):
                     atomic_density=self.atomic_density,
                     initial_safety_factor=self.safety_factor,
                     fallback_safety_factor=self.fallback_safety_factor,
+                    wrap_positions=True,
                 )
             )
             # Truncate the neighbor matrix to save computation/memory

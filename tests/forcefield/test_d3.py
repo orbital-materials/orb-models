@@ -115,3 +115,37 @@ def test_pbe_bj_periodic_agreement(
         rtol=0.1,
         atol=1e-6,
     )
+
+
+def test_d3_forward_wraps_periodic_positions():
+    """D3 should be invariant to integer-cell translations of periodic positions."""
+    cell = torch.eye(3).unsqueeze(0) * 10.0
+    pbc = torch.tensor([[True, True, True]])
+    atomic_numbers = torch.tensor([8, 8], dtype=torch.long)
+    node_batch_index = torch.zeros(2, dtype=torch.int32)
+
+    positions = torch.tensor([[1.0, 1.0, 1.0], [2.0, 1.0, 1.0]])
+    unwrapped_positions = positions.clone()
+    unwrapped_positions[1, 0] += 2 * cell[0, 0, 0]
+
+    model = AlchemiDFTD3(functional="PBE", damping="BJ", cutoff=8.0, has_stress=False)
+    wrapped = model(
+        positions,
+        cell,
+        atomic_numbers,
+        pbc,
+        node_batch_index,
+        compute_forces=False,
+        compute_stress=False,
+    )
+    unwrapped = model(
+        unwrapped_positions,
+        cell,
+        atomic_numbers,
+        pbc,
+        node_batch_index,
+        compute_forces=False,
+        compute_stress=False,
+    )
+
+    torch.testing.assert_close(unwrapped["energy"], wrapped["energy"], rtol=1e-6, atol=1e-8)
