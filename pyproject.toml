@@ -45,7 +45,7 @@ CI = "https://github.com/orbital-materials/orb-models/actions"
 dev = [
     "pytest>=8.3.4,<9",
     "pytest-xdist>=3.5",
-    "ruff>=0.10.0",
+    "ruff>=0.15,<0.16",
     "mypy>=1.13",
     "torch_dftd",
     "torch-sim-atomistic>=0.6.0",

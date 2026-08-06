@@ -22,6 +22,7 @@ Trained on OMol25 and OPoly26 (ωB97M-V/def2-TZVPD); supports both periodic and 
 
 ```python
 from orb_models.forcefield.pretrained import orbmol_v2
+
 model, atoms_adapter = orbmol_v2(device="cuda")
 # atoms.info["charge"] and atoms.info["spin"] (multiplicity, = 2S+1) must be set.
 ```
