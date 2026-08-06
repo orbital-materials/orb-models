@@ -30,12 +30,12 @@ _DIRECT_MODELS = [
 
 @pytest.fixture(scope="module", params=_CONSERVATIVE_MODELS)
 def conservative_wrapper(request) -> OrbWrapper:
-    return OrbWrapper.from_pretrained(request.param)
+    return OrbWrapper.from_pretrained(request.param, compile=True)
 
 
 @pytest.fixture(scope="module", params=_DIRECT_MODELS)
 def direct_wrapper(request) -> OrbWrapper:
-    return OrbWrapper.from_pretrained(request.param)
+    return OrbWrapper.from_pretrained(request.param, compile=True)
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +106,7 @@ def _compare_standalone_predictions(wrapper: OrbWrapper, atoms, *, atol: float =
     ref_stress = calc.results.get("stress")
 
     batch = _ase_to_nvalchemi_batch(atoms, adapter)
-    out = wrapper.forward(batch)
+    out = wrapper(batch)
 
     energy = out["energy"].detach().cpu().numpy().squeeze()
     np.testing.assert_allclose(energy, ref_energy, atol=atol, err_msg="energy mismatch")
@@ -124,11 +124,12 @@ def _compare_pipeline_predictions(wrapper: OrbWrapper, atoms, *, atol: float = 1
     """Run standalone vs pipeline autograd and assert matching forces/stress."""
     adapter = wrapper.atoms_adapter
 
-    ref = wrapper.forward(_ase_to_nvalchemi_batch(atoms, adapter))
+    ref = wrapper(_ase_to_nvalchemi_batch(atoms, adapter))
     ref_forces = ref["forces"].detach().cpu().numpy()
 
     pipe = PipelineModelWrapper(groups=[PipelineGroup(steps=[wrapper], use_autograd=True)])
-    out = pipe.forward(_ase_to_nvalchemi_batch(atoms, adapter))
+    pipe.eval()
+    out = pipe(_ase_to_nvalchemi_batch(atoms, adapter))
 
     np.testing.assert_allclose(
         out["forces"].detach().cpu().numpy(), ref_forces, atol=atol, err_msg="pipeline forces"
@@ -159,6 +160,13 @@ class TestConservativeWrapper:
 
     def test_pipeline_autograd_h2o(self, conservative_wrapper):
         _compare_pipeline_predictions(conservative_wrapper, _h2o())
+
+    def test_compile_with_training_raises(self):
+        """compile (True or the default) + inference=False on a conservative model raises."""
+        with pytest.raises(AssertionError, match="conservative model in training mode"):
+            OrbWrapper.from_pretrained(
+                "orb-v3-conservative-inf-omat", inference=False, compile=True
+            )
 
 
 # ---------------------------------------------------------------------------

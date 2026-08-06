@@ -62,14 +62,10 @@ def _make_charge_fn(n_atoms: int, seed: int = 42) -> torch.nn.Module:
     )
 
 
-def _total_forces(
-    energy: torch.Tensor,
-    explicit_forces: torch.Tensor,
-    positions: torch.Tensor,
-) -> torch.Tensor:
-    """Compute total Coulomb forces = explicit + autograd(-dE/dr)."""
-    (autograd_forces,) = torch.autograd.grad(energy.sum(), positions, create_graph=True)
-    return explicit_forces - autograd_forces
+def _autograd_forces(energy: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
+    """Total Coulomb forces F = −∂E/∂r via autograd on the energy."""
+    (grad,) = torch.autograd.grad(energy.sum(), positions, create_graph=True)
+    return -grad
 
 
 def _virial_to_stress(virial: torch.Tensor, cell: torch.Tensor) -> torch.Tensor:
@@ -79,35 +75,22 @@ def _virial_to_stress(virial: torch.Tensor, cell: torch.Tensor) -> torch.Tensor:
     return torch_full_3x3_to_voigt_6_stress(stress_3x3)
 
 
-def _total_stress(
-    energy: torch.Tensor,
-    explicit_stress: torch.Tensor,
-    strain: torch.Tensor,
-    cell: torch.Tensor,
+def _autograd_stress(
+    energy: torch.Tensor, strain: torch.Tensor, cell: torch.Tensor
 ) -> torch.Tensor:
-    """Compute total Coulomb stress = explicit + autograd component."""
-    (autograd_virial,) = torch.autograd.grad(energy.sum(), strain, create_graph=True)
-    autograd_stress = _virial_to_stress(autograd_virial.unsqueeze(0), cell).squeeze(0)
-    return explicit_stress.squeeze(0) - autograd_stress
+    """Total Coulomb stress = ∂E/∂ε / V via autograd, in Voigt-6 notation."""
+    (dEde,) = torch.autograd.grad(energy.sum(), strain, create_graph=True)
+    return _virial_to_stress((-dEde).unsqueeze(0), cell).squeeze(0)
 
 
-def _total_forces_and_stress(
-    energy: torch.Tensor,
-    explicit_forces: torch.Tensor,
-    explicit_stress: torch.Tensor,
-    positions: torch.Tensor,
-    strain: torch.Tensor,
-    cell: torch.Tensor,
-    training: bool = True,
+def _autograd_forces_and_stress(
+    energy: torch.Tensor, positions: torch.Tensor, strain: torch.Tensor, cell: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    (autograd_forces, autograd_virial) = torch.autograd.grad(
-        outputs=[energy.sum()],
-        inputs=[positions, strain],
-        create_graph=training,
-        retain_graph=training,
-    )
-    autograd_stress = _virial_to_stress(autograd_virial.unsqueeze(0), cell).squeeze(0)
-    return explicit_forces + autograd_forces, explicit_stress.squeeze(0) + autograd_stress
+    """Total forces and stress from a single backward through the energy."""
+    grad_pos, dEde = torch.autograd.grad(energy.sum(), [positions, strain], create_graph=True)
+    forces = -grad_pos
+    stress = _virial_to_stress((-dEde).unsqueeze(0), cell).squeeze(0)
+    return forces, stress
 
 
 def _apply_strain(
@@ -193,13 +176,11 @@ class TestNonPeriodic:
         charges = torch.randn(n_atoms, 1)
 
         coulomb = CoulombModule(direct_coulomb_erf_damping_sigma=1.0)
-        energy, explicit_forces, explicit_stress = coulomb(charges, batch)
+        energy = coulomb(charges, batch)
 
         assert energy.shape == (2,)
         assert torch.isfinite(energy).all()
         assert energy.abs().sum() > 0
-        assert explicit_forces.shape == (n_atoms, 3)
-        assert explicit_stress.shape == (2, 6)
 
     def test_zero_charges_zero_energy(self):
         batch = _make_batch(_nonperiodic_molecules())
@@ -207,7 +188,7 @@ class TestNonPeriodic:
         charges = torch.zeros(n_atoms, 1)
 
         coulomb = CoulombModule(direct_coulomb_erf_damping_sigma=1.0)
-        energy, _, _ = coulomb(charges, batch)
+        energy = coulomb(charges, batch)
 
         assert (energy.abs() < 1e-10).all()
 
@@ -217,7 +198,7 @@ class TestNonPeriodic:
         charges = torch.tensor([[1.0], [-1.0]])
 
         coulomb = CoulombModule(direct_coulomb_erf_damping_sigma=1.0)
-        energy, _, _ = coulomb(charges, batch)
+        energy = coulomb(charges, batch)
 
         assert energy.item() < 0, "Opposite charges should attract (negative energy)"
 
@@ -227,7 +208,7 @@ class TestNonPeriodic:
         charges = torch.randn(n_atoms, 1, requires_grad=True)
 
         coulomb = CoulombModule(direct_coulomb_erf_damping_sigma=1.0)
-        energy, _, _ = coulomb(charges, batch)
+        energy = coulomb(charges, batch)
 
         grad = torch.autograd.grad(energy.sum(), charges)[0]
         assert grad is not None
@@ -243,8 +224,8 @@ class TestNonPeriodic:
         positions = batch.node_features["positions"]
         positions.requires_grad_(True)
         charges = charge_fn(positions.unsqueeze(0)).squeeze(0)
-        energy, explicit_forces, _ = coulomb(charges, batch)
-        total_f = _total_forces(energy, explicit_forces, positions)
+        energy = coulomb(charges, batch)
+        total_f = _autograd_forces(energy, positions)
 
         # Backprop through total forces to charge model weights
         total_f.sum().backward()
@@ -253,7 +234,7 @@ class TestNonPeriodic:
         assert linear.weight.grad.abs().sum() > 0
 
     def test_total_forces(self):
-        """Total force (explicit + autograd) with q=q(r) matches finite difference.
+        """Total force (autograd −dE/dr) with q=q(r) matches finite difference.
 
         Use double precision to avoid numerical instability in finite difference.
         """
@@ -262,19 +243,17 @@ class TestNonPeriodic:
         charge_fn = _make_charge_fn(n_atoms=3).double()
         coulomb = CoulombModule(direct_coulomb_erf_damping_sigma=1.0)
 
-        # Autograd total forces
         positions = batch.node_features["positions"].double()
         batch.node_features["positions"] = positions
         positions.requires_grad_(True)
         charges = charge_fn(positions.unsqueeze(0)).squeeze(0)
-        energy, explicit_forces, _ = coulomb(charges, batch)
-        forces_auto = _total_forces(energy, explicit_forces, positions)
+        energy = coulomb(charges, batch)
+        forces_auto = _autograd_forces(energy, positions)
 
         def energy_fn(pos):
             batch.node_features["positions"] = pos
             q = charge_fn(pos.unsqueeze(0)).squeeze(0)
-            e, _, _ = coulomb(q, batch)
-            return e.sum()
+            return coulomb(q, batch).sum()
 
         forces_fd = _fd_forces(energy_fn, positions)
         torch.testing.assert_close(forces_auto.detach(), forces_fd, atol=1e-5, rtol=1e-5)
@@ -289,14 +268,11 @@ class TestPeriodic:
         charges = torch.randn(n_atoms, 1)
 
         coulomb = _get_coulomb_module()
-        energy, explicit_forces, explicit_stress = coulomb(charges, batch)
+        energy = coulomb(charges, batch)
 
         assert energy.shape == (2,)
         assert torch.isfinite(energy).all()
-        assert explicit_forces.shape == (n_atoms, 3)
-        assert explicit_stress.shape == (2, 6)
-        assert explicit_forces.abs().sum() > 0
-        assert explicit_stress.abs().sum() > 0
+        assert energy.abs().sum() > 0
 
     def test_opposite_charges_attract(self):
         atoms = ase.Atoms(
@@ -309,7 +285,7 @@ class TestPeriodic:
         charges = torch.tensor([[1.0], [-1.0]])
 
         coulomb = CoulombModule(pme_accuracy=1e-6)
-        energy, _, _ = coulomb(charges, batch)
+        energy = coulomb(charges, batch)
 
         assert energy.item() < 0, "Opposite charges should attract (negative energy)"
 
@@ -323,14 +299,14 @@ class TestPeriodic:
         atoms_np = ase.Atoms("H2O", positions=positions)
         batch_np = _make_batch([atoms_np])
         coulomb = CoulombModule(direct_coulomb_erf_damping_sigma=0.5)
-        e_nonperiodic, _, _ = coulomb(charges_val, batch_np)
+        e_nonperiodic = coulomb(charges_val, batch_np)
 
         # Periodic with increasing box size
         energies = []
         for box_size in [15.0, 25.0, 40.0, 100.0]:
             atoms_p = ase.Atoms("H2O", positions=positions, cell=[box_size] * 3, pbc=True)
             batch_p = _make_batch([atoms_p])
-            e, _, _ = CoulombModule(direct_coulomb_erf_damping_sigma=0.5, pme_accuracy=1e-6)(
+            e = CoulombModule(direct_coulomb_erf_damping_sigma=0.5, pme_accuracy=1e-6)(
                 charges_val, batch_p
             )
             energies.append(e.item())
@@ -346,29 +322,57 @@ class TestPeriodic:
         charges = torch.randn(n_atoms, 1, requires_grad=True)
 
         coulomb = _get_coulomb_module()
-        energy, _, _ = coulomb(charges, batch)
+        energy = coulomb(charges, batch)
 
         grad = torch.autograd.grad(energy.sum(), charges)[0]
         assert grad is not None
         assert grad.abs().sum() > 0
 
-    def test_explicit_stress_nonzero(self):
-        batch = _make_batch(_water_molecules())
+    def test_positions_differentiable_both_modes(self):
+        """dE/dr through the PME energy is nonzero in both train/eval modes."""
+        batch = _make_batch(_water_molecules()[:1])
         n_atoms = batch.node_features["positions"].shape[0]
-        torch.manual_seed(42)
-        charges = torch.randn(n_atoms, 1)
+        for mode in ["train", "eval"]:
+            coulomb = _get_coulomb_module()
+            getattr(coulomb, mode)()
 
-        coulomb = _get_coulomb_module()
-        _, _, explicit_stress = coulomb(charges, batch)
+            positions = batch.node_features["positions"].clone().requires_grad_(True)
+            batch.node_features["positions"] = positions
+            charges = torch.randn(n_atoms, 1, requires_grad=True)
+            energy = coulomb(charges, batch)
 
-        assert explicit_stress.abs().sum() > 0
+            grad = torch.autograd.grad(energy.sum(), positions, retain_graph=True)[0]
+            assert grad is not None and grad.abs().sum() > 0, (
+                f"In {mode} mode, dE/dr should be nonzero (energy is position-differentiable)"
+            )
 
-    def test_spatial_forces(self):
-        """Spatial forces (fixed charges) match finite difference.
+    def test_cell_differentiable_both_modes(self):
+        """dE/dε through the PME energy is nonzero in both train/eval modes."""
+        batch = _make_batch(_water_molecules()[:1])
+        n_atoms = batch.node_features["positions"].shape[0]
+        for mode in ["train", "eval"]:
+            coulomb = _get_coulomb_module()
+            getattr(coulomb, mode)()
 
-        With fixed charges, positions are detached inside PME, so the spatial
-        component lives entirely in explicit_forces (no autograd component).
+            pos = batch.node_features["positions"].clone()
+            cell = batch.system_features["cell"].clone()
+            strain = torch.zeros(3, 3, requires_grad=True)
+            strained_pos, strained_cell = _apply_strain(pos, cell, strain)
+            batch.node_features["positions"] = strained_pos
+            batch.system_features["cell"] = strained_cell
 
+            charges = torch.randn(n_atoms, 1, requires_grad=True)
+            energy = coulomb(charges, batch)
+
+            grad = torch.autograd.grad(energy.sum(), strain, retain_graph=True)[0]
+            assert grad is not None and grad.abs().sum() > 0, (
+                f"In {mode} mode, dE/dε should be nonzero (energy is cell-differentiable)"
+            )
+
+    def test_forces_match_fd_fixed_charges(self):
+        """Forces (fixed charges) match finite difference.
+
+        With fixed charges dq/dr=0, so −dE/dr is the pure spatial force.
         Use double precision to avoid numerical instability in finite difference.
         """
         atoms = ase.Atoms(
@@ -384,24 +388,23 @@ class TestPeriodic:
         charges = torch.tensor([[1.0], [-1.0]], dtype=torch.float64)
         coulomb = CoulombModule(pme_accuracy=1e-6)
 
-        _, explicit_forces, _ = coulomb(charges, batch)
-
-        pos_base = batch.node_features["positions"]
+        positions = batch.node_features["positions"].requires_grad_(True)
+        batch.node_features["positions"] = positions
+        forces_auto = _autograd_forces(coulomb(charges, batch), positions)
 
         def force_energy_fn(pos):
             batch.node_features["positions"] = pos
-            e, _, _ = coulomb(charges, batch)
-            return e.sum()
+            return coulomb(charges, batch).sum()
 
-        forces_fd = _fd_forces(force_energy_fn, pos_base)
-        torch.testing.assert_close(explicit_forces, forces_fd, atol=1e-5, rtol=1e-5)
+        forces_fd = _fd_forces(force_energy_fn, positions)
+        torch.testing.assert_close(forces_auto.detach(), forces_fd, atol=1e-5, rtol=1e-5)
 
-    def test_spatial_stress(self):
-        """Spatial stress (fixed charges) matches finite difference.
+    def test_stress_match_fd_fixed_charges(self):
+        """Stress (fixed charges) matches finite difference.
 
-        With fixed charges, positions are detached inside PME, so the spatial
-        component lives entirely in explicit_stress (no autograd component).
-
+        Pin PME parameters so FD strain perturbations don't re-estimate them (a strained
+        cell changes the volume and thus alpha/cutoff, which would make the energy
+        non-smooth w.r.t. strain).
         Use double precision to avoid numerical instability in finite difference.
         """
         atoms = ase.Atoms(
@@ -412,60 +415,26 @@ class TestPeriodic:
         )
 
         batch = _make_batch([atoms])
-        batch.node_features["positions"] = batch.node_features["positions"].double()
-        batch.system_features["cell"] = batch.system_features["cell"].double()
+        pos_base = batch.node_features["positions"].double()
+        cell_base = batch.system_features["cell"].double()
+        batch.node_features["positions"] = pos_base
+        batch.system_features["cell"] = cell_base
         charges = torch.tensor([[1.0], [-1.0]], dtype=torch.float64)
         coulomb = CoulombModule(pme_accuracy=1e-6)
 
-        _, _, explicit_stress = coulomb(charges, batch)
-
-        pos_base = batch.node_features["positions"]
-        cell_base = batch.system_features["cell"]
+        strain = torch.zeros(3, 3, dtype=torch.float64, requires_grad=True)
+        strained_pos, strained_cell = _apply_strain(pos_base, cell_base, strain)
+        batch.node_features["positions"] = strained_pos
+        batch.system_features["cell"] = strained_cell
+        stress_auto = _autograd_stress(coulomb(charges, batch), strain, strained_cell)
 
         def virial_energy_fn(pos, cell):
             batch.node_features["positions"] = pos
             batch.system_features["cell"] = cell
-            e, _, _ = coulomb(charges, batch)
-            return e.sum()
+            return coulomb(charges, batch).sum()
 
         stress_fd = _fd_stress(virial_energy_fn, pos_base, cell_base)
-        torch.testing.assert_close(explicit_stress.squeeze(0), stress_fd, atol=1e-5, rtol=1e-5)
-
-    def test_spatial_forces_not_differentiable_wrt_charges_model(self):
-        """Explicit forces are *not* differentiable w.r.t. charge model."""
-        batch = _make_batch(_water_molecules()[:1])
-        n_atoms = batch.node_features["positions"].shape[0]
-        charge_fn = _make_charge_fn(n_atoms=n_atoms)
-        charge_fn.train()
-        coulomb = _get_coulomb_module()
-        coulomb.train()
-
-        positions = batch.node_features["positions"].clone().requires_grad_(True)
-        batch.node_features["positions"] = positions
-        charges = charge_fn(positions.unsqueeze(0)).squeeze(0)
-        energy, explicit_forces, explicit_stress = coulomb(charges, batch)
-
-        assert explicit_forces.requires_grad is False, (
-            "explicit_forces should not be differentiable"
-        )
-
-    def test_spatial_stress_not_differentiable_wrt_charges_model(self):
-        """Explicit stress is *not* differentiable w.r.t. charge model."""
-        batch = _make_batch(_water_molecules()[:1])
-        n_atoms = batch.node_features["positions"].shape[0]
-        charge_fn = _make_charge_fn(n_atoms=n_atoms)
-        charge_fn.train()
-        coulomb = _get_coulomb_module()
-        coulomb.train()
-
-        positions = batch.node_features["positions"].clone().requires_grad_(True)
-        batch.node_features["positions"] = positions
-        charges = charge_fn(positions.unsqueeze(0)).squeeze(0)
-        energy, explicit_forces, explicit_stress = coulomb(charges, batch)
-
-        assert explicit_stress.requires_grad is False, (
-            "explicit_stress should not be differentiable"
-        )
+        torch.testing.assert_close(stress_auto.detach(), stress_fd, atol=1e-5, rtol=1e-5)
 
     def test_total_forces_differentiable_wrt_charges_model(self):
         """Total forces are differentiable w.r.t. charge model."""
@@ -479,9 +448,9 @@ class TestPeriodic:
         positions = batch.node_features["positions"].clone().requires_grad_(True)
         batch.node_features["positions"] = positions
         charges = charge_fn(positions.unsqueeze(0)).squeeze(0)
-        energy, explicit_forces, explicit_stress = coulomb(charges, batch)
+        energy = coulomb(charges, batch)
 
-        total_forces = _total_forces(energy, explicit_forces, positions)
+        total_forces = _autograd_forces(energy, positions)
 
         linear = charge_fn[1]
         total_forces.sum().backward()
@@ -508,9 +477,9 @@ class TestPeriodic:
         batch.system_features["cell"] = strained_cell
 
         charges = charge_fn(strained_pos.unsqueeze(0)).squeeze(0)
-        energy, explicit_forces, explicit_stress = coulomb(charges, batch)
+        energy = coulomb(charges, batch)
 
-        total_stress = _total_stress(energy, explicit_stress, strain, strained_cell)
+        total_stress = _autograd_stress(energy, strain, strained_cell)
 
         linear = charge_fn[1]
         total_stress.sum().backward()
@@ -520,7 +489,7 @@ class TestPeriodic:
         assert linear.weight.grad.abs().sum() > 0
 
     def test_combined_loss_differentiable_wrt_charges_model(self):
-        """Combined loss on energy, total forces, and total virial is differentiable w.r.t. charge model.
+        """Combined loss on energy, total forces, and total stress is differentiable w.r.t. charge model.
 
         This is mostly just a smoke test to ensure that this works.
         """
@@ -534,7 +503,6 @@ class TestPeriodic:
         pos_base = batch.node_features["positions"].clone()
         cell_base = batch.system_features["cell"]
 
-        # Apply differentiable strain for virial
         strain = torch.zeros(3, 3, dtype=pos_base.dtype, requires_grad=True)
         strained_pos, strained_cell = _apply_strain(pos_base, cell_base, strain)
         positions = strained_pos.requires_grad_(True)
@@ -542,16 +510,10 @@ class TestPeriodic:
         batch.system_features["cell"] = strained_cell
 
         charges = charge_fn(positions.unsqueeze(0)).squeeze(0)
-        energy, explicit_forces, explicit_stress = coulomb(charges, batch)
+        energy = coulomb(charges, batch)
 
-        total_forces, total_stress = _total_forces_and_stress(
-            energy,
-            explicit_forces,
-            explicit_stress,
-            positions,
-            strain,
-            strained_cell,
-            training=True,
+        total_forces, total_stress = _autograd_forces_and_stress(
+            energy, positions, strain, strained_cell
         )
 
         linear = charge_fn[1]
@@ -578,7 +540,7 @@ class TestPeriodic:
         positions = batch.node_features["positions"]
         positions.requires_grad_(True)
         charges = charge_fn(positions.unsqueeze(0)).squeeze(0)
-        energy, _, _ = coulomb(charges, batch)
+        energy = coulomb(charges, batch)
 
         # dE/dq should be nonzero
         dEdq = torch.autograd.grad(energy.sum(), charges, retain_graph=True)[0]
@@ -608,14 +570,13 @@ class TestPeriodic:
         positions = batch.node_features["positions"]
         positions.requires_grad_(True)
         charges = charge_fn(positions.unsqueeze(0)).squeeze(0)
-        energy, explicit_forces, _ = coulomb(charges, batch)
-        forces_auto = _total_forces(energy, explicit_forces, positions)
+        energy = coulomb(charges, batch)
+        forces_auto = _autograd_forces(energy, positions)
 
         def energy_fn(pos):
             batch.node_features["positions"] = pos
             q = charge_fn(pos.unsqueeze(0)).squeeze(0)
-            e, _, _ = coulomb(q, batch)
-            return e.sum()
+            return coulomb(q, batch).sum()
 
         forces_fd = _fd_forces(energy_fn, positions)
         torch.testing.assert_close(forces_auto.detach(), forces_fd, atol=1e-5, rtol=1e-5)
@@ -663,83 +624,17 @@ class TestPeriodic:
         batch.system_features["cell"] = strained_cell
 
         charges = charge_fn(strained_pos.unsqueeze(0)).squeeze(0)
-        energy, _, explicit_stress = coulomb(charges, batch, kwargs=fixed_pme)
-        stress_auto = _total_stress(energy, explicit_stress, strain, strained_cell)
+        energy = coulomb(charges, batch, kwargs=fixed_pme)
+        stress_auto = _autograd_stress(energy, strain, strained_cell)
 
         def virial_energy_fn(pos, cell):
             batch.node_features["positions"] = pos
             batch.system_features["cell"] = cell
             q = charge_fn(pos.unsqueeze(0)).squeeze(0)
-            e, _, _ = coulomb(q, batch, kwargs=fixed_pme)
-            return e.sum()
+            return coulomb(q, batch, kwargs=fixed_pme).sum()
 
         stress_fd = _fd_stress(virial_energy_fn, pos_base, cell_base)
         torch.testing.assert_close(stress_auto.detach(), stress_fd, atol=1e-5, rtol=1e-5)
-
-    def test_positions_detached_both_modes(self):
-        """Positions are detached inside PME in both train/eval modes.
-
-        Spatial forces come only from explicit_forces, not through autograd on energy.
-        """
-        batch = _make_batch(_water_molecules()[:1])
-        n_atoms = batch.node_features["positions"].shape[0]
-        for mode in ["train", "eval"]:
-            coulomb = _get_coulomb_module()
-            getattr(coulomb, mode)()
-
-            positions = batch.node_features["positions"].clone().requires_grad_(True)
-            batch.node_features["positions"] = positions
-            # Charges require grad so the energy stays in the compute graph
-            charges = torch.randn(n_atoms, 1, requires_grad=True)
-            energy, explicit_forces, _ = coulomb(charges, batch)
-
-            # dE/dr through the energy should be None (positions detached inside PME)
-            grad = torch.autograd.grad(
-                energy.sum(), positions, allow_unused=True, retain_graph=True
-            )[0]
-            assert grad is None or (grad.abs() < 1e-10).all(), (
-                f"In {mode} mode, positions should be detached inside PME"
-            )
-
-            # But explicit_forces should be nonzero
-            assert explicit_forces.abs().sum() > 0, (
-                f"In {mode} mode, explicit_forces should carry the spatial component"
-            )
-
-    def test_cell_detached_both_modes(self):
-        """Cell is detached inside PME in both train/eval modes.
-
-        Stress contributions come only from explicit_stress, not through autograd
-        on energy w.r.t. strain.
-        """
-        batch = _make_batch(_water_molecules()[:1])
-        n_atoms = batch.node_features["positions"].shape[0]
-        for mode in ["train", "eval"]:
-            coulomb = _get_coulomb_module()
-            getattr(coulomb, mode)()
-
-            pos = batch.node_features["positions"].clone()
-            cell = batch.system_features["cell"].clone()
-            strain = torch.zeros(3, 3, requires_grad=True)
-            strained_pos, strained_cell = _apply_strain(pos, cell, strain)
-            batch.node_features["positions"] = strained_pos
-            batch.system_features["cell"] = strained_cell
-
-            charges = torch.randn(n_atoms, 1, requires_grad=True)
-            energy, _, explicit_stress = coulomb(charges, batch)
-
-            # dE/dε through the energy should be None (cell detached inside PME)
-            grad = torch.autograd.grad(energy.sum(), strain, allow_unused=True, retain_graph=True)[
-                0
-            ]
-            assert grad is None or (grad.abs() < 1e-10).all(), (
-                f"In {mode} mode, cell should be detached inside PME"
-            )
-
-            # But explicit_stress should be nonzero
-            assert explicit_stress.abs().sum() > 0, (
-                f"In {mode} mode, explicit_stress should carry the stress component"
-            )
 
 
 class TestBatching:
@@ -755,12 +650,12 @@ class TestBatching:
             n = len(mol)
             q = torch.randn(n, 1)
             all_charges.append(q)
-            e, _, _ = coulomb(q, _make_batch([mol]))
+            e = coulomb(q, _make_batch([mol]))
             individual_energies.append(e.item())
 
         batch = _make_batch(molecules)
         charges = torch.cat(all_charges, dim=0)
-        batched_energies, _, _ = coulomb(charges, batch)
+        batched_energies = coulomb(charges, batch)
 
         for i, (batched, individual) in enumerate(
             zip(batched_energies.tolist(), individual_energies, strict=True)
@@ -770,7 +665,7 @@ class TestBatching:
             )
 
     def test_periodic_batched_vs_individual(self):
-        """Energy, explicit_forces, and stress match between batched and individual."""
+        """Energy, forces, and stress match between batched and individual."""
         waters = _water_molecules()
         coulomb = _get_coulomb_module()
 
@@ -782,14 +677,41 @@ class TestBatching:
             n = len(mol)
             q = torch.randn(n, 1)
             all_charges.append(q)
-            e, f, v = coulomb(q, _make_batch([mol]))
+
+            single = _make_batch([mol])
+            pos = single.node_features["positions"].double().requires_grad_(True)
+            single.node_features["positions"] = pos
+            cell_base = single.system_features["cell"].double()
+            strain = torch.zeros(3, 3, dtype=torch.float64, requires_grad=True)
+            strained_pos, strained_cell = _apply_strain(pos, cell_base, strain)
+            single.node_features["positions"] = strained_pos
+            single.system_features["cell"] = strained_cell
+            e = coulomb(q.double(), single)
             individual_energies.append(e.item())
-            individual_forces.append(f)
-            individual_stresses.append(v)
+            f, s = _autograd_forces_and_stress(e, pos, strain, strained_cell)
+            individual_forces.append(f.detach())
+            individual_stresses.append(s.detach())
 
         batch = _make_batch(waters)
-        charges = torch.cat(all_charges, dim=0)
-        batched_energies, batched_forces, batched_stress = coulomb(charges, batch)
+        charges = torch.cat(all_charges, dim=0).double()
+        pos = batch.node_features["positions"].double().requires_grad_(True)
+        batch.node_features["positions"] = pos
+        cell_base = batch.system_features["cell"].double()
+        # Per-system independent strains, so each system's stress is recoverable.
+        strain = torch.zeros(len(waters), 3, 3, dtype=torch.float64, requires_grad=True)
+        node_graph_idx = batch.node_batch_index
+        sym = 0.5 * (strain + strain.transpose(-1, -2))
+        strained_pos = pos + torch.bmm(pos.unsqueeze(1), sym[node_graph_idx]).squeeze(1)
+        strained_cell = cell_base + torch.bmm(cell_base, sym)
+        batch.node_features["positions"] = strained_pos
+        batch.system_features["cell"] = strained_cell
+        batched_energies = coulomb(charges, batch)
+        # Single backward for both forces and stress (per-system strain, so no unsqueeze).
+        grad_pos, dEde = torch.autograd.grad(
+            batched_energies.sum(), [pos, strain], create_graph=True
+        )
+        batched_forces = (-grad_pos).detach()
+        batched_stress = _virial_to_stress(-dEde, strained_cell).detach()
 
         # Energy
         for i, (batched, individual) in enumerate(
@@ -814,14 +736,14 @@ class TestBatching:
         # Stress
         for i in range(len(waters)):
             torch.testing.assert_close(
-                batched_stress[i : i + 1],
+                batched_stress[i],
                 individual_stresses[i],
                 atol=1e-3,
                 rtol=1e-3,
             )
 
     def test_mixed_periodic_nonperiodic(self):
-        """Mixed batch: each system matches its individual computation."""
+        """Mixed batch: each system's energy and forces match its individual computation."""
         periodic = ase.Atoms(
             "H2O",
             positions=[[0, 0, 0], [0.96, 0, 0], [0.24, 0.93, 0]],
@@ -835,21 +757,17 @@ class TestBatching:
         q_periodic = torch.randn(3, 1)
         q_nonperiodic = torch.randn(2, 1)
 
-        e_periodic, f_periodic, _ = coulomb(q_periodic, _make_batch([periodic]))
-        e_nonperiodic, f_nonperiodic, _ = coulomb(q_nonperiodic, _make_batch([nonperiodic]))
+        e_periodic = coulomb(q_periodic, _make_batch([periodic]))
+        e_nonperiodic = coulomb(q_nonperiodic, _make_batch([nonperiodic]))
 
         # Mixed batch
         mixed_batch = _make_batch([periodic, nonperiodic])
         mixed_charges = torch.cat([q_periodic, q_nonperiodic], dim=0)
-        mixed_energy, mixed_forces, _ = coulomb(mixed_charges, mixed_batch)
+        mixed_energy = coulomb(mixed_charges, mixed_batch)
 
         assert mixed_energy.shape == (2,)
         torch.testing.assert_close(mixed_energy[0], e_periodic[0], atol=1e-4, rtol=1e-4)
         torch.testing.assert_close(mixed_energy[1], e_nonperiodic[0], atol=1e-5, rtol=1e-5)
-
-        # Non-periodic explicit forces should be zero, periodic should be nonzero
-        assert mixed_forces[:3].abs().sum() > 0, "Periodic explicit forces should be nonzero"
-        assert (mixed_forces[3:].abs() < 1e-10).all(), "Non-periodic explicit forces should be zero"
 
 
 class TestRotationalGradients:
@@ -863,11 +781,8 @@ class TestRotationalGradients:
     def test_rotational_grad_zero_with_fixed_charges(self, atoms_fn):
         """dE/d(generator) is zero when charges are independent of geometry.
 
-        Sanity check to ensure that we're not missing a contribution to equigrad gradients,
-        since nvalchemiops detaches positions and cell from the graph.
-
-        Coulomb energy is rotationally invariant, so rotating positions (and cell)
-        via the generator should not change energy — gradient must vanish.
+        Coulomb energy is rotationally invariant, so jointly rotating positions (and cell)
+        via the generator must not change the energy — the gradient vanishes.
         """
         batch = _make_batch(atoms_fn())
         n_atoms = batch.node_features["positions"].shape[0]
@@ -884,17 +799,10 @@ class TestRotationalGradients:
             batch.system_features["cell"] = cell @ rotation
 
         charges = torch.randn(n_atoms, 1, requires_grad=True)
-        # For this test, we disable hybrid forces, so that nvalchemiops does not detach positions and cell from the graph.
-        # This allows us to check that the rotational gradient is zero when charges are fixed.
-        # We do this because our normal computation graph with hybrid_forces=True would detach the positions and cell
-        # from the graph _and also_ compute_differentiable_edge_vectors does not set the rotated positions/cell in the AtomGraphs object,
-        # hence their contributions to equigrad regularization would be lost.
-        #
-        # This check tests that we are not missing anything (rotational gradients are 0)
-        energy, _, _ = coulomb(charges, batch, kwargs={"pme_hybrid_forces": False})
+        energy = coulomb(charges, batch)
 
         grad = torch.autograd.grad(energy.sum(), generator, allow_unused=True, retain_graph=True)[0]
-        assert (grad.abs() < 1e-7).all(), (
+        assert grad is None or (grad.abs() < 1e-7).all(), (
             f"Rotational gradient should be zero with fixed charges, got {grad}"
         )
 
@@ -925,7 +833,7 @@ class TestRotationalGradients:
             batch.system_features["cell"] = cell @ rotation
 
         charges = charge_fn(rotated_pos.unsqueeze(0)).squeeze(0)
-        energy, _, _ = coulomb(charges, batch)
+        energy = coulomb(charges, batch)
 
         grad = torch.autograd.grad(energy.sum(), generator)[0]
         assert grad.abs().sum() > 0.5, (
@@ -987,14 +895,14 @@ class TestEdgeCases:
         batch_np = _make_batch([atoms_np])
         charges = torch.tensor([[1.0]])
         coulomb = _get_coulomb_module()
-        energy, _, _ = coulomb(charges, batch_np)
+        energy = coulomb(charges, batch_np)
         assert energy.item() == pytest.approx(0.0, abs=1e-6)
 
         # Periodic: finite energy
         atoms_p = ase.Atoms("H", positions=[[0, 0, 0]], cell=[10, 10, 10], pbc=True)
         batch_p = _make_batch([atoms_p])
         coulomb_p = _get_coulomb_module()
-        energy_p, _, _ = coulomb_p(charges, batch_p)
+        energy_p = coulomb_p(charges, batch_p)
         assert torch.isfinite(energy_p).all()
 
     def test_mixed_system_sizes(self):
@@ -1008,11 +916,9 @@ class TestEdgeCases:
         charges = torch.randn(n_atoms, 1)
 
         coulomb = _get_coulomb_module()
-        energy, explicit_forces, explicit_stress = coulomb(charges, batch)
+        energy = coulomb(charges, batch)
 
         assert energy.shape == (3,)
-        assert explicit_forces.shape == (n_atoms, 3)
-        assert explicit_stress.shape == (3, 6)
         assert torch.isfinite(energy).all()
 
     def test_partial_pbc_raises(self):

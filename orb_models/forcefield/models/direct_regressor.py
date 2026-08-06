@@ -115,15 +115,6 @@ class DirectForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
         """
         return frozenset()
 
-    @property
-    def analytic_derivative_keys(self) -> frozenset[str]:
-        """Forward() output keys for spatial derivatives that cannot be computed via autograd.
-
-        Direct models predict forces/stress from NN heads, so there are
-        no explicit (analytical) derivative terms to expose.
-        """
-        return frozenset()
-
     def forward(
         self,
         batch: AtomGraphs,

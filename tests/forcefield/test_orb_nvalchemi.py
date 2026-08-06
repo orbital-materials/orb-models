@@ -263,116 +263,90 @@ class TestAdaptOutput:
 
 class TestForwardDirect:
     def test_energy_shape_single(self, direct_wrapper, single_batch):
-        out = direct_wrapper.forward(single_batch)
+        out = direct_wrapper(single_batch)
         assert out["energy"].shape == (1, 1)
 
     def test_energy_shape_multi(self, direct_wrapper, multi_batch):
-        out = direct_wrapper.forward(multi_batch)
+        out = direct_wrapper(multi_batch)
         assert out["energy"].shape == (2, 1)
 
     def test_forces_shape(self, direct_wrapper, single_batch):
-        out = direct_wrapper.forward(single_batch)
+        out = direct_wrapper(single_batch)
         assert out["forces"].shape == (3, 3)
 
     def test_forces_shape_multi(self, direct_wrapper, multi_batch):
-        out = direct_wrapper.forward(multi_batch)
+        out = direct_wrapper(multi_batch)
         assert out["forces"].shape == (6, 3)
 
     def test_stress_shape(self, direct_wrapper, single_batch):
-        out = direct_wrapper.forward(single_batch)
+        out = direct_wrapper(single_batch)
         assert out["stress"].shape == (1, 3, 3)
 
     def test_stress_shape_multi(self, direct_wrapper, multi_batch):
-        out = direct_wrapper.forward(multi_batch)
+        out = direct_wrapper(multi_batch)
         assert out["stress"].shape == (2, 3, 3)
 
     def test_no_forces_when_disabled(self, direct_wrapper, single_batch):
         direct_wrapper.model_config.active_outputs = {"energy"}
-        out = direct_wrapper.forward(single_batch)
+        out = direct_wrapper(single_batch)
         assert out.get("forces") is None
 
     def test_no_stress_when_disabled(self, direct_wrapper, single_batch):
         direct_wrapper.model_config.active_outputs = {"energy", "forces"}
-        out = direct_wrapper.forward(single_batch)
+        out = direct_wrapper(single_batch)
         assert out.get("stress") is None
 
 
 class TestForwardConservative:
     def test_energy_shape_single(self, conservative_wrapper, single_batch):
-        out = conservative_wrapper.forward(single_batch)
+        out = conservative_wrapper(single_batch)
         assert out["energy"].shape == (1, 1)
 
     def test_energy_shape_multi(self, conservative_wrapper, multi_batch):
-        out = conservative_wrapper.forward(multi_batch)
+        out = conservative_wrapper(multi_batch)
         assert out["energy"].shape == (2, 1)
 
     def test_forces_shape(self, conservative_wrapper, single_batch):
-        out = conservative_wrapper.forward(single_batch)
+        out = conservative_wrapper(single_batch)
         assert out["forces"].shape == (3, 3)
 
     def test_forces_shape_multi(self, conservative_wrapper, multi_batch):
-        out = conservative_wrapper.forward(multi_batch)
+        out = conservative_wrapper(multi_batch)
         assert out["forces"].shape == (6, 3)
 
     def test_stress_shape(self, conservative_wrapper, single_batch):
-        out = conservative_wrapper.forward(single_batch)
+        out = conservative_wrapper(single_batch)
         assert out["stress"].shape == (1, 3, 3)
 
     def test_no_forces_when_disabled(self, conservative_wrapper, single_batch):
         conservative_wrapper.model_config.active_outputs = {"energy"}
-        out = conservative_wrapper.forward(single_batch)
+        out = conservative_wrapper(single_batch)
         assert out.get("forces") is None
 
     def test_no_stress_when_disabled(self, conservative_wrapper, single_batch):
         conservative_wrapper.model_config.active_outputs = {"energy", "forces"}
-        out = conservative_wrapper.forward(single_batch)
+        out = conservative_wrapper(single_batch)
         assert out.get("stress") is None
 
 
-class TestPipelineAutograd:
-    def test_not_pipeline_autograd_by_default(self, conservative_wrapper):
-        assert not conservative_wrapper._is_pipeline_autograd()
-
-    def test_direct_never_pipeline_autograd(self, direct_wrapper):
-        direct_wrapper.model_config.active_outputs = {"energy"}
-        assert not direct_wrapper._is_pipeline_autograd()
-
-    def test_is_pipeline_autograd_when_derivatives_stripped(self, conservative_wrapper):
+class TestPipeline:
+    def test_pipeline_returns_energy_only(self, conservative_wrapper, single_batch):
         conservative_wrapper.model_config.active_outputs = {"energy"}
-        assert conservative_wrapper._is_pipeline_autograd()
+        out = conservative_wrapper(single_batch)
+        assert "energy" in out
+        assert "forces" not in out
+        assert "stress" not in out
 
-    def test_pipeline_autograd_returns_energy(self, conservative_wrapper, single_batch):
+    def test_pipeline_does_not_mutate_active_outputs(self, conservative_wrapper, single_batch):
         conservative_wrapper.model_config.active_outputs = {"energy"}
-        out = conservative_wrapper.forward(single_batch)
-        assert out["energy"] is not None
+        conservative_wrapper(single_batch)
+        assert conservative_wrapper.model_config.active_outputs == {"energy"}
 
     def test_direct_derivative_keys_conservative(self, conservative_wrapper):
         assert conservative_wrapper.direct_derivative_keys() == set()
 
     def test_direct_derivative_keys_direct(self, direct_wrapper):
         assert direct_wrapper.direct_derivative_keys() == set()
-
-
-class TestPipelineAnalyticDerivatives:
-    @pytest.fixture
-    def wrapper(self, adapter):
-        model = orb_v3_conservative_architecture(latent_dim=_LATENT_DIM, has_electrostatics=True)
-        return OrbWrapper(model, adapter)
-
-    def test_pipeline_autograd_returns_analytic_forces(self, wrapper, single_batch):
-        wrapper.model_config.active_outputs = {"energy"}
-        out = wrapper.forward(single_batch)
-        assert out["forces"].shape == (3, 3)
-
-    def test_pipeline_autograd_returns_analytic_stress(self, wrapper, single_batch):
-        wrapper.model_config.active_outputs = {"energy"}
-        out = wrapper.forward(single_batch)
-        assert out["stress"].shape == (1, 3, 3)
-
-    def test_pipeline_autograd_does_not_mutate_active_outputs(self, wrapper, single_batch):
-        wrapper.model_config.active_outputs = {"energy"}
-        wrapper.forward(single_batch)
-        assert wrapper.model_config.active_outputs == {"energy"}
 
 
 class TestComputeEmbeddings:

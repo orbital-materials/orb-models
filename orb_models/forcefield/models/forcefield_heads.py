@@ -190,7 +190,7 @@ class EnergyHead(ForcefieldHead):
                 kJ/mol resolution against large reference energies. See
                 `absolute_energy` for the precision trade-off.
         """
-        interaction_energy = self.forward(node_features, batch)
+        interaction_energy = self(node_features, batch)
         return self.absolute_energy(interaction_energy, batch, fp64=fp64)
 
     def loss(

@@ -722,31 +722,28 @@ def _compute_neighbor_list_with_fallback(
     cutoff: float,
     batch_idx: torch.Tensor | None = None,
     batch_ptr: torch.Tensor | None = None,
-    initial_safety_factor: float = 1.0,
-    fallback_safety_factor: float = 5.0,
-    atomic_density: float = 0.35,
+    initial_atomic_density: float = 0.35,
+    fallback_atomic_density: float = 0.35 * 5,
     fill_value: int | None = None,
     wrap_positions: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Compute neighbor list with automatic fallback if initial estimate is too low.
 
-    Estimates max neighbors based on atomic density and a safety factor, using less conservative
-    defaults than alchemiops. With default settings, a 6.0 Å radius allows up to 320 neighbors
-    (~2.6x the estimated 120), which suffices for most cases. If the system is very dense,
-    underestimating max neighbors causes silent truncation of random neighbors, so we fallback
-    to a higher safety factor.
+    Estimates max neighbors based on atomic density, using less conservative defaults than alchemiops.
+    With default settings, a 6.0 Å radius allows up to 320 neighbors (~2.6x the estimated 120), which
+    suffices for most cases. If the system is very dense, underestimating max neighbors causes silent
+    truncation of random neighbors, so we fallback to a higher atomic density.
 
-    See: https://nvidia.github.io/warp/modules/sim.html#neighbor-finding
+    See: https://nvidia.github.io/nvalchemi-toolkit-ops/modules/warp/neighbors.html#nvalchemiops.neighbors.neighbor_utils.estimate_max_neighbors
     """
+
     # nvalchemiops produces incorrect results when pbc has shape (3,) for batched inputs
     # so we expand it to (n_systems, 3). We can remove this once it's fixed.
     n_systems = cell.shape[0] if cell.dim() == 3 else 1
     pbc = pbc.view(-1, 3).expand(n_systems, 3).contiguous()
 
-    for safety_factor in [initial_safety_factor, fallback_safety_factor]:
-        max_num_neighbors_alchemi = estimate_max_neighbors(
-            cutoff, atomic_density=atomic_density, safety_factor=safety_factor
-        )
+    for atomic_density in [initial_atomic_density, fallback_atomic_density]:
+        max_num_neighbors_alchemi = estimate_max_neighbors(cutoff, atomic_density=atomic_density)
         neighbor_matrix, num_neighbors, neighbor_shift_matrix = nva_neighbor_list(
             positions=positions,
             cell=cell,
@@ -762,9 +759,8 @@ def _compute_neighbor_list_with_fallback(
             return neighbor_matrix, num_neighbors, neighbor_shift_matrix
 
     raise RuntimeError(
-        f"max_num_neighbors_alchemi ({max_num_neighbors_alchemi}) is insufficient "
-        f"even with safety_factor={fallback_safety_factor}. "
-        f"Observed max neighbors: {num_neighbors.max().item()}"
+        f"max_num_neighbors_alchemi ({max_num_neighbors_alchemi}) is insufficient even with higher "
+        f"atomic density={fallback_atomic_density}. Observed max neighbors: {num_neighbors.max().item()}"
     )
 
 

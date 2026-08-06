@@ -38,7 +38,7 @@ def test_linear_reference_energy_forward_zero_weights():
     model = LinearReferenceEnergy(weight_init=weight_init, trainable=False)
     atom_types = torch.tensor([1, 6, 8, 1, 1], dtype=torch.long)
     n_node = torch.tensor([5])
-    output = model.forward(atom_types, n_node)
+    output = model(atom_types, n_node)
     expected_output = torch.zeros((1, 1))
     assert torch.allclose(output, expected_output)
 
@@ -48,7 +48,7 @@ def test_linear_reference_energy_forward_one_weights():
     model = LinearReferenceEnergy(weight_init=weight_init, trainable=False)
     atom_types = torch.tensor([1, 6, 8, 1, 1], dtype=torch.long)
     n_node = torch.tensor([5])
-    output = model.forward(atom_types, n_node)
+    output = model(atom_types, n_node)
     expected_output = torch.tensor([[5.0]])
     assert torch.allclose(output, expected_output)
 
@@ -63,7 +63,7 @@ def test_energy_head_initialization(energy_head):
 
 def test_energy_head_forward(energy_head, batch):
     node_features = batch.node_features[_KEY]
-    output = energy_head.forward(node_features, batch)
+    output = energy_head(node_features, batch)
     assert output.shape == (batch.n_node.shape[0],)
 
 
@@ -125,7 +125,7 @@ def test_force_head_initialization(force_head):
 
 def test_force_head_forward(force_head, batch):
     node_features = batch.node_features[_KEY]
-    output = force_head.forward(node_features, batch)
+    output = force_head(node_features, batch)
     assert output.shape == (batch.n_node.sum().item(), 3)
 
 

@@ -88,7 +88,8 @@ def test_forcefield_adapter_equigrad():
     graphs_ = []
     for atoms in [periodic, molecule]:
         g = adapter.from_ase_atoms(atoms)
-        vectors, _, generator = g.compute_differentiable_edge_vectors()
+        geom = g.compute_differentiable_edge_vectors()
+        vectors, generator = geom.edge_vectors, geom.rotation_generator
         g.edge_features["vectors"] = vectors
         g.system_features["generator"] = generator
         graphs.append(g)

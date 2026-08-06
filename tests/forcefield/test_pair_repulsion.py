@@ -82,7 +82,10 @@ def test_pair_grads(pbc):
 
     graphs = [adapter.from_ase_atoms(atoms, output_dtype=torch.float64) for a in [atoms, atoms]]
     batch = AtomGraphs.batch(graphs)
-    vectors, displacement, generator = batch.compute_differentiable_edge_vectors()
+    geom = batch.compute_differentiable_edge_vectors()
+    vectors = geom.edge_vectors
+    displacement = geom.stress_displacement
+    generator = geom.rotation_generator
     batch.edge_features["vectors"] = vectors
     out = pair_repulsion(batch)
 

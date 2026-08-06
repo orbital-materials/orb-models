@@ -13,6 +13,16 @@ from orb_models.common.torch_utils import torch_lexsort
 _T = TypeVar("_T", bound="AtomGraphs")
 
 
+class DifferentiableGeometry(NamedTuple):
+    """The differentiable geometry produced for conservative forces/stress."""
+
+    edge_vectors: torch.Tensor
+    stress_displacement: torch.Tensor | None
+    rotation_generator: torch.Tensor | None
+    strained_positions: torch.Tensor
+    strained_cell: torch.Tensor
+
+
 class AtomGraphs(AbstractAtomBatch):
     """A batch of atomic systems represented as graphs with edge vectors and indices.
 
@@ -246,8 +256,8 @@ class AtomGraphs(AbstractAtomBatch):
         self,
         use_stress_displacement: bool = True,
         use_rotation: bool = True,
-    ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
-        """Compute pbc-aware edge vectors such that gradients flow back to positions.
+    ) -> DifferentiableGeometry:
+        """Compute pbc-aware differentiable geometry for conservative forces/stress.
 
         Args:
             use_stress_displacement (bool): If True, a zero 'displacement' tensor is created
@@ -271,6 +281,10 @@ class AtomGraphs(AbstractAtomBatch):
                 positions, cell, per_node_graph_indices
             )
 
+        # Captured pre-rotation for equivariant consumers (e.g. Coulomb): they are equivariant by construction,
+        # so they stay out of the rotational-gradient path (equigrad regularises only the learned GNN).
+        strained_positions, strained_cell = positions, cell
+
         equigrad_generator = None
         if use_rotation:
             per_node_graph_indices = self._get_per_node_graph_indices()
@@ -284,14 +298,19 @@ class AtomGraphs(AbstractAtomBatch):
             ).squeeze(1)
             cell = torch.bmm(cell, rotation)
 
-        # This is a compilable equivalent of cells.repeat_interleave(self.n_edge, dim=0)
         per_edge_graph_indices = self._get_per_edge_graph_indices()
         cells_repeat = cell[per_edge_graph_indices]  # (nedges, 3, 3)
 
         shifts = torch.bmm(unit_shifts, cells_repeat).squeeze(1)  # (nedges, 3)
         vectors = positions[self.receivers] - positions[self.senders] + shifts
 
-        return vectors, stress_displacement, equigrad_generator
+        return DifferentiableGeometry(
+            stress_displacement=stress_displacement,
+            rotation_generator=equigrad_generator,
+            edge_vectors=vectors,
+            strained_positions=strained_positions,
+            strained_cell=strained_cell,
+        )
 
     def check_edges_allclose(self, other: _T, msg: str = "", tol: float = 1e-6):
         """Assert that the edges of two atomgraphs are equal."""

@@ -142,20 +142,6 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
             keys.add("stress")
         return frozenset(keys)
 
-    @property
-    def analytic_derivative_keys(self) -> frozenset[str]:
-        """Forward() output keys for spatial derivatives that cannot be computed via autograd.
-
-        Returns the dict keys of analytically computed derivatives (e.g. from Coulomb PME)
-        that are *not* obtained via autograd on the energy, and should be added to the gradient-based forces/stress.
-        """
-        if self.coulomb_module is not None:
-            keys = {"analytic_forces"}
-            if self.has_stress:
-                keys.add("analytic_stress")
-            return frozenset(keys)
-        return frozenset()
-
     def forward(
         self,
         batch: AtomGraphs,
@@ -176,18 +162,18 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
             Components (used by loss and pipeline frameworks):
                 "interaction_energy"  — energy without reference (B,)
                 "rotational_grad"     — equivariance regularisation gradient (B, 3, 3)
-                "analytic_forces"     — non-autograd forces, e.g. Coulomb (N, 3)
-                "analytic_stress"     — non-autograd stress, e.g. Coulomb (B, 6)
         """
         compute_stress = compute_stress and self.has_stress
 
         if compute_forces or compute_stress:
-            vectors, stress_displacement, generator = batch.compute_differentiable_edge_vectors()
-            assert stress_displacement is not None
-            assert generator is not None
-            batch.system_features["stress_displacement"] = stress_displacement
-            batch.system_features["generator"] = generator
-            batch.edge_features["vectors"] = vectors
+            geom = batch.compute_differentiable_edge_vectors()
+            assert geom.stress_displacement is not None
+            assert geom.rotation_generator is not None
+            batch.system_features["stress_displacement"] = geom.stress_displacement
+            batch.system_features["generator"] = geom.rotation_generator
+            batch.edge_features["vectors"] = geom.edge_vectors
+            batch.node_features["strained_positions"] = geom.strained_positions
+            batch.system_features["strained_cell"] = geom.strained_cell
 
         out = self.model(batch)
         node_features = out["node_features"]
@@ -218,13 +204,8 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
 
         if self.coulomb_module is not None:
             assert latent_charges is not None, "CoulombModule requires a LatentChargeHead"
-            coulomb_energy, explicit_forces, explicit_stress = self.coulomb_module(
-                latent_charges, batch, compute_forces=True, compute_stress=self.has_stress
-            )
+            coulomb_energy = self.coulomb_module(latent_charges, batch)
             interaction_energy = interaction_energy + coulomb_energy
-            out["analytic_forces"] = explicit_forces
-            if explicit_stress is not None:
-                out["analytic_stress"] = explicit_stress
 
         out["interaction_energy"] = interaction_energy
         out["energy"] = cast(EnergyHead, self.heads["energy"]).absolute_energy(
@@ -241,11 +222,6 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
                 compute_stress=compute_stress,
                 generator=batch.system_features["generator"],
             )
-
-            if "analytic_forces" in out:
-                forces = forces + out["analytic_forces"]
-            if "analytic_stress" in out:
-                stress = stress + out["analytic_stress"]
 
             if compute_forces:
                 out["forces"] = forces  # eV / A

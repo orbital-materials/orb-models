@@ -67,13 +67,11 @@ class AlchemiDFTD3(torch.nn.Module):
         # Performance tuning: we estimate the number of maximum neighbors given a radius based on
         # assumed atomic density and a safety factor. We override the default parameters from alchemi,
         # which are *extremely* conservative.
-        # With the safety_factor, a radius of 22.0 Å will allow for up to 8928 neighbors per atom,
-        # which is ~9x lower than the default 78064 neighbors.
+        # With a radius of 22.0 Å allows up to 8928 neighbors per atom, ~9x lower than the default 78064 neighbors.
         # See https://nvidia.github.io/nvalchemi-toolkit-ops/userguide/components/neighborlist.html#performance-tuning
-        # NOTE: If the system is very dense, underestimating max_num_neighbors_alchemi will cause
-        # alchemiops to *silently* truncate a number of *random* neighbors.
-        # To avoid silent errors we use a fallback safety factor, and if that fails raise an error in
-        # _compute_neighbor_list_with_fallback.
+        # NOTE: If the system is very dense, underestimating max_num_neighbors_alchemi will cause alchemiops
+        # to *silently* truncate a number of *random* neighbors.
+        # _compute_neighbor_list_with_fallback detects this, retries with fallback_safety_factor, and raises if that is still insufficient.
         self.atomic_density = 0.2 / ANGSTROM_TO_BOHR**3  # Å^3 -> Bohr^3
         self.safety_factor = 1.0
         self.fallback_safety_factor = 5.0
@@ -149,9 +147,8 @@ class AlchemiDFTD3(torch.nn.Module):
                     pbc=pbc,
                     cutoff=self.cutoff,
                     batch_idx=node_batch_index,
-                    atomic_density=self.atomic_density,
-                    initial_safety_factor=self.safety_factor,
-                    fallback_safety_factor=self.fallback_safety_factor,
+                    initial_atomic_density=self.atomic_density * self.safety_factor,
+                    fallback_atomic_density=self.atomic_density * self.fallback_safety_factor,
                     wrap_positions=True,
                 )
             )

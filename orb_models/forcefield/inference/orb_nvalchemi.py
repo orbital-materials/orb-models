@@ -8,15 +8,15 @@ Usage
 -----
 Load a pretrained Orb model::
 
-    from core.forcefield.inference.orb_nvalchemi import OrbWrapper
+    from orb_models.forcefield.inference.orb_nvalchemi import OrbWrapper
     import torch
 
     model = OrbWrapper.from_pretrained("orb-v3-conservative-omol", device=torch.device("cuda"))
 
 Or wrap an already-loaded model::
 
-    from core import interface
-    orb_model, config, adapter = interface.orb_v3_conservative_omol(device="cuda")
+    from orb_models.forcefield import pretrained
+    orb_model, adapter = pretrained.orb_v3_conservative_omol(device="cuda")
     model = OrbWrapper(orb_model, adapter)
 
 Pipeline composition::
@@ -30,10 +30,22 @@ Notes
 -----
 * Conservative models declare ``autograd_outputs`` so they can participate in
   nvalchemi pipeline autograd groups. Direct models do not.
-* Models with a CoulombModule expose analytical spatial forces/stress via
-  ``analytic_derivative_keys``. In pipeline autograd mode these are passed
-  through to the pipeline, which sums them with autograd derivatives.
 * Stress is converted from Orb's Voigt-6 notation to the full 3x3 tensor.
+
+When to compile
+---------------
+``from_pretrained(compile=...)`` compiles the *model*, which is orthogonal to compiling a *pipeline*. Choose by run mode:
+
+* **Pipeline / dynamics (production)** — keep the wrapper **uncompiled** (``compile=False``,
+  the default) and let nvalchemi compile the whole step (``FusedStage.compile()``): neighbor-list
+  rebuild, forward, force/stress autograd, and integrator update all fuse into one graph.
+  See https://nvidia.github.io/nvalchemi-toolkit/modules/dynamics/fused_stage.html#torch-compile-support
+* **Standalone inference** — ``from_pretrained(compile=True)``: forces come from the model's own autograd
+  inside the compiled forward.
+* **Ad-hoc compiled pipeline** — ``torch.compile(pipe)`` over an *uncompiled* wrapper, after
+  ``pipe.eval()``. Fuses just the forward + force/stress autograd (no dynamics loop).
+* **Training** — conservative models must stay uncompiled (``inference=False``): training needs
+  double-backward, which torch.compile does not support.
 """
 
 from collections import OrderedDict
@@ -281,50 +293,17 @@ class OrbWrapper(nn.Module, BaseModelMixin):
     # Forward pass
     # ------------------------------------------------------------------
 
-    def _is_pipeline_autograd(self) -> bool:
-        """Check if a pipeline has stripped autograd outputs from active_outputs.
-
-        In an autograd group the pipeline removes derivative keys (forces, stress)
-        from active_outputs so it can compute them via its own autograd pass on
-        the summed energy. We detect this by checking that autograd outputs are
-        no longer a subset of active_outputs.
-        """
-        if not self.model_config.autograd_outputs:
-            return False
-        active = self.model_config.active_outputs
-        return "energy" in active and not (self.model_config.autograd_outputs <= active)
-
     def forward(self, data: AtomicData | Batch, **kwargs: Any) -> ModelOutputs:
         """Run the Orb model and return nvalchemi-formatted outputs."""
         atom_graphs = self.adapt_input(data, **kwargs)
-
-        if self._is_pipeline_autograd():
-            # Call via __call__ (not .forward) so torch.compile / module hooks apply.
-            raw = self.model(  # type: ignore[operator]
-                atom_graphs,
-                compute_forces=False,
-                compute_stress=False,
-                fp64_energy=True,
-            )
-            out: dict[str, Any] = {"energy": raw["energy"]}
-            # Return analytical derivatives as forces/stress.
-            # The pipeline mode will sum them with autograd derivatives.
-            for key in self.model.analytic_derivative_keys & raw.keys():
-                if "forces" in key:
-                    out["forces"] = out.get("forces", 0) + raw[key]
-                elif "stress" in key:
-                    out["stress"] = out.get("stress", 0) + raw[key]
-            return self.adapt_output(out, data)
-        else:
-            active = self.model_config.active_outputs & self.model_config.outputs
-            # Call via __call__ (not .forward) so torch.compile / module hooks apply.
-            raw = self.model(  # type: ignore[operator]
-                atom_graphs,
-                compute_forces="forces" in active,
-                compute_stress="stress" in active,
-                fp64_energy=True,
-            )
-            return self.adapt_output(raw, data)
+        active = self.model_config.active_outputs & self.model_config.outputs
+        raw = self.model(  # type: ignore[operator]
+            atom_graphs,
+            compute_forces="forces" in active,
+            compute_stress="stress" in active,
+            fp64_energy=True,
+        )
+        return self.adapt_output(raw, data)
 
     # ------------------------------------------------------------------
     # Embeddings
@@ -356,7 +335,8 @@ class OrbWrapper(nn.Module, BaseModelMixin):
         model_name: str,
         device: torch.device | str = torch.device("cpu"),
         *,
-        compile: bool | None = None,
+        compile: bool | None = False,
+        inference: bool = True,
     ) -> "OrbWrapper":
         """Load a pretrained Orb model and return an :class:`OrbWrapper`.
 
@@ -372,7 +352,13 @@ class OrbWrapper(nn.Module, BaseModelMixin):
         device : torch.device | str
             Target device. Defaults to CPU.
         compile : bool | None
-            Whether to ``torch.compile`` the model. ``None`` uses the default heuristic.
+            Whether to ``torch.compile`` the model. ``False`` (default): don't; ``True``: always;
+            ``None``: device-based heuristic (see :func:`should_compile`). See the "When to
+            compile" matrix in the module docstring for which to pick per run mode.
+        inference : bool
+            ``True`` (default): eval mode, frozen params.
+            ``False``: train mode, trainable params.
+
         """
         _LOADERS: dict[str, Any] = {
             # orbmol-v2 (learnable electrostatics)
@@ -394,6 +380,8 @@ class OrbWrapper(nn.Module, BaseModelMixin):
         if model_name not in _LOADERS:
             raise ValueError(f"Unknown model: {model_name!r}. Available: {sorted(_LOADERS)}")
 
-        model, adapter = _LOADERS[model_name](device=device, compile=compile)
+        model, adapter = _LOADERS[model_name](device=device, compile=compile, train=not inference)
         assert isinstance(adapter, ForcefieldAtomsAdapter)
-        return cls(model=model, atoms_adapter=adapter)
+        wrapper = cls(model=model, atoms_adapter=adapter)
+        wrapper.train(not inference)
+        return wrapper
