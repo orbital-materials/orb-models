@@ -197,12 +197,12 @@ import torch
 from ase.build import bulk
 
 from nvalchemi.data import AtomicData, Batch
-from nvalchemi.dynamics import FIRE, ConvergenceHook, DynamicsStage
+from nvalchemi.dynamics import FIRE, ConvergenceHook, DynamicsStage, FusedStage
 from nvalchemi.hooks import NeighborListHook
 
 from orb_models.forcefield.inference.orb_nvalchemi import OrbWrapper
 
-device = "cuda"  # or device="cuda"
+device = "cpu"  # or device="cuda"
 orb = OrbWrapper.from_pretrained("orb-v3-conservative-inf-omat", device=device)
 
 nl_hook = NeighborListHook(
@@ -219,11 +219,16 @@ optimizer = FIRE(
     model=orb,
     dt=1.0,
     n_steps=100,
-    hooks=[nl_hook],
     convergence_hook=ConvergenceHook.from_fmax(0.01),
 )
-with optimizer:
-    relaxed = optimizer.run(batch)
+# Fuse and torch.compile the whole dynamics step
+fused = FusedStage(
+    sub_stages=[(0, optimizer)],
+    hooks=[nl_hook],
+    compile_step=True,
+)
+with fused:
+    relaxed = fused.run(batch)
 print("Optimized energy:", orb(relaxed)["energy"])
 ```
 
@@ -234,14 +239,13 @@ import torch
 from ase.build import bulk
 
 from nvalchemi.data import AtomicData, Batch
-from nvalchemi.dynamics import FIRE, ConvergenceHook, DynamicsStage
-from nvalchemi.hooks import NeighborListHook
+from nvalchemi.dynamics import FIRE, ConvergenceHook, FusedStage
 from nvalchemi.models.dftd3 import DFTD3ModelWrapper
 from nvalchemi.models.pipeline import PipelineGroup, PipelineModelWrapper
 
 from orb_models.forcefield.inference.orb_nvalchemi import OrbWrapper
 
-device = "cuda"  # or device="cuda"
+device = "cpu"  # or device="cuda"
 orb = OrbWrapper.from_pretrained("orb-v3-conservative-inf-omat", device=device)
 
 # DFT-D3 dispersion correction (PBE-BJ parameters)
@@ -251,11 +255,8 @@ d3 = DFTD3ModelWrapper(a1=0.4289, a2=4.4407, s8=0.7875).to(device)
 pipe = PipelineModelWrapper(groups=[
     PipelineGroup(steps=[orb, d3], use_autograd=True),
 ])
-
-nl_hook = NeighborListHook(
-    config=pipe.model_config.neighbor_config,
-    stage=DynamicsStage.BEFORE_COMPUTE,
-)
+pipe.eval()
+nl_hooks = pipe.make_neighbor_hooks()
 
 atoms = bulk("Cu", "fcc", a=3.58, cubic=True)
 atoms.rattle(0.5)
@@ -266,11 +267,16 @@ optimizer = FIRE(
     model=pipe,
     dt=1.0,
     n_steps=100,
-    hooks=[nl_hook],
     convergence_hook=ConvergenceHook.from_fmax(0.01),
 )
-with optimizer:
-    relaxed = optimizer.run(batch)
+# Fuse and torch.compile the whole dynamics step
+fused = FusedStage(
+    sub_stages=[(0, optimizer)],
+    hooks=nl_hooks,
+    compile_step=True,
+)
+with fused:
+    relaxed = fused.run(batch)
 print("Optimized energy:", pipe(relaxed)["energy"])
 ```
 
