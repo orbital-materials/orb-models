@@ -88,7 +88,7 @@ class OrbTorchSimModel(ModelInterface):
         if "stress" in results and not self._compute_stress:
             results.pop("stress", None)
 
-        return results
+        return {k: v.detach() if hasattr(v, "detach") else v for k, v in results.items()}
 
     def _get_results(self, out: dict[str, torch.Tensor]):
         """Parses the results into a final output dictionary."""
