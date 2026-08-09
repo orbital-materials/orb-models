@@ -201,6 +201,7 @@ class AttentionInteractionNetwork(nn.Module):
             cutoff: Edge cutoff values [num_edges, 1]
             cond_nodes: Optional conditioning for nodes
             cond_edges: Optional conditioning for edges
+            segment_sum_impl: Whether to use default or mesh-aware segment sum implementation
 
         Returns:
             Tuple of (updated_nodes, updated_edges)
@@ -474,11 +475,16 @@ class MoleculeGNS(base.ModelMixin):
             activation=activation,
         )
 
-    def forward(self, batch: AtomGraphs) -> dict[str, torch.Tensor]:
+    def forward(
+        self,
+        batch: AtomGraphs,
+        segment_sum_impl: Callable = segment_ops.segment_sum,
+    ) -> dict[str, torch.Tensor]:
         """Encode a graph using molecular GNS.
 
         Args:
             batch: Input molecular graph
+            segment_sum_impl: Whether to use default or mesh-aware segment sum implementation.
 
         Returns:
             Dictionary containing node_features, edge_features, and predictions
@@ -505,6 +511,7 @@ class MoleculeGNS(base.ModelMixin):
                 cutoff,
                 cond_nodes=cond_nodes,
                 cond_edges=cond_edges,
+                segment_sum_impl=segment_sum_impl,
             )
 
         # Decode
