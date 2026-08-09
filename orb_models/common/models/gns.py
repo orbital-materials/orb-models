@@ -189,6 +189,7 @@ class AttentionInteractionNetwork(nn.Module):
         cutoff: torch.Tensor,
         cond_nodes: torch.Tensor | None = None,
         cond_edges: torch.Tensor | None = None,
+        segment_sum_impl: Callable | None = segment_ops.segment_sum,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Run interaction network forward pass.
 
@@ -245,10 +246,10 @@ class AttentionInteractionNetwork(nn.Module):
         edge_features = torch.cat([edges, sent_attributes, received_attributes], dim=1)
         updated_edges = self._edge_mlp(edge_features)
 
-        sent_attributes = segment_ops.segment_sum(
+        sent_attributes = segment_sum_impl(
             updated_edges * send_attn, senders, nodes.shape[0]
         )
-        received_attributes = segment_ops.segment_sum(
+        received_attributes = segment_sum_impl(
             updated_edges * receive_attn, receivers, nodes.shape[0]
         )
 
