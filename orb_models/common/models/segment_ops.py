@@ -1,6 +1,6 @@
 import torch
+from torch.distributed import _functional_collectives as funcol
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor import DTensor, Partial, Replicate
 
 TORCHINT = [torch.int64, torch.int32, torch.int16, torch.int8, torch.uint8]
 
@@ -309,27 +309,9 @@ def split_prediction(pred: torch.Tensor, n_node: torch.Tensor):
         raise ValueError(f"Unexpected length of prediction tensor: {len(pred)}")
 
 
-def segment_sum_simple(data: torch.Tensor, segment_ids: torch.Tensor, num_segments: int):
-    """Just a more readable version of segment_sum"""
-    out = data.new_zeros(size=(num_segments, *data.shape[1:]))
-    out.index_add_(dim=0, index=segment_ids, source=data)
-    return out
-
-
 def distributed_segment_sum(
     data: torch.Tensor, segment_ids: torch.Tensor, num_segments: int, mesh: DeviceMesh
 ) -> torch.Tensor:
-    """
-    Use with functools.partial to inject your mesh, then use this with segment_sum_impl
-    """
-    local_sum = segment_sum_simple(data, segment_ids, num_segments)
-    partial_sum = DTensor.from_local(
-        local_sum,
-        device_mesh=mesh,
-        placements=[Partial("sum")],
-        shape=local_sum.shape,
-        stride=local_sum.stride(),
-    )
-    return partial_sum.redistribute(placements=[Replicate()]).to_local(
-        grad_placements=[Partial("sum")]
-    )
+    """Sum local edge shards into replicated node attributes."""
+    local_sum = segment_sum(data, segment_ids, num_segments)
+    return funcol.all_reduce(local_sum, "sum", mesh)
