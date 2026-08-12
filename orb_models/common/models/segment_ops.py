@@ -330,8 +330,8 @@ def _safe_logsumexp(log_terms: torch.Tensor) -> torch.Tensor:
 
 
 def segment_softmax_inner(
-    inputs: torch.Tensor,
-    segments: torch.Tensor,
+    data: torch.Tensor,
+    segment_ids: torch.Tensor,
     num_segments: int,
     weights: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -344,9 +344,9 @@ def segment_softmax_inner(
         weights: Optional weights tensor to multiply unnormalised probabilities.
     """
     if weights is not None:
-        inputs = inputs + _safe_log(weights)
+        data = data + _safe_log(weights)
 
-    segment_maxes = segment_max(inputs, segments, num_segments)
+    segment_maxes = segment_max(data, segment_ids, num_segments)
     # A segment can be all -inf: no rows at all, or every row's weight zero. Its
     # max is then -inf and `inputs - max` is NaN. Shifting by 0 instead is just as
     # valid -- there is no magnitude to stabilise -- and stays finite.
@@ -355,8 +355,8 @@ def segment_softmax_inner(
         segment_maxes,
         torch.zeros_like(segment_maxes),
     )
-    shifted = inputs - segment_maxes[segments]
-    log_sum = _safe_log(segment_sum(torch.exp(shifted), segments, num_segments))
+    shifted = data - segment_maxes[segment_ids]
+    log_sum = _safe_log(segment_sum(torch.exp(shifted), segment_ids, num_segments))
     log_denominator = segment_maxes + log_sum
     # `log_sum` is -inf exactly for those all -inf segments, and every `shifted` in
     # one is -inf too. Subtracting 0 leaves the log-probability at -inf, i.e. p = 0,
@@ -364,15 +364,15 @@ def segment_softmax_inner(
     log_sum = torch.where(
         torch.isfinite(log_sum), log_sum, torch.zeros_like(log_sum)
     )
-    return shifted - log_sum[segments], log_denominator
+    return shifted - log_sum[segment_ids], log_denominator
 
 
 def distributed_segment_softmax(
-    inputs: torch.Tensor,
-    segments: torch.Tensor,
+    data: torch.Tensor,
+    segment_ids: torch.Tensor,
     num_segments: int,
-    mesh: DeviceMesh,
     weights: torch.Tensor | None = None,
+    mesh: DeviceMesh | None = None,
 ) -> torch.Tensor:
     """Segment softmax over rows sharded across mesh, normalised globally.
 
@@ -384,7 +384,7 @@ def distributed_segment_softmax(
         weights: Optional weights tensor to multiply unnormalised probabilities.
     """
     log_probs, log_denominator = segment_softmax_inner(
-        inputs, segments, num_segments, weights
+        data, segment_ids, num_segments, weights
     )
 
     gathered = funcol.all_gather_tensor(log_denominator, 0, mesh)
@@ -397,4 +397,4 @@ def distributed_segment_softmax(
     rescale = torch.where(
         torch.isfinite(total), log_denominator - total, torch.zeros_like(total)
     )
-    return torch.exp(log_probs + rescale[segments])
+    return torch.exp(log_probs + rescale[segment_ids])

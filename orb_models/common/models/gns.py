@@ -190,6 +190,7 @@ class AttentionInteractionNetwork(nn.Module):
         cond_nodes: torch.Tensor | None = None,
         cond_edges: torch.Tensor | None = None,
         segment_sum_impl: Callable | None = segment_ops.segment_sum,
+        segment_softmax_impl: Callable | None = segment_ops.segment_softmax,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Run interaction network forward pass.
 
@@ -202,7 +203,7 @@ class AttentionInteractionNetwork(nn.Module):
             cond_nodes: Optional conditioning for nodes
             cond_edges: Optional conditioning for edges
             segment_sum_impl: Whether to use default or mesh-aware segment sum implementation
-
+            segment_softmax_impl: Whether to use default or mesh-aware segment softmax implementation
         Returns:
             Tuple of (updated_nodes, updated_edges)
         """
@@ -222,13 +223,13 @@ class AttentionInteractionNetwork(nn.Module):
 
         if self._attention_gate == "softmax":
             num_segments = nodes.shape[0]
-            receive_attn = segment_ops.segment_softmax(
+            receive_attn = segment_softmax_impl(
                 self._receive_attn(edges),
                 receivers,
                 num_segments,
                 weights=cutoff if self._distance_cutoff else None,
             )
-            send_attn = segment_ops.segment_softmax(
+            send_attn = segment_softmax_impl(
                 self._send_attn(edges),
                 senders,
                 num_segments,
@@ -479,6 +480,7 @@ class MoleculeGNS(base.ModelMixin):
         self,
         batch: AtomGraphs,
         segment_sum_impl: Callable = segment_ops.segment_sum,
+        segment_softmax_impl: Callable = segment_ops.segment_softmax,
     ) -> dict[str, torch.Tensor]:
         """Encode a graph using molecular GNS.
 
@@ -512,6 +514,7 @@ class MoleculeGNS(base.ModelMixin):
                 cond_nodes=cond_nodes,
                 cond_edges=cond_edges,
                 segment_sum_impl=segment_sum_impl,
+                segment_softmax_impl=segment_softmax_impl,
             )
 
         # Decode
