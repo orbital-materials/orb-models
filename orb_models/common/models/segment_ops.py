@@ -315,3 +315,86 @@ def distributed_segment_sum(
     """Sum local edge shards into replicated node attributes."""
     local_sum = segment_sum(data, segment_ids, num_segments)
     return funcol.all_reduce(local_sum, "sum", mesh)
+
+
+def _safe_log(x: torch.Tensor) -> torch.Tensor:
+    positive = x > 0
+    inputs = torch.where(positive, x, torch.ones_like(x))
+    return torch.where(positive, torch.log(inputs), -torch.inf)
+
+
+def _safe_logsumexp(log_terms: torch.Tensor) -> torch.Tensor:
+    maxes = log_terms.amax(dim=0)
+    maxes = torch.where(torch.isfinite(maxes), maxes, torch.zeros_like(maxes))
+    return maxes + _safe_log(torch.sum(torch.exp(log_terms - maxes), dim=0))
+
+
+def segment_softmax_inner(
+    inputs: torch.Tensor,
+    segments: torch.Tensor,
+    num_segments: int,
+    weights: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Computes log-probabilities and the log denominator for a segment softmax.
+
+    Args:
+        inputs: The input tensor to normalise over segments.
+        segments: The segment indices tensor.
+        num_segments: The number of segments.
+        weights: Optional weights tensor to multiply unnormalised probabilities.
+    """
+    if weights is not None:
+        inputs = inputs + _safe_log(weights)
+
+    segment_maxes = segment_max(inputs, segments, num_segments)
+    # A segment can be all -inf: no rows at all, or every row's weight zero. Its
+    # max is then -inf and `inputs - max` is NaN. Shifting by 0 instead is just as
+    # valid -- there is no magnitude to stabilise -- and stays finite.
+    segment_maxes = torch.where(
+        torch.isfinite(segment_maxes),
+        segment_maxes,
+        torch.zeros_like(segment_maxes),
+    )
+    shifted = inputs - segment_maxes[segments]
+    log_sum = _safe_log(segment_sum(torch.exp(shifted), segments, num_segments))
+    log_denominator = segment_maxes + log_sum
+    # `log_sum` is -inf exactly for those all -inf segments, and every `shifted` in
+    # one is -inf too. Subtracting 0 leaves the log-probability at -inf, i.e. p = 0,
+    # which is what `safe_division` returns for a zero denominator.
+    log_sum = torch.where(
+        torch.isfinite(log_sum), log_sum, torch.zeros_like(log_sum)
+    )
+    return shifted - log_sum[segments], log_denominator
+
+
+def distributed_segment_softmax(
+    inputs: torch.Tensor,
+    segments: torch.Tensor,
+    num_segments: int,
+    mesh: DeviceMesh,
+    weights: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Segment softmax over rows sharded across mesh, normalised globally.
+
+    Args:
+        inputs: The input tensor to normalise over segments.
+        segments: The segment indices tensor.
+        num_segments: The number of segments.
+        mesh: The device mesh over which rows are sharded.
+        weights: Optional weights tensor to multiply unnormalised probabilities.
+    """
+    log_probs, log_denominator = segment_softmax_inner(
+        inputs, segments, num_segments, weights
+    )
+
+    gathered = funcol.all_gather_tensor(log_denominator, 0, mesh)
+    total = _safe_logsumexp(
+        gathered.reshape(mesh.size(), *log_denominator.shape)
+    )
+    # A segment with no weight on any rank is -inf on both sides of the
+    # subtraction. Its rows are already at -inf log-probability, so any finite
+    # shift leaves them at p = 0; taking 0 avoids the NaN.
+    rescale = torch.where(
+        torch.isfinite(total), log_denominator - total, torch.zeros_like(total)
+    )
+    return torch.exp(log_probs + rescale[segments])
