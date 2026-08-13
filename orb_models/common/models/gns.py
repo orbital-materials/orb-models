@@ -8,13 +8,19 @@ from typing import Any, Literal
 import torch
 import torch.nn.functional as F
 from torch import nn
+from torch.utils.checkpoint import checkpoint
 
 from orb_models.common.atoms.batch.abstract_batch import AbstractAtomBatch
 from orb_models.common.atoms.batch.graph_batch import AtomGraphs
 from orb_models.common.models import base, segment_ops
 from orb_models.common.models.angular import UnitVector
 from orb_models.common.models.embedding import AtomEmbedding, AtomEmbeddingBag
-from orb_models.common.models.nn_util import build_mlp, get_cutoff, mlp_and_layer_norm
+from orb_models.common.models.nn_util import (
+    build_mlp,
+    chunked_apply,
+    get_cutoff,
+    mlp_and_layer_norm,
+)
 
 ConditioningType = Literal["additive", "concatenative", "none"]
 
@@ -76,19 +82,29 @@ class Encoder(nn.Module):
         )
 
     def forward(
-        self, node_features: torch.Tensor, edge_features: torch.Tensor
+        self,
+        node_features: torch.Tensor,
+        edge_features: torch.Tensor,
+        chunk_size: int | None = None,
+        checkpoint_edge_block: bool | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Forward pass to encode node and edge features.
 
         Args:
             node_features: Input node features tensor
             edge_features: Input edge features tensor
+            chunk_size: Max edges per chunk in the edge MLP, which is by far the largest
+                activation here. The node MLP is num_nodes-shaped and left whole.
+            checkpoint_edge_block: Recompute the edge MLP in the backward pass instead of
+                storing it. None means "checkpoint iff chunking".
 
         Returns:
             Tuple of (encoded_nodes, encoded_edges)
         """
         encoded_nodes = self._node_fn(node_features)
-        encoded_edges = self._edge_fn(edge_features)
+        encoded_edges = chunked_apply(
+            self._edge_fn, edge_features, chunk_size, checkpoint_chunks=checkpoint_edge_block
+        )
         return encoded_nodes, encoded_edges
 
 
@@ -180,6 +196,36 @@ class AttentionInteractionNetwork(nn.Module):
         """The type of conditioning used by the interaction network."""
         return self._node_cond, self._edge_cond
 
+    def _edge_block(
+        self,
+        nodes: torch.Tensor,
+        edges: torch.Tensor,
+        senders: torch.Tensor,
+        receivers: torch.Tensor,
+        receive_attn: torch.Tensor,
+        send_attn: torch.Tensor,
+        segment_sum_impl: Callable,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """The message-passing step for one chunk of edges.
+
+        The gathers and their [num_edges, 3 * latent_dim] concatenation belong in here
+        alongside the MLP: they are its input, so leaving them outside would materialise
+        them at full width and cost more than half of what chunking can save. The
+        attention weights, by contrast, are [num_edges, 1] and stay outside.
+
+        Wrapped in a checkpoint, only `updated_edges` and the two
+        [num_nodes, latent_dim] partial sums survive into the backward pass.
+        """
+        edge_features = torch.cat([edges, nodes[senders], nodes[receivers]], dim=1)
+        updated_edges = self._edge_mlp(edge_features)
+
+        num_segments = nodes.shape[0]
+        return (
+            updated_edges,
+            segment_sum_impl(updated_edges * send_attn, senders, num_segments),
+            segment_sum_impl(updated_edges * receive_attn, receivers, num_segments),
+        )
+
     def forward(
         self,
         nodes: torch.Tensor,
@@ -191,6 +237,8 @@ class AttentionInteractionNetwork(nn.Module):
         cond_edges: torch.Tensor | None = None,
         segment_sum_impl: Callable | None = segment_ops.segment_sum,
         segment_softmax_impl: Callable | None = segment_ops.segment_softmax,
+        chunk_size: int | None = None,
+        checkpoint_edge_block: bool | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Run interaction network forward pass.
 
@@ -204,6 +252,10 @@ class AttentionInteractionNetwork(nn.Module):
             cond_edges: Optional conditioning for edges
             segment_sum_impl: Whether to use default or mesh-aware segment sum implementation
             segment_softmax_impl: Whether to use default or mesh-aware segment softmax implementation
+            chunk_size: Max edges per chunk in the edge block. Bounds the transient that the
+                backward recompute holds; on its own it saves almost nothing.
+            checkpoint_edge_block: Recompute the edge block in the backward pass instead of
+                storing it. None means "checkpoint iff chunking".
         Returns:
             Tuple of (updated_nodes, updated_edges)
         """
@@ -243,17 +295,42 @@ class AttentionInteractionNetwork(nn.Module):
             receive_attn = receive_attn * cutoff
             send_attn = send_attn * cutoff
 
-        sent_attributes = nodes[senders]
-        received_attributes = nodes[receivers]
-        edge_features = torch.cat([edges, sent_attributes, received_attributes], dim=1)
-        updated_edges = self._edge_mlp(edge_features)
+        num_edges = edges.shape[0]
+        chunk_size = min(chunk_size or num_edges, num_edges)
+        if checkpoint_edge_block is None:
+            checkpoint_edge_block = chunk_size < num_edges
+        use_checkpoint = checkpoint_edge_block and torch.is_grad_enabled()
+        # An edgeless graph (e.g. a padding graph) still runs the block once, on empties.
+        starts = range(0, num_edges, chunk_size) if num_edges else [0]
 
-        sent_attributes = segment_sum_impl(
-            updated_edges * send_attn, senders, nodes.shape[0]
-        )
-        received_attributes = segment_sum_impl(
-            updated_edges * receive_attn, receivers, nodes.shape[0]
-        )
+        # The aggregations accumulate as we go, so each chunk's partial sums are freed
+        # once added; the updated edges are collected, as they are all needed at the end.
+        edge_chunks: list[torch.Tensor] = []
+        sent_attributes = edges.new_zeros(nodes.shape[0], self.latent_dim)
+        received_attributes = edges.new_zeros(nodes.shape[0], self.latent_dim)
+        for start in starts:
+            chunk = slice(start, start + chunk_size)
+            block_args = (
+                nodes,
+                edges[chunk],
+                senders[chunk],
+                receivers[chunk],
+                receive_attn[chunk],
+                send_attn[chunk],
+                segment_sum_impl,
+            )
+            if use_checkpoint:
+                chunk_edges, sent, received = checkpoint(
+                    self._edge_block, *block_args, use_reentrant=False
+                )
+            else:
+                chunk_edges, sent, received = self._edge_block(*block_args)
+            edge_chunks.append(chunk_edges)
+            sent_attributes = sent_attributes + sent
+            received_attributes = received_attributes + received
+
+        # torch.cat always copies, so skip it on the single-chunk (default) path.
+        updated_edges = edge_chunks[0] if len(edge_chunks) == 1 else torch.cat(edge_chunks, dim=0)
 
         node_features = torch.cat([nodes, received_attributes, sent_attributes], dim=1)
         updated_nodes = self._node_mlp(node_features)
@@ -481,12 +558,18 @@ class MoleculeGNS(base.ModelMixin):
         batch: AtomGraphs,
         segment_sum_impl: Callable = segment_ops.segment_sum,
         segment_softmax_impl: Callable = segment_ops.segment_softmax,
+        chunk_size: int | None = None,
+        checkpoint_edge_block: bool | None = None,
     ) -> dict[str, torch.Tensor]:
         """Encode a graph using molecular GNS.
 
         Args:
             batch: Input molecular graph
             segment_sum_impl: Whether to use default or mesh-aware segment sum implementation.
+            chunk_size: Max edges per chunk in the encoder's and the interaction networks'
+                edge paths. None disables chunking.
+            checkpoint_edge_block: Recompute those edge paths in the backward pass instead of
+                storing them. None means "checkpoint iff chunking"
 
         Returns:
             Dictionary containing node_features, edge_features, and predictions
@@ -500,7 +583,12 @@ class MoleculeGNS(base.ModelMixin):
             cond_nodes, cond_edges = None, None
 
         # Encode
-        nodes, edges = self._encoder(node_features, edge_features)
+        nodes, edges = self._encoder(
+            node_features,
+            edge_features,
+            chunk_size=chunk_size,
+            checkpoint_edge_block=checkpoint_edge_block,
+        )
 
         # Process through interaction networks
         cutoff = get_cutoff(batch.edge_features["vectors"].norm(dim=-1))
@@ -515,6 +603,8 @@ class MoleculeGNS(base.ModelMixin):
                 cond_edges=cond_edges,
                 segment_sum_impl=segment_sum_impl,
                 segment_softmax_impl=segment_softmax_impl,
+                chunk_size=chunk_size,
+                checkpoint_edge_block=checkpoint_edge_block,
             )
 
         # Decode
