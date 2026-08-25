@@ -1,3 +1,8 @@
+import numpy as np
+import pytest
+from ase import Atoms
+from ase.build import molecule
+
 from orb_models.forcefield.forcefield_adapter import ForcefieldAtomsAdapter
 from orb_models.forcefield.inference.calculator import ORBCalculator
 
@@ -77,3 +82,50 @@ def test_direct_stress_enabled(direct_regressor, mptraj_10_systems_db):
     calc.calculate(atoms)
     assert "stress" in calc.results
     assert "forces" in calc.results
+
+
+@pytest.mark.parametrize(
+    ("atoms", "total_charge"),
+    [
+        (molecule("H2O"), 1),
+        # Single atom: guards against to_numpy collapsing (1,) to a Python float.
+        (Atoms("H", positions=[[0.0, 0.0, 0.0]]), 0),
+    ],
+)
+def test_charges(conservative_regressor, atoms, total_charge):
+    """Charges are exposed to ASE as (n_atoms,) and sum to the requested total."""
+    atoms.info["charge"] = total_charge
+    atoms.info["spin"] = 1
+    calc = ORBCalculator(
+        model=conservative_regressor,
+        atoms_adapter=ForcefieldAtomsAdapter(6.0, 20),
+    )
+    assert "charges" in calc.implemented_properties
+    atoms.calc = calc
+
+    charges = atoms.get_charges()
+    assert charges.shape == (len(atoms),)
+    assert np.isfinite(charges).all()
+    assert charges.sum() == pytest.approx(total_charge, abs=1e-5)
+
+
+def test_dipole(conservative_regressor, mptraj_10_systems_db):
+    """Dipole is the point-charge sum, and only available for non-periodic systems."""
+    adapter = ForcefieldAtomsAdapter(6.0, 20)
+
+    atoms = molecule("H2O")
+    atoms.info["charge"] = 0
+    atoms.info["spin"] = 1
+    atoms.calc = ORBCalculator(model=conservative_regressor, atoms_adapter=adapter)
+
+    dipole = atoms.get_dipole_moment()
+    assert dipole.shape == (3,)
+    np.testing.assert_allclose(dipole, atoms.get_charges() @ atoms.get_positions(), rtol=1e-6)
+
+    periodic = mptraj_10_systems_db.get_atoms(1)
+    periodic.info["charge"] = 0
+    periodic.info["spin"] = 1
+    calc = ORBCalculator(model=conservative_regressor, atoms_adapter=adapter)
+    calc.calculate(periodic)
+    assert "charges" in calc.results
+    assert "dipole" not in calc.results
