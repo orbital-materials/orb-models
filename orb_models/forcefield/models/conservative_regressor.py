@@ -1,3 +1,4 @@
+import warnings
 from collections.abc import Mapping
 from typing import Any, Literal, cast
 
@@ -54,6 +55,7 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
         pair_repulsion: bool = False,
         has_stress: bool = True,
         coulomb_module: CoulombModule | None = None,
+        expose_experimental_charges: bool = False,
         **kwargs,
     ):
         super().__init__()
@@ -109,6 +111,36 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
             if heads[name] is not None:
                 self.extra_properties.append(heads[name].target.fullname)
 
+        self.expose_charges = False
+        if expose_experimental_charges:
+            self.enable_charges()
+
+    def enable_charges(self) -> None:
+        """Expose the latent per-atom charges as a "charges" prediction.
+
+        Emits a warning, because these values are experimental: the model has not
+        seen any per-atom charge values during training; they are emergent from
+        optimisation against energies and forces alone. See MODELS.md.
+        """
+        if "latent_charges" not in self.heads:
+            raise ValueError("Cannot expose charges: this model has no 'latent_charges' head.")
+        warnings.warn(
+            "Exposing experimental per-atom charges. The model has not seen any "
+            "per-atom charge values during training; these are emergent from "
+            "optimisation against energies and forces alone. They should therefore "
+            "be treated with caution: while in at least some cases they appear to "
+            "correspond to the correct physical values, the reliability and "
+            "generality of this correspondence is unclear and is the subject of "
+            "ongoing investigations. See MODELS.md for details.",
+            UserWarning,
+            stacklevel=2,
+        )
+        self.expose_charges = True
+
+    def disable_charges(self) -> None:
+        """Stop exposing the latent per-atom charges."""
+        self.expose_charges = False
+
     def enable_stress(self) -> None:
         """Enable stress computation. No-op if already enabled."""
         self.has_stress = True
@@ -128,7 +160,7 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
         if self.has_stress:
             props.append("stress")
         props.extend(self.extra_properties)
-        if "latent_charges" in self.heads:
+        if self.expose_charges:
             props.append("charges")
         return props
 
@@ -267,8 +299,8 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
             "energy"  — absolute energy (B,)
             "forces"  — total forces (N, 3)
             "stress"  — total stress in Voigt notation (B, 6)
-            "charges" — per-atom charges (N,) in e, if a latent_charges head exists;
-                        emergent from energy/force fitting alone, see MODELS.md
+            "charges" — per-atom charges (N,) in e, only when enable_charges() has been
+                        called; emergent from energy/force fitting alone, see MODELS.md
         """
         # self() not self.forward() to respect torch.compile
         preds = self(
@@ -293,7 +325,7 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
             else:
                 raise ValueError(f"Expected ForcefieldHead or ConfidenceHead, got {type(head)}.")
 
-        if "charges" in preds:
+        if self.expose_charges:
             out["charges"] = preds["charges"]
 
         if split:

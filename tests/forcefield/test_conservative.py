@@ -19,15 +19,33 @@ def test_regressor_forward(request, conservative_regressor, graph_name):
     assert "stress" in out
 
 
-def test_predict_charges(conservative_regressor, batch):
+def test_predict_charges(charge_regressor, batch):
     """Per-atom charges are exposed as (N,) and sum to the system total charge."""
-    assert "charges" in conservative_regressor.properties
-    charges = conservative_regressor.predict(batch)["charges"]
+    assert "charges" in charge_regressor.properties
+    charges = charge_regressor.predict(batch)["charges"]
     assert charges.shape == (batch.n_node.sum(),)
 
     # The batch fixture carries no total_charge, so charges are centered on zero.
     per_system = aggregate_nodes(charges, batch.n_node, reduction="sum")
     torch.testing.assert_close(per_system, torch.zeros_like(per_system), atol=1e-6, rtol=0)
+
+
+def test_charges_not_exposed_by_default(conservative_regressor, batch):
+    """Charges stay out of properties/predict() until enable_charges() is called."""
+    assert "charges" not in conservative_regressor.properties
+    assert "charges" not in conservative_regressor.predict(batch)
+
+
+def test_enable_charges_requires_head(gns_model, energy_head):
+    """enable_charges() is an error on a model with no latent_charges head."""
+    regressor = ConservativeForcefieldRegressor(
+        heads={"energy": energy_head},
+        model=gns_model,
+        loss_weights={"energy": 1.0, "forces": 1.0, "stress": 1.0, "rotational_grad": 1.0},
+    )
+    assert "charges" not in regressor.properties
+    with pytest.raises(ValueError, match="no 'latent_charges' head"):
+        regressor.enable_charges()
 
 
 def test_regressor_loss(conservative_regressor, batch):

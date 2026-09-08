@@ -216,6 +216,7 @@ def orb_v3_conservative_architecture(
     has_stress: bool = True,
     has_electrostatics: bool = False,
     use_per_atom_spins: bool = False,
+    expose_experimental_charges: bool = False,
     device: torch.device | str | None = None,
 ) -> ConservativeForcefieldRegressor:
     """The orb-v3 conservative architecture.
@@ -307,6 +308,7 @@ def orb_v3_conservative_architecture(
         pair_repulsion=True,
         has_stress=has_stress,
         coulomb_module=CoulombModule() if has_electrostatics else None,
+        expose_experimental_charges=expose_experimental_charges,
     )
     device = get_device(device)
     if device is not None and device != torch.device("cpu"):
@@ -414,10 +416,16 @@ def orbmol_v2(
     train: bool = False,
     train_reference_energies: bool = False,
     loss_weights: dict[str, float] | None = None,
+    expose_experimental_charges: bool = False,
 ) -> tuple[ConservativeForcefieldRegressor, ForcefieldAtomsAdapter]:
     """Load OrbMol-v2 with learnable electrostatics (charges, Coulomb).
 
     Trained on OMol25 and OPoly26 (ωB97M-V/def2-TZVPD).
+
+    Set expose_experimental_charges=True to additionally return the model's
+    per-atom charges as "charges" from predict() — and hence via ORBCalculator,
+    OrbTorchSimModel and OrbWrapper. These charges are experimental; see
+    ConservativeForcefieldRegressor.enable_charges() and MODELS.md.
     """
     if compile is None and train:
         compile = False
@@ -442,6 +450,7 @@ def orbmol_v2(
         has_charge_spin_cond=True,
         has_stress=False,
         has_electrostatics=True,
+        expose_experimental_charges=expose_experimental_charges,
         device=device,
     )
     model = load_model(

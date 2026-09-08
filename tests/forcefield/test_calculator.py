@@ -93,14 +93,13 @@ def test_direct_stress_enabled(direct_regressor, mptraj_10_systems_db):
         (Atoms("H", positions=[[0.0, 0.0, 0.0]]), 0),
     ],
 )
-def test_charges(conservative_regressor, atoms, total_charge):
+def test_charges(charge_regressor, atoms, total_charge):
     """Charges are exposed to ASE as (n_atoms,) and sum to the requested total."""
     atoms.info["charge"] = total_charge
     atoms.info["spin"] = 1
     calc = ORBCalculator(
-        model=conservative_regressor,
+        model=charge_regressor,
         atoms_adapter=ForcefieldAtomsAdapter(6.0, 20),
-        use_experimental_charges=True,
     )
     assert "charges" in calc.implemented_properties
     atoms.calc = calc
@@ -111,16 +110,14 @@ def test_charges(conservative_regressor, atoms, total_charge):
     assert charges.sum() == pytest.approx(total_charge, abs=1e-5)
 
 
-def test_dipole(conservative_regressor, mptraj_10_systems_db):
+def test_dipole(charge_regressor, mptraj_10_systems_db):
     """Dipole is the point-charge sum, and only available for non-periodic systems."""
     adapter = ForcefieldAtomsAdapter(6.0, 20)
 
     atoms = molecule("H2O")
     atoms.info["charge"] = 0
     atoms.info["spin"] = 1
-    atoms.calc = ORBCalculator(
-        model=conservative_regressor, atoms_adapter=adapter, use_experimental_charges=True
-    )
+    atoms.calc = ORBCalculator(model=charge_regressor, atoms_adapter=adapter)
 
     dipole = atoms.get_dipole_moment()
     assert dipole.shape == (3,)
@@ -129,16 +126,14 @@ def test_dipole(conservative_regressor, mptraj_10_systems_db):
     periodic = mptraj_10_systems_db.get_atoms(1)
     periodic.info["charge"] = 0
     periodic.info["spin"] = 1
-    calc = ORBCalculator(
-        model=conservative_regressor, atoms_adapter=adapter, use_experimental_charges=True
-    )
+    calc = ORBCalculator(model=charge_regressor, atoms_adapter=adapter)
     calc.calculate(periodic)
     assert "charges" in calc.results
     assert "dipole" not in calc.results
 
 
 def test_charges_require_opt_in(conservative_regressor):
-    """Charges and dipole are absent unless use_experimental_charges is set."""
+    """Charges and dipole are absent until the model opts in via enable_charges()."""
     atoms = molecule("H2O")
     atoms.info["charge"] = 0
     atoms.info["spin"] = 1
