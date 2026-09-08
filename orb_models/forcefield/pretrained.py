@@ -422,10 +422,9 @@ def orbmol_v2(
 
     Trained on OMol25 and OPoly26 (ωB97M-V/def2-TZVPD).
 
-    Set expose_experimental_charges=True to additionally return the model's
-    per-atom charges as "charges" from predict() — and hence via ORBCalculator,
-    OrbTorchSimModel and OrbWrapper. These charges are experimental; see
-    ConservativeForcefieldRegressor.enable_charges() and MODELS.md.
+    Set expose_experimental_charges=True to return the model's per-atom charges
+    as "charges" from predict() — and hence via ORBCalculator, OrbTorchSimModel
+    and OrbWrapper. These charges are experimental; see MODELS.md.
     """
     if compile is None and train:
         compile = False
