@@ -232,6 +232,14 @@ def conservative_regressor(gns_model, energy_head, latent_charge_head, coulomb_m
 
 
 @pytest.fixture
+def charge_regressor(conservative_regressor):
+    """A conservative regressor that has opted in to exposing latent charges."""
+    with pytest.warns(UserWarning, match="experimental per-atom charges"):
+        conservative_regressor.enable_charges()
+    return conservative_regressor
+
+
+@pytest.fixture
 def direct_regressor(gns_model, energy_head, force_head, stress_head):
     return DirectForcefieldRegressor(
         heads={"energy": energy_head, "forces": force_head, "stress": stress_head},

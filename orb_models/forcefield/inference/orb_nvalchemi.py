@@ -287,6 +287,10 @@ class OrbWrapper(nn.Module, BaseModelMixin):
         if stress is not None:
             output["stress"] = _voigt_6_to_full_3x3(torch.atleast_2d(stress))
 
+        charges = raw_output.get("charges")
+        if charges is not None and "charges" in self.model_config.active_outputs:
+            output["charges"] = charges
+
         return output
 
     # ------------------------------------------------------------------

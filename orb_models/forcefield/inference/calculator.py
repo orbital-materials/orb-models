@@ -62,7 +62,10 @@ class ORBCalculator(Calculator):
             conditioner, ChargeSpinConditioner
         )
 
-        self.implemented_properties = model.properties  # type: ignore
+        properties = list(model.properties)  # type: ignore
+        if "charges" in properties:
+            properties.append("dipole")
+        self.implemented_properties = properties
 
     def check_state(self, atoms, tol=1e-15):
         """Check if calculation is needed.
@@ -122,7 +125,17 @@ class ORBCalculator(Calculator):
             # ASE expects:
             #  - stresses to be squeezed to a 1D array of shape (6,)
             #  - forces to never be squeezed i.e. single-atom systems should be (1, 3)
+            #  - charges to be (n_atoms,)
             if prop == "stress":
                 self.results[prop] = to_numpy(out[out_key].squeeze())
+            elif prop == "charges":
+                self.results[prop] = out[out_key].detach().reshape(-1).cpu().numpy()
             else:
                 self.results[prop] = to_numpy(out[out_key])
+
+        if "dipole" in self.implemented_properties and "charges" in self.results:
+            atoms = self.atoms
+            # Point-charge dipole sum_i q_i r_i, in e*A (ASE's convention). Only
+            # defined for non-periodic systems, and origin-dependent unless neutral.
+            if atoms is not None and not atoms.pbc.any():
+                self.results["dipole"] = self.results["charges"] @ atoms.get_positions()
