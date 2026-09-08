@@ -116,12 +116,7 @@ class ConservativeForcefieldRegressor(base.RegressorModelMixin[AtomGraphs]):
             self.enable_charges()
 
     def enable_charges(self) -> None:
-        """Expose the latent per-atom charges as a "charges" prediction.
-
-        Emits a warning, because these values are experimental: the model has not
-        seen any per-atom charge values during training; they are emergent from
-        optimisation against energies and forces alone. See MODELS.md.
-        """
+        """Expose the latent per-atom charges as a "charges" prediction."""
         if "latent_charges" not in self.heads:
             raise ValueError("Cannot expose charges: this model has no 'latent_charges' head.")
         warnings.warn(

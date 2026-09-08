@@ -287,9 +287,6 @@ class OrbWrapper(nn.Module, BaseModelMixin):
         if stress is not None:
             output["stress"] = _voigt_6_to_full_3x3(torch.atleast_2d(stress))
 
-        # Charges must be emitted whenever declared: nvalchemi treats "charges" as a
-        # producer output that Ewald/PME consume as a required input, so a pipeline
-        # wires this model to them on the strength of the declaration alone.
         charges = raw_output.get("charges")
         if charges is not None and "charges" in self.model_config.active_outputs:
             output["charges"] = charges
