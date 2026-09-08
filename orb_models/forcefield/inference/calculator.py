@@ -21,6 +21,7 @@ class ORBCalculator(Calculator):
         edge_method: EdgeCreationMethod | None = None,
         max_num_neighbors: int | None = None,
         half_supercell: bool | None = None,
+        use_experimental_charges: bool = False,
         device: torch.device | str | None = None,
         directory: str = ".",
     ):
@@ -40,6 +41,15 @@ class ORBCalculator(Calculator):
                 This flag does not affect the resulting graph; it is purely an optimization that can double
                 throughput and half memory for very large cells (e.g. 5k+ atoms). For smaller systems, it can hurt
                 performance due to additional computation to enforce max_num_neighbors.
+            use_experimental_charges (bool): Whether to expose the model's per-atom charges
+                as ASE's `charges` property, and a point-charge `dipole` derived from them.
+                Defaults to False, and has no effect on models without a latent charge head.
+                The model has not seen any per-atom charge values during training; these are
+                emergent from optimisation against energies and forces alone. They should
+                therefore be treated with caution: while in at least some cases they appear to
+                correspond to the correct physical values, the reliability and generality of
+                this correspondence is unclear and is the subject of ongoing investigations.
+                See MODELS.md for details.
             device (torch.device, optional): The device to use for the model.
             directory (str, optional): Working directory in which to read and write files and perform calculations.
         """
@@ -62,9 +72,13 @@ class ORBCalculator(Calculator):
             conditioner, ChargeSpinConditioner
         )
 
+        self.use_experimental_charges = use_experimental_charges
         properties = list(model.properties)  # type: ignore
         if "charges" in properties:
-            properties.append("dipole")
+            if use_experimental_charges:
+                properties.append("dipole")
+            else:
+                properties.remove("charges")
         self.implemented_properties = properties
 
     def check_state(self, atoms, tol=1e-15):

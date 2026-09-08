@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 from ase import Atoms
 from ase.build import molecule
+from ase.calculators.calculator import PropertyNotImplementedError
 
 from orb_models.forcefield.forcefield_adapter import ForcefieldAtomsAdapter
 from orb_models.forcefield.inference.calculator import ORBCalculator
@@ -99,6 +100,7 @@ def test_charges(conservative_regressor, atoms, total_charge):
     calc = ORBCalculator(
         model=conservative_regressor,
         atoms_adapter=ForcefieldAtomsAdapter(6.0, 20),
+        use_experimental_charges=True,
     )
     assert "charges" in calc.implemented_properties
     atoms.calc = calc
@@ -116,7 +118,9 @@ def test_dipole(conservative_regressor, mptraj_10_systems_db):
     atoms = molecule("H2O")
     atoms.info["charge"] = 0
     atoms.info["spin"] = 1
-    atoms.calc = ORBCalculator(model=conservative_regressor, atoms_adapter=adapter)
+    atoms.calc = ORBCalculator(
+        model=conservative_regressor, atoms_adapter=adapter, use_experimental_charges=True
+    )
 
     dipole = atoms.get_dipole_moment()
     assert dipole.shape == (3,)
@@ -125,7 +129,29 @@ def test_dipole(conservative_regressor, mptraj_10_systems_db):
     periodic = mptraj_10_systems_db.get_atoms(1)
     periodic.info["charge"] = 0
     periodic.info["spin"] = 1
-    calc = ORBCalculator(model=conservative_regressor, atoms_adapter=adapter)
+    calc = ORBCalculator(
+        model=conservative_regressor, atoms_adapter=adapter, use_experimental_charges=True
+    )
     calc.calculate(periodic)
     assert "charges" in calc.results
     assert "dipole" not in calc.results
+
+
+def test_charges_require_opt_in(conservative_regressor):
+    """Charges and dipole are absent unless use_experimental_charges is set."""
+    atoms = molecule("H2O")
+    atoms.info["charge"] = 0
+    atoms.info["spin"] = 1
+    calc = ORBCalculator(
+        model=conservative_regressor, atoms_adapter=ForcefieldAtomsAdapter(6.0, 20)
+    )
+    assert "charges" not in calc.implemented_properties
+    assert "dipole" not in calc.implemented_properties
+
+    calc.calculate(atoms)
+    assert "charges" not in calc.results
+    assert "dipole" not in calc.results
+
+    atoms.calc = calc
+    with pytest.raises(PropertyNotImplementedError):
+        atoms.get_charges()

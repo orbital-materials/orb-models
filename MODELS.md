@@ -27,7 +27,7 @@ model, atoms_adapter = orbmol_v2(device="cuda")
 # atoms.info["charge"] and atoms.info["spin"] (multiplicity, = 2S+1) must be set.
 ```
 
-> **Caution:** While the model does predict per-atom charge values as a latent feature in the charge head, the model has not seen any per-atom charge values during training; these are emergent from optimisation against energies and forces alone. They should therefore be treated with caution: while in at least some cases they appear to correspond to the correct physical values, the reliability and generality of this correspondence is unclear and is the subject of ongoing investigations. For trial purposes they are returned as `charges` from `predict()`, and as ASE's `charges` and `dipole` properties from `ORBCalculator`.
+> **Caution:** While the model does predict per-atom charge values as a latent feature in the charge head, the model has not seen any per-atom charge values during training; these are emergent from optimisation against energies and forces alone. They should therefore be treated with caution: while in at least some cases they appear to correspond to the correct physical values, the reliability and generality of this correspondence is unclear and is the subject of ongoing investigations. For trial purposes they are returned as `charges` from `predict()`, and — for those who opt in by passing `use_experimental_charges=True` to `ORBCalculator` — as ASE's `charges` and `dipole` properties.
 
 ### [V3 Models](https://arxiv.org/abs/2504.06231)
 
