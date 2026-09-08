@@ -62,7 +62,6 @@ class ORBCalculator(Calculator):
             conditioner, ChargeSpinConditioner
         )
 
-        # "charges" is present only when the model opts in via enable_charges().
         properties = list(model.properties)  # type: ignore
         if "charges" in properties:
             properties.append("dipole")
