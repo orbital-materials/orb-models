@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 import ase
 import torch
 
@@ -58,11 +60,16 @@ class ZBLBasis(torch.nn.Module):
         self.register_buffer("a_exp", torch.tensor(0.300), persistent=False)
         self.register_buffer("a_prefactor", torch.tensor(0.4543), persistent=False)
 
-    def forward(self, batch: AtomGraphs) -> dict:
+    def forward(
+        self,
+        batch: AtomGraphs,
+        segment_sum_impl: Callable = segment_ops.segment_sum,
+    ) -> dict:
         """Forward pass with energy, forces, and stress calculation.
 
         Args:
             batch: The input atom graphs.
+            segment_sum_impl: Whether to use default or mesh-aware segment sum implementation
 
         Returns:
             dict: Dictionary containing energy, forces, and stress tensor.
@@ -109,7 +116,7 @@ class ZBLBasis(torch.nn.Module):
         # Apply envelope to potential and its derivative (product rule)
         v_edges = 0.5 * v_edges_raw * envelope
 
-        V_ZBL = segment_ops.segment_sum(
+        V_ZBL = segment_sum_impl(
             v_edges,
             senders,
             one_hot.shape[0],
