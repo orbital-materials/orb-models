@@ -1,0 +1,15 @@
+name: All checks pass
+on:
+  pull_request:
+    types: [ opened, synchronize, reopened, edited, labeled, auto_merge_enabled ]
+jobs:
+    allchecks:
+        permissions:
+            checks: read
+            contents: read
+        runs-on: ubuntu-latest
+        steps:
+          - uses: wechuli/allcheckspassed@v1
+            with:
+                retries: '20'
+                polling_interval: '2'
