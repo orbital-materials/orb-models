@@ -25,8 +25,7 @@ dependencies = [
 
 [project.optional-dependencies]
 torchsim = ["torch-sim-atomistic>=0.6.0"]
-# TODO: replace with pypi version once a version is released with bug fixes
-alchemi-toolkit = ["nvalchemi-toolkit @ git+https://github.com/NVIDIA/nvalchemi-toolkit@main"]
+alchemi-toolkit = ["nvalchemi-toolkit>=0.2.0"]
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -49,7 +48,7 @@ dev = [
     "mypy>=1.13",
     "torch_dftd",
     "torch-sim-atomistic>=0.6.0",
-    "nvalchemi-toolkit @ git+https://github.com/NVIDIA/nvalchemi-toolkit@main",
+    "nvalchemi-toolkit>=0.2.0",
 ]
 
 [tool.setuptools.dynamic]
