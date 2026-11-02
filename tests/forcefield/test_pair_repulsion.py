@@ -71,13 +71,14 @@ def test_pair_conservative(gns_model):
 
 
 @pytest.mark.parametrize("pbc", [True, False])
-def test_pair_grads(pbc):
+@pytest.mark.parametrize("handedness", [1, -1], ids=["right-handed", "left-handed"])
+def test_pair_grads(pbc, handedness):
     """Test analytical gradients of pair repulsion energy match autograd."""
     adapter = ForcefieldAtomsAdapter(radius=3.0, max_num_neighbors=120)
     pair_repulsion = ZBLBasis(p=6, node_aggregation="sum", compute_gradients=True)
 
     positions = 0.4 * np.array([[0, 0, 0], [0, 1, 0], [1, 0, 0]])
-    cell = np.diag([1, 1.5, 1.1])
+    cell = np.diag([handedness, 1.5, 1.1])
     atoms = Atoms("H2O", positions=positions, cell=cell, pbc=pbc)
 
     graphs = [adapter.from_ase_atoms(atoms, output_dtype=torch.float64) for a in [atoms, atoms]]
