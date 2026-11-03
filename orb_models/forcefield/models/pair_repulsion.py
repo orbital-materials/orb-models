@@ -154,7 +154,7 @@ class ZBLBasis(torch.nn.Module):
             # σ = -1/V ∑_{i<j} r_ij ⊗ F_ij
             # Get unit cell and compute volume
             cell = batch.system_features["cell"]
-            volume = torch.linalg.det(cell)
+            volume = torch.linalg.det(cell).abs()
 
             # Compute outer products for stress tensor
             # Create stress tensor of shape [batch_size, 3, 3]

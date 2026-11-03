@@ -111,6 +111,31 @@ def test_pair_grads(pbc):
     )
 
 
+def test_pair_stress_is_independent_of_cell_handedness():
+    """Swapping two cell vectors gives the same lattice with det < 0; the stress must not change sign."""
+    positions = 0.4 * np.array([[0, 0, 0], [0, 1, 0], [1, 0, 0]])
+    right_handed = np.diag([3.0, 3.5, 3.2])
+    left_handed = right_handed[[1, 0, 2]]
+    assert np.linalg.det(right_handed) > 0
+    assert np.linalg.det(left_handed) < 0
+    adapter = ForcefieldAtomsAdapter(radius=3.0, max_num_neighbors=120)
+    pair_repulsion = ZBLBasis(p=6, node_aggregation="sum", compute_gradients=True)
+
+    right, left = (
+        pair_repulsion(
+            adapter.from_ase_atoms(
+                Atoms("H2O", positions=positions, cell=cell, pbc=True),
+                device="cpu",
+                output_dtype=torch.float64,
+            )
+        )["stress"]
+        for cell in (right_handed, left_handed)
+    )
+
+    assert right.abs().max() > 0
+    torch.testing.assert_close(left, right)
+
+
 def test_pair_direct(gns_model):
     """Test pair repulsion is decreasing and zero beyond covalent radii."""
     energy_head = EnergyHead(
