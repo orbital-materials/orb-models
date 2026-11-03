@@ -11,7 +11,6 @@ class ZBLBasis(torch.nn.Module):
 
     with a polynomial cutoff envelope.
     Includes direct calculation of forces and virial stress.
-    Virial stress uses the positive cell volume, independent of cell handedness.
     """
 
     p: torch.Tensor
