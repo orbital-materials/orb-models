@@ -7,7 +7,51 @@ from functools import partial
 import torch
 import torch.nn.functional as F
 from torch import nn
-from torch.utils.checkpoint import checkpoint_sequential
+from torch.utils.checkpoint import checkpoint, checkpoint_sequential
+
+
+def chunked_apply(
+    fn: Callable[[torch.Tensor], torch.Tensor],
+    x: torch.Tensor,
+    chunk_size: int | None = None,
+    checkpoint_chunks: bool | None = None,
+) -> torch.Tensor:
+    """Apply a row-wise function to `x`, optionally in chunks and/or recomputed in backward.
+
+    Only valid for `fn` that acts independently on each row of `x` (an MLP, a norm over
+    the feature dim, elementwise ops) — anything that mixes rows, such as attention or a
+    segment reduction, will silently give wrong answers.
+
+    Args:
+        fn: Row-wise callable, e.g. an `nn.Sequential` MLP.
+        x: Input of shape [rows, features].
+        chunk_size: Max rows per chunk. None or >= rows means no chunking.
+        checkpoint_chunks: Recompute each chunk in the backward pass instead of storing it.
+            None (the default) means "checkpoint iff chunking".
+
+    Returns:
+        `fn(x)`, identical up to floating-point non-determinism in the backward reduction.
+    """
+    rows = x.shape[0]
+    # Under no_grad nothing is stored, so neither lever buys anything.
+    if not torch.is_grad_enabled():
+        return fn(x)
+
+    chunked = bool(chunk_size) and chunk_size < rows
+    if checkpoint_chunks is None:
+        checkpoint_chunks = chunked
+
+    if not chunked:
+        return checkpoint(fn, x, use_reentrant=False) if checkpoint_chunks else fn(x)
+
+    assert chunk_size is not None  # implied by `chunked`, but not visible to the checker
+    out = [
+        checkpoint(fn, x[start : start + chunk_size], use_reentrant=False)
+        if checkpoint_chunks
+        else fn(x[start : start + chunk_size])
+        for start in range(0, rows, chunk_size)
+    ]
+    return torch.cat(out, dim=0)
 
 
 class ChargeSpinEmbedding(nn.Module):
