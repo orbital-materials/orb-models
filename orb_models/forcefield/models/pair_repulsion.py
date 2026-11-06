@@ -166,8 +166,12 @@ class ZBLBasis(torch.nn.Module):
                 batch.n_edge,
                 reduction="sum",
             )
-            stress = torch_full_3x3_to_voigt_6_stress(stress) / volume.unsqueeze(1)
-            stress = torch.where(torch.abs(stress) < 1e10, stress, torch.zeros_like(stress))
+            volume = volume.unsqueeze(1)
+            has_volume = volume > 0
+            stress = torch_full_3x3_to_voigt_6_stress(stress) / volume.masked_fill(~has_volume, 1)
+            stress = torch.where(
+                has_volume & (torch.abs(stress) < 1e10), stress, torch.zeros_like(stress)
+            )
 
             output["forces"] = forces
             output["stress"] = stress

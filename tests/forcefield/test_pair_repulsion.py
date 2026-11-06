@@ -136,6 +136,19 @@ def test_pair_stress_is_independent_of_cell_handedness():
     torch.testing.assert_close(left, right)
 
 
+def test_pair_nonperiodic_stress_has_zero_position_gradient():
+    adapter = ForcefieldAtomsAdapter(radius=2.0, max_num_neighbors=20)
+    atoms = Atoms("H2", positions=[[0, 0, 0], [0.5, 0, 0]], pbc=False)
+    batch = adapter.from_ase_atoms(atoms, device="cpu", output_dtype=torch.float64)
+    geom = batch.compute_differentiable_edge_vectors()
+    batch.edge_features["vectors"] = geom.edge_vectors
+    stress = ZBLBasis(compute_gradients=True)(batch)["stress"]
+
+    gradient = torch.autograd.grad(stress.sum(), batch.positions)[0]
+    torch.testing.assert_close(stress, torch.zeros_like(stress))
+    torch.testing.assert_close(gradient, torch.zeros_like(batch.positions))
+
+
 def test_pair_direct(gns_model):
     """Test pair repulsion is decreasing and zero beyond covalent radii."""
     energy_head = EnergyHead(

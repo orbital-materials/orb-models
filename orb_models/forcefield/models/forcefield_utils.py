@@ -182,7 +182,10 @@ def compute_gradient_forces_and_stress(
     training: bool = True,
     compute_stress: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
-    """Compute forces and stress from energy using autograd."""
+    """Compute forces and stress from energy using autograd.
+
+    Zero-volume cells have zero stress and contribute no stress gradients.
+    """
     positions.grad = None
     displacement.grad = None
     generator.grad = None
@@ -226,9 +229,12 @@ def compute_gradient_forces_and_stress(
     stress = torch.zeros_like(displacement)
     if compute_stress:
         cell = cell.view(-1, 3, 3)
-        volume = torch.linalg.det(cell).abs().unsqueeze(-1)
-        stress = neg_virials / volume.view(-1, 1, 1)
-        stress = torch.where(torch.abs(stress) < 1e10, stress, torch.zeros_like(stress))
+        volume = torch.linalg.det(cell).abs().view(-1, 1, 1)
+        has_volume = volume > 0
+        stress = neg_virials / volume.masked_fill(~has_volume, 1)
+        stress = torch.where(
+            has_volume & (torch.abs(stress) < 1e10), stress, torch.zeros_like(stress)
+        )
     voigt_stress = torch_full_3x3_to_voigt_6_stress(stress)
     return -1 * forces, voigt_stress, rotational_grad
 
