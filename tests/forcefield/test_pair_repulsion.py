@@ -136,17 +136,27 @@ def test_pair_stress_is_independent_of_cell_handedness():
     torch.testing.assert_close(left, right)
 
 
-def test_pair_nonperiodic_stress_has_zero_position_gradient():
-    adapter = ForcefieldAtomsAdapter(radius=2.0, max_num_neighbors=20)
-    atoms = Atoms("H2", positions=[[0, 0, 0], [0.5, 0, 0]], pbc=False)
-    batch = adapter.from_ase_atoms(atoms, device="cpu", output_dtype=torch.float64)
-    geom = batch.compute_differentiable_edge_vectors()
-    batch.edge_features["vectors"] = geom.edge_vectors
-    stress = ZBLBasis(compute_gradients=True)(batch)["stress"]
+def test_pair_stress_gradients_are_finite_for_a_batch_mixing_a_molecule_and_a_crystal():
+    """The molecule's zero-volume stress is masked to 0, but must not backpropagate 0 * (1 / 0) = NaN."""
+    positions = 0.4 * np.array([[0, 0, 0], [0, 1, 0], [1, 0, 0]])
+    molecule = Atoms("H2O", positions=positions)
+    crystal = Atoms("H2O", positions=positions, cell=np.diag([3.0, 3.5, 3.2]), pbc=True)
+    adapter = ForcefieldAtomsAdapter(radius=3.0, max_num_neighbors=120)
+    batch = AtomGraphs.batch(
+        [
+            adapter.from_ase_atoms(a, device="cpu", output_dtype=torch.float64)
+            for a in (molecule, crystal)
+        ]
+    )
+    batch.edge_features["vectors"] = batch.compute_differentiable_edge_vectors().edge_vectors
+    pair_repulsion = ZBLBasis(p=6, node_aggregation="sum", compute_gradients=True)
 
-    gradient = torch.autograd.grad(stress.sum(), batch.positions)[0]
-    torch.testing.assert_close(stress, torch.zeros_like(stress))
-    torch.testing.assert_close(gradient, torch.zeros_like(batch.positions))
+    stress = pair_repulsion(batch)["stress"]
+    gradient = torch.autograd.grad(stress.square().sum(), batch.node_features["positions"])[0]
+
+    assert torch.equal(stress[0], torch.zeros_like(stress[0]))
+    assert stress[1].abs().max() > 0
+    assert torch.isfinite(gradient).all() and gradient.abs().max() > 0
 
 
 def test_pair_direct(gns_model):

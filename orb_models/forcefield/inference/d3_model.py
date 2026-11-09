@@ -11,7 +11,7 @@ from orb_models.common.models.base import RegressorModelMixin
 from orb_models.common.models.segment_ops import split_prediction
 from orb_models.forcefield.models.conservative_regressor import ConservativeForcefieldRegressor
 from orb_models.forcefield.models.direct_regressor import DirectForcefieldRegressor
-from orb_models.forcefield.models.forcefield_utils import torch_full_3x3_to_voigt_6_stress
+from orb_models.forcefield.models.forcefield_utils import stress_from_neg_virials
 
 HARTREE_TO_EV = scipy.constants.value("Hartree energy in eV")
 BOHR_TO_ANGSTROM = scipy.constants.value("Bohr radius") / 1e-10
@@ -191,14 +191,8 @@ class AlchemiDFTD3(torch.nn.Module):
             if compute_forces:
                 out["forces"] = forces * (HARTREE_TO_EV / BOHR_TO_ANGSTROM)
             if compute_stress:
-                # Virial is in Hartree, convert to eV
-                virial = virial * HARTREE_TO_EV
-                # Convert to stress tensor (units: eV/Å³)
-                volume = torch.det(cell_angstrom).abs()
-                stress = -virial / volume.view(-1, 1, 1)
-                # Convert full stress matrix [N, 3, 3] to Voigt notation [N, 6]
-                stress_voigt = torch_full_3x3_to_voigt_6_stress(stress)
-                out["stress"] = stress_voigt
+                # Virial: Hartree -> eV; stress in eV/Å³
+                out["stress"] = stress_from_neg_virials(-virial * HARTREE_TO_EV, cell_angstrom)
 
         return out
 

@@ -117,6 +117,20 @@ def test_pbe_bj_periodic_agreement(
     )
 
 
+def test_d3_stress_is_zero_for_a_molecule_without_a_cell(alchemi_d3, forcefield_adapter):
+    """A molecule without a cell has zero volume, so its virial must not be divided into inf stress."""
+    batch = AtomGraphs.batch(
+        [
+            forcefield_adapter.from_ase_atoms(atoms)
+            for atoms in [molecule("H2O"), bulk("Si", cubic=True)]
+        ]
+    )
+    stress = alchemi_d3.predict(batch)["stress"]
+
+    assert torch.equal(stress[0], torch.zeros_like(stress[0]))
+    assert torch.isfinite(stress[1]).all() and stress[1].abs().max() > 0
+
+
 def test_d3_forward_wraps_periodic_positions():
     """D3 should be invariant to integer-cell translations of periodic positions."""
     cell = torch.eye(3).unsqueeze(0) * 10.0
