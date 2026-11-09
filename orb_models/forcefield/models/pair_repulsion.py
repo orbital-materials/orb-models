@@ -3,7 +3,7 @@ import torch
 
 from orb_models.common.atoms.batch.graph_batch import AtomGraphs
 from orb_models.common.models import segment_ops
-from orb_models.forcefield.models.forcefield_utils import torch_full_3x3_to_voigt_6_stress
+from orb_models.forcefield.models.forcefield_utils import stress_from_neg_virials
 
 
 class ZBLBasis(torch.nn.Module):
@@ -152,22 +152,16 @@ class ZBLBasis(torch.nn.Module):
 
             # Calculate virial stress tensor
             # σ = -1/V ∑_{i<j} r_ij ⊗ F_ij
-            # Get unit cell and compute volume
-            cell = batch.system_features["cell"]
-            volume = torch.linalg.det(cell).abs()
-
             # Compute outer products for stress tensor
             # Create stress tensor of shape [batch_size, 3, 3]
             stress_per_edge = -torch.einsum("bi,bj->bij", vectors, force_vectors)
 
-            # Sum stress over all edges and divide by volume
-            stress = segment_ops.aggregate_nodes(  # actually aggregates over edges
+            neg_virials = segment_ops.aggregate_nodes(  # actually aggregates over edges
                 stress_per_edge,
                 batch.n_edge,
                 reduction="sum",
             )
-            stress = torch_full_3x3_to_voigt_6_stress(stress) / volume.unsqueeze(1)
-            stress = torch.where(torch.abs(stress) < 1e10, stress, torch.zeros_like(stress))
+            stress = stress_from_neg_virials(neg_virials, batch.system_features["cell"])
 
             output["forces"] = forces
             output["stress"] = stress

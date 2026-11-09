@@ -136,6 +136,29 @@ def test_pair_stress_is_independent_of_cell_handedness():
     torch.testing.assert_close(left, right)
 
 
+def test_pair_stress_gradients_are_finite_for_a_batch_mixing_a_molecule_and_a_crystal():
+    """The molecule's zero-volume stress is masked to 0, but must not backpropagate 0 * (1 / 0) = NaN."""
+    positions = 0.4 * np.array([[0, 0, 0], [0, 1, 0], [1, 0, 0]])
+    molecule = Atoms("H2O", positions=positions)
+    crystal = Atoms("H2O", positions=positions, cell=np.diag([3.0, 3.5, 3.2]), pbc=True)
+    adapter = ForcefieldAtomsAdapter(radius=3.0, max_num_neighbors=120)
+    batch = AtomGraphs.batch(
+        [
+            adapter.from_ase_atoms(a, device="cpu", output_dtype=torch.float64)
+            for a in (molecule, crystal)
+        ]
+    )
+    batch.edge_features["vectors"] = batch.compute_differentiable_edge_vectors().edge_vectors
+    pair_repulsion = ZBLBasis(p=6, node_aggregation="sum", compute_gradients=True)
+
+    stress = pair_repulsion(batch)["stress"]
+    gradient = torch.autograd.grad(stress.square().sum(), batch.node_features["positions"])[0]
+
+    assert torch.equal(stress[0], torch.zeros_like(stress[0]))
+    assert stress[1].abs().max() > 0
+    assert torch.isfinite(gradient).all() and gradient.abs().max() > 0
+
+
 def test_pair_direct(gns_model):
     """Test pair repulsion is decreasing and zero beyond covalent radii."""
     energy_head = EnergyHead(
